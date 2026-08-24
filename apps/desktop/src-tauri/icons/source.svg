@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">ManuscriptDock</title>
+  <desc id="desc">A manuscript page resting on a dock, forming the letter M.</desc>
+  <rect width="1024" height="1024" rx="228" fill="#F7F7F5"/>
+  <path d="M292 226h308l132 132v360c0 44-36 80-80 80H292V226Z" fill="#FFFFFF" stroke="#1F2321" stroke-width="44" stroke-linejoin="round"/>
+  <path d="M600 226v132h132" fill="none" stroke="#1F2321" stroke-width="44" stroke-linejoin="round"/>
+  <path d="M356 630V446l92 112 92-112v184" fill="none" stroke="#176B52" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M236 798h552" fill="none" stroke="#176B52" stroke-width="54" stroke-linecap="round"/>
+</svg>

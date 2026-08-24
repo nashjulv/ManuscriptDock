@@ -1,0 +1,11 @@
+[workspace]
+members = [
+  "apps/desktop/src-tauri",
+  "crates/manuscript-core",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Proprietary"
+rust-version = "1.93"

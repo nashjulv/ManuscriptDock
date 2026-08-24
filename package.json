@@ -1,0 +1,23 @@
+{
+  "name": "manuscriptdock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ManuscriptDock local-first manuscript submission workspace",
+  "workspaces": ["apps/*"],
+  "engines": {
+    "node": "^24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @manuscriptdock/desktop",
+    "bundle:mac": "npm run tauri -- build --target universal-apple-darwin --bundles app,dmg",
+    "bundle:windows": "npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis",
+    "bundle:windows:cross": "sh scripts/build-windows-cross.sh",
+    "check": "npm run typecheck && npm run test && npm run build && cargo fmt --all --check && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
+    "dev": "npm run tauri --workspace @manuscriptdock/desktop -- dev",
+    "frontend:dev": "npm run dev --workspace @manuscriptdock/desktop",
+    "tauri": "npm run tauri --workspace @manuscriptdock/desktop --",
+    "test": "npm run test --workspace @manuscriptdock/desktop",
+    "typecheck": "npm run typecheck --workspace @manuscriptdock/desktop"
+  }
+}

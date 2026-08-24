@@ -1,0 +1,26 @@
+# ManuscriptDock 文档
+
+## 产品设计
+
+- [产品设计总纲](product-design-overview.md)：品牌、用户、价值主张、信息架构和 MVP 边界。
+- [投稿规则系统](submission-rule-system.md)：统一论文模型、分层规则包、覆盖等级和维护机制。
+- [内置出版标准目录](publication-standards-catalog.md)：首批中国、国际、出版商和研究报告规则及其真实覆盖边界。
+- [本地论文版本库](local-version-library.md)：面向作者的连续版本、确定性比较、安全恢复和知识体版本锚点。
+- [投稿优化修订台](submission-revision-desk.md)：面向投稿问题的结构化修订、差异确认、格式回写边界及版本闭环。
+- [学术知识体演进路线](academic-knowledge-body-roadmap.md)：从本地稿件工作区到作者控制的 AI 与发布网络对象。
+- [学术知识体服务模型](knowledge-body-service-model.md)：平台服务对象、生命周期、写回原则、授权投影和商业含义。
+- [学术知识体关联网络模型](knowledge-body-network-model.md)：单体边界、独立 AIReviewReport 版本、八类跨体声明协议和三级空间视图。
+- [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。
+
+## 技术与体验
+
+- [仓库结构](repository-structure.md)：活跃源码和未来工具链边界。
+- [MVP 开发计划](mvp-development-plan.md)：可执行切片、里程碑、验收标准和工具链策略。
+- [开发日志](development-log.md)：每个功能切片的实现、边界与提交前验证记录。
+- [MVP 完成状态与边界](mvp-release-status.md)：当前可运行能力、验证结果和后续缺口。
+- [桌面安装包](desktop-installers.md)：macOS 通用 DMG、Windows x64 NSIS 与发布签名边界。
+- [macOS / Windows 兼容性复验](platform-compatibility-audit-2026-08-24.md)：原生构建、交叉目标、界面回归与发布阻断项。
+- [架构决策记录](adr/README.md)：长期技术决策及其后果。
+- [全局设计系统](../design-system/manuscriptdock/MASTER.md)：界面原则、色彩、排版、组件、交互和可访问性。
+- [UI 视觉方案](ui-visual-system.md)：基于 PWC 内部工作台秩序定义的桌面框架、设计令牌、双面板模式和实施验收标准。
+- [UI 方向：简洁学术工作台](ui-design-direction.md)：OpenAI 式简洁体验在论文投稿场景中的转译。

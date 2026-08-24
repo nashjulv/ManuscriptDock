@@ -1,0 +1,65 @@
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# JavaScript / TypeScript
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust / Tauri
+target/
+**/src-tauri/target/
+apps/desktop/src-tauri/gen/
+*.pdb
+
+# Tests and tooling
+.cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+playwright-report/
+test-results/
+
+# Local application state
+*.local.db
+*.local.sqlite
+*.local.sqlite3
+
+# Temporary packaging and signing artifacts
+/installers/
+*.dmg
+*.msi
+*.app/
+*.AppImage
+*.deb
+*.rpm
+
+# Local historical research; never publish with ManuscriptDock
+/demo/
+/output/
+/tmp/
+/学术知识体调研资料.md
+/docs/browser-embedded-desktop-architecture.md
+/docs/product-design-submission-lifecycle.md

@@ -1,0 +1,19 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "useLocalToolsDir": true,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "startMenuFolder": "ManuscriptDock"
+      }
+    }
+  }
+}

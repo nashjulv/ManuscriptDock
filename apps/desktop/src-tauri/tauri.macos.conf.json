@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "macOS": {
+      "bundleName": "ManuscriptDock",
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

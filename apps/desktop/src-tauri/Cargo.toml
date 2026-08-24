@@ -1,0 +1,20 @@
+[package]
+name = "manuscriptdock-desktop"
+version = "0.1.0"
+description = "ManuscriptDock local-first manuscript submission workspace"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "manuscriptdock_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+manuscript-core = { path = "../../../crates/manuscript-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Minimum capability set for the ManuscriptDock main window",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
