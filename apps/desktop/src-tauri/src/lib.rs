@@ -1,11 +1,16 @@
+mod model_service;
+
 use manuscript_core::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, discipline_catalog,
-    AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, KnowledgeBodyRecord, LocalAttestation,
+    AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, KnowledgeBodyRecord,
+    KnowledgeDialogueLedger, KnowledgeInquiryStance, KnowledgeInquiryTarget, LocalAttestation,
     ManuscriptSelection, ReadinessEvaluation, RevisionApplication, RevisionChangeInput,
     RevisionDraft, RulePackCatalog, StructureAnalysis, SubmissionElementCatalog, SubmissionExport,
     SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, WorkspaceCatalog,
     WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
 };
+use model_service::{ModelSettingsSummary, ModelSlotInput};
+use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -203,6 +208,98 @@ async fn list_discipline_index() -> Result<Vec<DisciplineCatalogItem>, String> {
 }
 
 #[tauri::command]
+async fn get_model_settings(app: AppHandle) -> Result<ModelSettingsSummary, String> {
+    model_service::load_summary(&model_settings_root(&app)?)
+}
+
+#[tauri::command]
+async fn save_model_settings(
+    slots: Vec<ModelSlotInput>,
+    app: AppHandle,
+) -> Result<ModelSettingsSummary, String> {
+    model_service::save_settings(&model_settings_root(&app)?, slots)
+}
+
+#[tauri::command]
+async fn get_knowledge_dialogue(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<KnowledgeDialogueLedger, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .knowledge_dialogue(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn ask_knowledge_body(
+    workspace_id: String,
+    stance: KnowledgeInquiryStance,
+    target: KnowledgeInquiryTarget,
+    question: String,
+    author_confirmed_external_transmission: bool,
+    app: AppHandle,
+) -> Result<KnowledgeDialogueLedger, String> {
+    if !author_confirmed_external_transmission {
+        return Err("需要作者确认本次模型外发后才能提问".to_owned());
+    }
+    let root = workspace_root(&app)?;
+    let store = WorkspaceStore::new(&root);
+    let lifecycle = store
+        .lifecycle(&workspace_id)
+        .map_err(|error| error.to_string())?;
+    let knowledge = lifecycle
+        .knowledge_body
+        .as_ref()
+        .ok_or_else(|| "当前论文版本尚未固化知识体".to_owned())?;
+    let inquiry = store
+        .create_owner_inquiry(&workspace_id, stance, target, &question, true)
+        .map_err(|error| error.to_string())?;
+    let structure = lifecycle.structure_report.as_ref();
+    let projection = json!({
+        "knowledgeBodyRecordId": knowledge.record_id,
+        "knowledgeBodyHash": knowledge.record_hash,
+        "snapshotVersion": knowledge.snapshot.snapshot_version,
+        "discipline": knowledge.discipline_classification,
+        "manuscriptVersion": knowledge.manuscript_version,
+        "title": structure.and_then(|report| report.title.as_deref()),
+        "authors": structure.map(|report| report.authors.as_slice()).unwrap_or(&[]),
+        "abstract": structure.and_then(|report| report.abstract_text.as_deref()),
+        "sections": structure.map(|report| &report.sections),
+        "claim": knowledge.snapshot.claim,
+        "objects": knowledge.snapshot.objects,
+        "aiReviewReport": knowledge.snapshot.ai_review_report,
+        "externalTransmissionNotice": "This projection is sent only for this author-confirmed question."
+    });
+    let system_prompt = "You are the author's configured academic assistant. Answer only from the supplied KnowledgeBody projection. Distinguish established objects from pending v0 objects. Do not invent evidence, methods, results, reviews, citations, or scientific truth. If the projection is insufficient, state exactly what is missing. Reply in the language of the question and keep object names such as Claim, Scope, Method, Result, EvidenceRelation, SourceAnchor, and AIReviewReport explicit.";
+    let user_prompt = format!(
+        "Target: {}\nStance: {}\nQuestion: {}\n\nKnowledgeBody projection:\n{}",
+        serde_json::to_string(&target).unwrap_or_else(|_| "knowledge_body".to_owned()),
+        serde_json::to_string(&stance).unwrap_or_else(|_| "question".to_owned()),
+        inquiry.question,
+        serde_json::to_string_pretty(&projection)
+            .map_err(|error| format!("无法生成最小知识体投影：{error}"))?
+    );
+    let model_answer =
+        model_service::ask_with_failover(&model_settings_root(&app)?, system_prompt, &user_prompt)
+            .await?;
+    store
+        .record_model_answer(
+            &workspace_id,
+            &inquiry.inquiry_id,
+            model_answer.slot.as_str(),
+            &model_answer.provider_label,
+            &model_answer.model,
+            &model_answer.content,
+            std::slice::from_ref(&knowledge.snapshot.objects.source_anchor),
+        )
+        .map_err(|error| error.to_string())?;
+    store
+        .knowledge_dialogue(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn save_manuscript_version(
     workspace_id: String,
     selection_id: String,
@@ -327,6 +424,13 @@ fn workspace_root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法定位本地应用数据目录：{error}"))
 }
 
+fn model_settings_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|path| path.join("model-service"))
+        .map_err(|error| format!("无法定位模型设置目录：{error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -344,6 +448,10 @@ pub fn run() {
             record_manual_submission,
             finalize_knowledge_body,
             list_discipline_index,
+            get_model_settings,
+            save_model_settings,
+            get_knowledge_dialogue,
+            ask_knowledge_body,
             save_manuscript_version,
             restore_manuscript_version,
             compare_manuscript_versions,

@@ -577,6 +577,12 @@ describe("App", () => {
       if (command === "get_knowledge_body_snapshot") return Promise.resolve(snapshot);
       if (command === "list_discipline_index") return Promise.resolve([{ code: "life_sciences", label: "生命科学", labelEn: "Life sciences" }]);
       if (command === "finalize_knowledge_body") return Promise.resolve(record);
+      if (command === "get_model_settings") return Promise.resolve({ schemaVersion: 1, secureStore: "macOS Keychain", slots: [
+        { role: "primary", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+        { role: "fallback_1", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+        { role: "fallback_2", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+      ] });
+      if (command === "get_knowledge_dialogue") return Promise.resolve({ workspaceId: workspace.id, knowledgeBodyRecordId: record.recordId, knowledgeBodyHash: record.recordHash, items: [] });
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
 
@@ -628,10 +634,26 @@ describe("App", () => {
     const submission = { submissionId: "submission-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: "SYN-1", submittedUnixMs: Date.UTC(2026, 7, 24, 5, 30), statement: "synthetic", recordHash: "b".repeat(64), externalTransmission: "not_performed" };
     const disciplineClassification = { assignmentId: "classification-1", version: 1, scheme: "ManuscriptDock Discipline Index", schemeVersion: "1.0", code: "computer_information_sciences", label: "计算机与信息科学", labelEn: "Computer and information sciences", status: "author_confirmed", basis: "author_selection" };
     const knowledgeBody = { recordId: "knowledge-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 6, 0), disciplineClassification, snapshot: knowledgeSnapshot, recordHash: "c".repeat(64), externalTransmission: "not_performed" };
+    let modelConfigured = false;
+    const emptyModelSlots = [
+      { role: "primary", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+      { role: "fallback_1", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+      { role: "fallback_2", enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false },
+    ];
+    const configuredModelSlots = [
+      { role: "primary", enabled: true, providerLabel: "Synthetic AI", baseUrl: "https://api.synthetic.example/v1", model: "synthetic-reasoner", hasApiKey: true },
+      emptyModelSlots[1], emptyModelSlots[2],
+    ];
+    const inquiry = { schemaVersion: 1, inquiryId: "inquiry-1", workspaceId: workspace.id, knowledgeBodyRecordId: knowledgeBody.recordId, knowledgeBodyHash: knowledgeBody.recordHash, snapshotVersion: 7, origin: "owner", stance: "challenge", target: "claim", question: "这个 Claim 缺少哪些直接来源锚点？", externalActorLabel: null, createdUnixMs: Date.UTC(2026, 7, 24, 7, 0), recordHash: "d".repeat(64), externalTransmission: "author_confirmed_model_projection" };
+    const answer = { schemaVersion: 1, answerId: "answer-1", inquiryId: inquiry.inquiryId, workspaceId: workspace.id, knowledgeBodyRecordId: knowledgeBody.recordId, modelSlot: "primary", providerLabel: "Synthetic AI", model: "synthetic-reasoner", answer: "当前投影只给出一个 SourceAnchor；需要逐条核验 Claim 对应的页、段和句。", sourceAnchors: [bodies[0].sourceAnchor], createdUnixMs: Date.UTC(2026, 7, 24, 7, 1), recordHash: "e".repeat(64), externalTransmission: "author_confirmed_model_projection" };
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
       if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation, submission, knowledgeBody });
       if (command === "list_discipline_index") return Promise.resolve([disciplineClassification]);
+      if (command === "get_model_settings") return Promise.resolve({ schemaVersion: 1, secureStore: "macOS Keychain", slots: modelConfigured ? configuredModelSlots : emptyModelSlots });
+      if (command === "get_knowledge_dialogue") return Promise.resolve({ workspaceId: workspace.id, knowledgeBodyRecordId: knowledgeBody.recordId, knowledgeBodyHash: knowledgeBody.recordHash, items: [] });
+      if (command === "save_model_settings") { modelConfigured = true; return Promise.resolve({ schemaVersion: 1, secureStore: "macOS Keychain", slots: configuredModelSlots }); }
+      if (command === "ask_knowledge_body") return Promise.resolve({ workspaceId: workspace.id, knowledgeBodyRecordId: knowledgeBody.recordId, knowledgeBodyHash: knowledgeBody.recordHash, items: [{ inquiry, answers: [answer] }] });
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
@@ -672,5 +694,32 @@ describe("App", () => {
     expect(screen.getByRole("img", { name: /5 个保持边界的知识体/ })).toBeVisible();
     expect(document.querySelectorAll(".network-body")).toHaveLength(5);
     expect(document.querySelectorAll(".network-assertion")).toHaveLength(6);
+
+    await user.click(screen.getByRole("button", { name: /模型设置/ }));
+    expect(screen.getByText("1 个主模型，2 个备选模型")).toBeVisible();
+    expect(screen.getByText("主模型")).toBeVisible();
+    expect(screen.getByText("备选模型 1")).toBeVisible();
+    expect(screen.getByText("备选模型 2")).toBeVisible();
+    const primarySlot = screen.getByRole("group", { name: "主模型" });
+    await user.click(within(primarySlot).getByRole("checkbox", { name: "启用此槽位" }));
+    await user.type(within(primarySlot).getByLabelText("提供方名称"), "Synthetic AI");
+    await user.type(within(primarySlot).getByLabelText("API 地址"), "https://api.synthetic.example/v1");
+    await user.type(within(primarySlot).getByLabelText("模型名称"), "synthetic-reasoner");
+    await user.type(within(primarySlot).getByLabelText("API Key"), "synthetic-secret");
+    await user.click(screen.getByRole("button", { name: "保存模型设置" }));
+    expect(await screen.findByText(/API Key 仅保存在系统凭据库/)).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("save_model_settings", { slots: expect.arrayContaining([expect.objectContaining({ role: "primary", enabled: true, apiKey: "synthetic-secret" })]) });
+
+    await user.selectOptions(screen.getByLabelText("提问类型"), "challenge");
+    await user.selectOptions(screen.getByLabelText("针对对象"), "claim");
+    await user.type(screen.getByLabelText("问题或需求"), inquiry.question);
+    await user.click(screen.getByRole("button", { name: "询问知识体" }));
+    expect(await screen.findByText(answer.answer)).toBeVisible();
+    expect(screen.getByText("Synthetic AI · synthetic-reasoner")).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("ask_knowledge_body", { workspaceId: workspace.id, stance: "challenge", target: "claim", question: inquiry.question, authorConfirmedExternalTransmission: true });
+
+    await user.click(screen.getByRole("tab", { name: /外部反馈 · 预留/ }));
+    expect(screen.getByRole("heading", { name: "为外部读者保留的论文提问窗口" })).toBeVisible();
+    expect(screen.getByText("当前版本不接收外部网络请求，也不会虚构外部反馈。")).toBeVisible();
   });
 });

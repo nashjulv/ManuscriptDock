@@ -280,6 +280,51 @@ interface KnowledgeBodyRecord {
   externalTransmission: "not_performed";
 }
 
+type KnowledgeInquiryOrigin = "owner" | "external";
+type KnowledgeInquiryStance = "recognition" | "question" | "challenge";
+type KnowledgeInquiryTarget = "knowledge_body" | "claim" | "scope" | "method" | "result" | "evidence_relation" | "source_anchor" | "ai_review_report" | "provenance";
+
+interface KnowledgeInquiryRecord {
+  schemaVersion: number;
+  inquiryId: string;
+  workspaceId: string;
+  knowledgeBodyRecordId: string;
+  knowledgeBodyHash: string;
+  snapshotVersion: number;
+  origin: KnowledgeInquiryOrigin;
+  stance: KnowledgeInquiryStance;
+  target: KnowledgeInquiryTarget;
+  question: string;
+  externalActorLabel: string | null;
+  createdUnixMs: number;
+  recordHash: string;
+  externalTransmission: string;
+}
+
+interface KnowledgeAnswerRecord {
+  schemaVersion: number;
+  answerId: string;
+  inquiryId: string;
+  workspaceId: string;
+  knowledgeBodyRecordId: string;
+  modelSlot: string;
+  providerLabel: string;
+  model: string;
+  answer: string;
+  sourceAnchors: VersionedObjectReference[];
+  createdUnixMs: number;
+  recordHash: string;
+  externalTransmission: string;
+}
+
+interface KnowledgeDialogueItem { inquiry: KnowledgeInquiryRecord; answers: KnowledgeAnswerRecord[]; }
+interface KnowledgeDialogueLedger { workspaceId: string; knowledgeBodyRecordId: string; knowledgeBodyHash: string; items: KnowledgeDialogueItem[]; }
+
+type ModelSlotRole = "primary" | "fallback_1" | "fallback_2";
+interface ModelSlotSummary { role: ModelSlotRole; enabled: boolean; providerLabel: string; baseUrl: string; model: string; hasApiKey: boolean; }
+interface ModelSettingsSummary { schemaVersion: number; slots: ModelSlotSummary[]; secureStore: string; }
+interface ModelSlotDraft extends ModelSlotSummary { apiKey: string; clearApiKey: boolean; }
+
 interface WorkspaceLifecycle {
   workspaceId: string;
   currentVersion: number;
@@ -1219,7 +1264,7 @@ function EvidencePane({ stage, workspace, structureReport, readinessReport, know
   }
   if (stage === "attestation") return <EvidenceFrame kicker={text("存证证据", "Attestation evidence")} title={attestation ? text("不可变本地存证", "Immutable local attestation") : text("将要绑定的对象", "Objects to be bound")}>{attestation ? <LifecycleEvidence id={attestation.attestationId} hash={attestation.recordHash} items={[[text("稿件版本", "Manuscript version"), `v${attestation.manuscriptVersion}`], [text("检查报告", "Check report"), attestation.readinessReportId], [text("输出快照", "Output snapshot"), `v${attestation.readinessOutputSnapshotVersion}`]]} /> : readinessReport ? <div className="package-preview"><span>LOCAL ATTESTATION</span><h2>v{workspace.snapshotVersion}</h2><p>{outcomeLabel(readinessReport.outcome, locale)}</p><dl><div><dt>{text("稿件指纹", "Manuscript fingerprint")}</dt><dd>{workspace.contentHash.slice(0, 16)}</dd></div><div><dt>{text("检查报告", "Check report")}</dt><dd>{readinessReport.reportId.slice(0, 16)}</dd></div></dl><small>{text("仅本机 · 作者确认后创建", "Local only · Created after author confirmation")}</small></div> : <EvidenceEmpty copy={text("完成当前版本检查后才能创建存证。", "Complete checks for the current version before attestation.")} />}</EvidenceFrame>;
   if (stage === "submission") return <EvidenceFrame kicker={text("投稿证据", "Submission evidence")} title={submission ? text("已登记投稿", "Submission recorded") : text("投稿交付包", "Submission handoff")}>{submission ? <LifecycleEvidence id={submission.submissionId} hash={submission.recordHash} items={[[text("目标", "Target"), submission.target], [text("回执", "Receipt"), submission.receipt ?? text("未填写", "Not provided")], [text("绑定存证", "Bound attestation"), submission.attestationId]]} /> : <div className="package-preview"><span>MANUSCRIPTDOCK</span><h2>{structureReport?.title ?? workspace.manuscript.name}</h2><p>{text("作者控制的投稿交付", "Author-controlled submission handoff")}</p><dl><div><dt>{text("稿件版本", "Manuscript version")}</dt><dd>v{workspace.snapshotVersion}</dd></div><div><dt>{text("存证", "Attestation")}</dt><dd>{attestation?.attestationId.slice(0, 12) ?? text("未完成", "Not ready")}</dd></div><div><dt>{text("导出状态", "Export status")}</dt><dd>{submissionExport ? submissionExport.packageName : text("尚未导出", "Not exported")}</dd></div></dl><small>{text("导出不等于已投稿", "Export does not mean submitted")}</small></div>}</EvidenceFrame>;
-  if (stage === "knowledge") return <EvidenceFrame kicker={text("对象与声明证据", "Object and assertion evidence")} title={knowledgeBodyRecord ? text("已固化知识体", "Finalized knowledge body") : text("知识体预览", "Knowledge-body preview")}><KnowledgeSpatialMap workspace={workspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} /></EvidenceFrame>;
+  if (stage === "knowledge") return <><EvidenceFrame kicker={text("对象与声明证据", "Object and assertion evidence")} title={knowledgeBodyRecord ? text("已固化知识体", "Finalized knowledge body") : text("知识体预览", "Knowledge-body preview")}><KnowledgeSpatialMap workspace={workspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} /></EvidenceFrame><KnowledgeDialoguePanel workspace={workspace} knowledgeBodyRecord={knowledgeBodyRecord} /></>;
   return <EvidenceFrame kicker={text("流程证据", "Lifecycle evidence")} title={text("等待当前步骤产物", "Waiting for this stage's output")}><EvidenceEmpty copy={text("完成操作后，这里显示不可变证据和来源。", "Complete the action to see immutable evidence and provenance here.")} /></EvidenceFrame>;
 }
 
@@ -1339,6 +1384,184 @@ function KnowledgeSpatialMap({ workspace, structureReport, readinessReport, know
       <p className="knowledge-space-note">{view === "single" ? text("单一学术知识体是围绕一个或一组 Claim 构成的研究记忆单元，不是论文摘要。外圈固定各对象的具体版本；v0 表示对象尚未正式建立。", "A single academic knowledge body is a research-memory unit organized around one or more Claims, not a paper abstract. The outer snapshot pins exact object versions; v0 means an object is not yet established.") : text("圆形边界表示知识体自身边界；绿色菱形表示带依据、状态和版本的声明对象。相似度不会自动成为关系。", "Circular boundaries preserve each knowledge body; green diamonds are versioned assertions with basis and status. Similarity never becomes a relationship automatically.")}</p>
     </div>
   );
+}
+
+const MODEL_SLOT_ROLES: ModelSlotRole[] = ["primary", "fallback_1", "fallback_2"];
+const INQUIRY_TARGETS: KnowledgeInquiryTarget[] = ["knowledge_body", "claim", "scope", "method", "result", "evidence_relation", "source_anchor", "ai_review_report", "provenance"];
+
+function emptyModelSlot(role: ModelSlotRole): ModelSlotDraft {
+  return { role, enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false, apiKey: "", clearApiKey: false };
+}
+
+function modelSlotLabel(role: ModelSlotRole, locale: Locale) {
+  if (role === "primary") return localize(locale, "主模型", "Primary");
+  if (role === "fallback_1") return localize(locale, "备选模型 1", "Fallback 1");
+  return localize(locale, "备选模型 2", "Fallback 2");
+}
+
+function inquiryStanceLabel(stance: KnowledgeInquiryStance, locale: Locale) {
+  if (stance === "recognition") return localize(locale, "认可", "Recognition");
+  if (stance === "challenge") return localize(locale, "挑战", "Challenge");
+  return localize(locale, "疑问", "Question");
+}
+
+function inquiryTargetLabel(target: KnowledgeInquiryTarget, locale: Locale) {
+  const labels: Record<KnowledgeInquiryTarget, [string, string]> = {
+    knowledge_body: ["知识体整体", "Knowledge body"], claim: ["Claim 主张", "Claim"], scope: ["Scope 适用范围", "Scope"], method: ["Method 方法", "Method"], result: ["Result 结果", "Result"], evidence_relation: ["EvidenceRelation 证据关系", "EvidenceRelation"], source_anchor: ["SourceAnchor 来源锚点", "SourceAnchor"], ai_review_report: ["AIReviewReport 审核报告", "AIReviewReport"], provenance: ["Provenance 来源记录", "Provenance"],
+  };
+  return localize(locale, labels[target][0], labels[target][1]);
+}
+
+function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace: WorkspaceSummary; knowledgeBodyRecord: KnowledgeBodyRecord | null }) {
+  const { locale, text } = useI18n();
+  const [activeTab, setActiveTab] = useState<"owner" | "external">("owner");
+  const [ledger, setLedger] = useState<KnowledgeDialogueLedger | null>(null);
+  const [settings, setSettings] = useState<ModelSettingsSummary | null>(null);
+  const [slotDrafts, setSlotDrafts] = useState<ModelSlotDraft[]>(MODEL_SLOT_ROLES.map(emptyModelSlot));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [stance, setStance] = useState<KnowledgeInquiryStance>("question");
+  const [target, setTarget] = useState<KnowledgeInquiryTarget>("knowledge_body");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isAsking, setIsAsking] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const applySettings = (summary: ModelSettingsSummary) => {
+    setSettings(summary);
+    setSlotDrafts(MODEL_SLOT_ROLES.map((role) => {
+      const slot = summary.slots.find((item) => item.role === role);
+      return slot ? { ...slot, apiKey: "", clearApiKey: false } : emptyModelSlot(role);
+    }));
+  };
+
+  useEffect(() => {
+    let active = true;
+    setIsLoading(true);
+    setError(null);
+    const dialogueRequest = knowledgeBodyRecord
+      ? invoke<KnowledgeDialogueLedger>("get_knowledge_dialogue", { workspaceId: workspace.id })
+      : Promise.resolve(null);
+    void Promise.all([dialogueRequest, invoke<ModelSettingsSummary>("get_model_settings")])
+      .then(([nextLedger, nextSettings]) => {
+        if (!active) return;
+        setLedger(nextLedger);
+        applySettings(nextSettings);
+      })
+      .catch((reason) => { if (active) setError(normalizeError(reason)); })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [workspace.id, knowledgeBodyRecord?.recordId]);
+
+  const configuredSlots = settings?.slots.filter((slot) => slot.enabled && slot.hasApiKey && slot.providerLabel && slot.baseUrl && slot.model) ?? [];
+  const ownerItems = ledger?.items.filter((item) => item.inquiry.origin === "owner") ?? [];
+  const externalItems = ledger?.items.filter((item) => item.inquiry.origin === "external") ?? [];
+
+  const updateSlot = <K extends keyof ModelSlotDraft>(role: ModelSlotRole, field: K, value: ModelSlotDraft[K]) => {
+    setSlotDrafts((current) => current.map((slot) => slot.role === role ? { ...slot, [field]: value } : slot));
+  };
+
+  const saveSettings = async () => {
+    setIsSavingSettings(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const summary = await invoke<ModelSettingsSummary>("save_model_settings", {
+        slots: slotDrafts.map(({ role, enabled, providerLabel, baseUrl, model, apiKey, clearApiKey }) => ({
+          role, enabled, providerLabel, baseUrl, model, apiKey: apiKey.trim() || null, clearApiKey,
+        })),
+      });
+      applySettings(summary);
+      setNotice(text("模型设置已保存；API Key 仅保存在系统凭据库。", "Model settings saved; API keys remain only in the system credential store."));
+    } catch (reason) {
+      setError(normalizeError(reason));
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const ask = async () => {
+    if (!knowledgeBodyRecord || !question.trim() || configuredSlots.length === 0) return;
+    setIsAsking(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const nextLedger = await invoke<KnowledgeDialogueLedger>("ask_knowledge_body", {
+        workspaceId: workspace.id,
+        stance,
+        target,
+        question: question.trim(),
+        authorConfirmedExternalTransmission: true,
+      });
+      setLedger(nextLedger);
+      setQuestion("");
+    } catch (reason) {
+      setError(normalizeError(reason));
+      try {
+        setLedger(await invoke<KnowledgeDialogueLedger>("get_knowledge_dialogue", { workspaceId: workspace.id }));
+      } catch { /* Keep the last verified ledger if recovery also fails. */ }
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  return <section className="knowledge-dialogue" aria-labelledby="knowledge-dialogue-title">
+    <header className="knowledge-dialogue-header">
+      <div><p>{text("知识体自动服务", "Knowledge-body assistance")}</p><h2 id="knowledge-dialogue-title">{text("向这个知识体提问", "Ask this knowledge body")}</h2></div>
+      <button className="model-settings-button" type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>{text("模型设置", "Model settings")}<span>{configuredSlots.length}/3</span></button>
+    </header>
+
+    {settingsOpen ? <section className="model-settings" aria-labelledby="model-settings-title">
+      <header><div><h3 id="model-settings-title">{text("1 个主模型，2 个备选模型", "One primary and two fallback models")}</h3><p>{text("按主模型 → 备选 1 → 备选 2 自动尝试。接口需兼容 OpenAI Chat Completions。", "Automatic order: primary → fallback 1 → fallback 2. Endpoints must support OpenAI Chat Completions.")}</p></div><span>{settings?.secureStore ?? text("系统凭据库", "System credential store")}</span></header>
+      <div className="model-slot-grid">{slotDrafts.map((slot) => <fieldset className="model-slot" key={slot.role}>
+        <legend>{modelSlotLabel(slot.role, locale)}</legend>
+        <label className="model-enabled"><input type="checkbox" checked={slot.enabled} onChange={(event) => updateSlot(slot.role, "enabled", event.target.checked)} />{text("启用此槽位", "Enable this slot")}</label>
+        <label>{text("提供方名称", "Provider label")}<input value={slot.providerLabel} onChange={(event) => updateSlot(slot.role, "providerLabel", event.target.value)} placeholder={text("例如：OpenAI", "e.g. OpenAI")} /></label>
+        <label>{text("API 地址", "API base URL")}<input value={slot.baseUrl} onChange={(event) => updateSlot(slot.role, "baseUrl", event.target.value)} placeholder="https://api.example.com/v1" inputMode="url" /></label>
+        <label>{text("模型名称", "Model name")}<input value={slot.model} onChange={(event) => updateSlot(slot.role, "model", event.target.value)} placeholder="model-id" /></label>
+        <label>{text("API Key", "API key")}<input type="password" autoComplete="new-password" value={slot.apiKey} onChange={(event) => { updateSlot(slot.role, "apiKey", event.target.value); updateSlot(slot.role, "clearApiKey", false); }} placeholder={slot.hasApiKey ? text("已安全保存；留空表示保留", "Stored securely; leave blank to retain") : text("输入后保存到系统凭据库", "Saved to the system credential store")} /></label>
+        <label className="model-clear-key"><input type="checkbox" checked={slot.clearApiKey} onChange={(event) => updateSlot(slot.role, "clearApiKey", event.target.checked)} disabled={!slot.hasApiKey} />{text("删除已保存的 Key", "Delete saved key")}</label>
+      </fieldset>)}</div>
+      <div className="model-settings-actions"><p>{text("应用界面不会读取或回显明文 Key。仅在作者主动提问时调用模型。", "The interface never reads or reveals plaintext keys. Models are called only after an author submits a question.")}</p><button className="primary-button" type="button" disabled={isSavingSettings} onClick={() => void saveSettings()}>{isSavingSettings ? text("保存中…", "Saving…") : text("保存模型设置", "Save model settings")}</button></div>
+    </section> : null}
+
+    {error ? <p className="dialogue-message dialogue-error" role="alert">{error}</p> : null}
+    {notice ? <p className="dialogue-message" role="status">{notice}</p> : null}
+
+    <div className="dialogue-tabs" role="tablist" aria-label={text("知识体对话类型", "Knowledge dialogue type")}>
+      <button type="button" role="tab" aria-selected={activeTab === "owner"} onClick={() => setActiveTab("owner")}>{text("我的问答", "My questions")}<span>{ownerItems.length}</span></button>
+      <button type="button" role="tab" aria-selected={activeTab === "external"} onClick={() => setActiveTab("external")}>{text("外部反馈 · 预留", "External feedback · Reserved")}<span>{externalItems.length}</span></button>
+    </div>
+
+    {activeTab === "owner" ? <div className="dialogue-owner">
+      <KnowledgeDialogueList items={ownerItems} loading={isLoading} />
+      <form className="knowledge-composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
+        <div className="composer-controls"><label>{text("提问类型", "Stance")}<select value={stance} onChange={(event) => setStance(event.target.value as KnowledgeInquiryStance)}><option value="recognition">{text("认可", "Recognition")}</option><option value="question">{text("疑问", "Question")}</option><option value="challenge">{text("挑战", "Challenge")}</option></select></label><label>{text("针对对象", "Target")}<select value={target} onChange={(event) => setTarget(event.target.value as KnowledgeInquiryTarget)}>{INQUIRY_TARGETS.map((item) => <option value={item} key={item}>{inquiryTargetLabel(item, locale)}</option>)}</select></label></div>
+        <label className="composer-question"><span>{text("问题或需求", "Question or request")}</span><textarea rows={3} maxLength={4000} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={text("例如：这个 Claim 目前缺少哪些来源锚点？", "For example: Which source anchors are still missing for this Claim?")} disabled={!knowledgeBodyRecord || isAsking} /></label>
+        <div className="composer-submit"><p>{text("本次只发送知识体投影与问题，不发送源文件；回答不会自动改写知识体。", "Only the knowledge-body projection and question are sent, never the source file; answers cannot automatically modify the knowledge body.")}</p><button className="primary-button" type="submit" disabled={!knowledgeBodyRecord || !question.trim() || configuredSlots.length === 0 || isAsking}>{isAsking ? text("模型回答中…", "Model is answering…") : configuredSlots.length === 0 ? text("先设置模型", "Configure a model first") : text("询问知识体", "Ask knowledge body")}</button></div>
+        {!knowledgeBodyRecord ? <p className="composer-disabled-note">{text("先固化当前知识体，问答才会绑定到准确的快照与哈希。", "Finalize the current knowledge body first so dialogue can bind to its exact snapshot and hash.")}</p> : null}
+      </form>
+    </div> : <ExternalFeedbackReserve items={externalItems} />}
+  </section>;
+}
+
+function KnowledgeDialogueList({ items, loading }: { items: KnowledgeDialogueItem[]; loading: boolean }) {
+  const { locale, text } = useI18n();
+  if (loading) return <p className="dialogue-empty">{text("正在读取本地问答记录…", "Loading the local dialogue ledger…")}</p>;
+  if (items.length === 0) return <div className="dialogue-empty"><Icon name="knowledge" /><p>{text("还没有问题。可以从 Claim、Scope、Method 或来源锚点开始。", "No questions yet. Start with the Claim, Scope, Method, or source anchors.")}</p></div>;
+  return <ol className="dialogue-ledger">{items.map((item) => <li key={item.inquiry.inquiryId}>
+    <article className="inquiry-card"><header><span data-stance={item.inquiry.stance}>{inquiryStanceLabel(item.inquiry.stance, locale)}</span><strong>{inquiryTargetLabel(item.inquiry.target, locale)}</strong><time>{formatModifiedDate(item.inquiry.createdUnixMs, locale)}</time></header><p>{item.inquiry.question}</p><small>S{item.inquiry.snapshotVersion} · {item.inquiry.knowledgeBodyHash.slice(0, 12)}</small></article>
+    {item.answers.length > 0 ? item.answers.map((answer) => <article className="answer-card" key={answer.answerId}><header><strong>{answer.providerLabel} · {answer.model}</strong><span>{modelSlotLabel(answer.modelSlot as ModelSlotRole, locale)}</span></header><p>{answer.answer}</p><footer><span>{text(`${answer.sourceAnchors.length} 个来源锚点`, `${answer.sourceAnchors.length} source anchor(s)`)}</span><code>{answer.recordHash.slice(0, 12)}</code></footer></article>) : <p className="answer-pending">{text("问题已保存在本机；模型尚未形成回答。", "The question is saved locally; no model answer is available yet.")}</p>}
+  </li>)}</ol>;
+}
+
+function ExternalFeedbackReserve({ items }: { items: KnowledgeDialogueItem[] }) {
+  const { text } = useI18n();
+  return <div className="external-feedback">
+    {items.length > 0 ? <KnowledgeDialogueList items={items} loading={false} /> : null}
+    <div className="external-reserve-card"><span>{text("尚未开放", "Not yet available")}</span><h3>{text("为外部读者保留的论文提问窗口", "Reserved inquiry window for external readers")}</h3><p>{text("未来可让经过授权的客户针对公开知识体表达认可、疑问或挑战；身份、权限、原问题和 AI 回答都进入可追溯记录。", "Authorized readers will be able to express recognition, questions, or challenges toward a published knowledge body; identity, permission, original inquiry, and AI answer will remain traceable.")}</p><ul><li>{text("认可", "Recognition")}</li><li>{text("疑问", "Question")}</li><li>{text("挑战", "Challenge")}</li></ul><small>{text("当前版本不接收外部网络请求，也不会虚构外部反馈。", "This version accepts no external network requests and never fabricates reader feedback.")}</small></div>
+  </div>;
 }
 
 function KnowledgeNetworkCanvas({ bodies, assertions, view }: { bodies: KnowledgeBodyNode[]; assertions: NetworkAssertion[]; view: Exclude<KnowledgeView, "single"> }) {

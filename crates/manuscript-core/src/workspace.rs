@@ -1,4 +1,9 @@
 use crate::{
+    dialogue::{
+        KnowledgeAnswerRecord, KnowledgeDialogueItem, KnowledgeDialogueLedger,
+        KnowledgeInquiryOrigin, KnowledgeInquiryRecord, KnowledgeInquiryStance,
+        KnowledgeInquiryTarget, KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+    },
     inspect_manuscript,
     knowledge::{
         discipline_catalog_item, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
@@ -206,6 +211,10 @@ pub enum WorkspaceError {
     MissingCurrentAttestation,
     MissingCurrentSubmission,
     InvalidDisciplineClassification,
+    MissingCurrentKnowledgeBody,
+    InvalidKnowledgeInquiry,
+    KnowledgeInquiryNotFound,
+    InvalidKnowledgeAnswer,
     InvalidExportDestination,
     ExportDestinationExists,
     TimeBeforeUnixEpoch,
@@ -247,6 +256,19 @@ impl fmt::Display for WorkspaceError {
             }
             Self::InvalidDisciplineClassification => {
                 write!(formatter, "请选择有效的学科索引分类后再固化知识体")
+            }
+            Self::MissingCurrentKnowledgeBody => {
+                write!(formatter, "当前论文版本尚未固化知识体，不能建立问答记录")
+            }
+            Self::InvalidKnowledgeInquiry => {
+                write!(formatter, "知识体问题不能为空，且不能超过 4000 个字符")
+            }
+            Self::KnowledgeInquiryNotFound => write!(formatter, "未找到当前知识体对应的问题记录"),
+            Self::InvalidKnowledgeAnswer => {
+                write!(
+                    formatter,
+                    "模型回答、模型名称和提供方不能为空，且长度必须在限制内"
+                )
             }
             Self::InvalidExportDestination => write!(formatter, "请选择可写入的导出文件夹"),
             Self::ExportDestinationExists => {
@@ -395,6 +417,41 @@ struct KnowledgeBodyPayload<'a> {
     finalized_unix_ms: u64,
     discipline_classification: &'a DisciplineClassification,
     snapshot: &'a AcademicKnowledgeBodySnapshot,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeInquiryPayload<'a> {
+    schema_version: u32,
+    inquiry_id: &'a str,
+    workspace_id: &'a str,
+    knowledge_body_record_id: &'a str,
+    knowledge_body_hash: &'a str,
+    snapshot_version: u32,
+    origin: KnowledgeInquiryOrigin,
+    stance: KnowledgeInquiryStance,
+    target: KnowledgeInquiryTarget,
+    question: &'a str,
+    external_actor_label: &'a Option<String>,
+    created_unix_ms: u64,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeAnswerPayload<'a> {
+    schema_version: u32,
+    answer_id: &'a str,
+    inquiry_id: &'a str,
+    workspace_id: &'a str,
+    knowledge_body_record_id: &'a str,
+    model_slot: &'a str,
+    provider_label: &'a str,
+    model: &'a str,
+    answer: &'a str,
+    source_anchors: &'a [crate::VersionedObjectReference],
+    created_unix_ms: u64,
     external_transmission: &'a str,
 }
 
@@ -1186,6 +1243,215 @@ impl WorkspaceStore {
         Ok(record)
     }
 
+    pub fn knowledge_dialogue(
+        &self,
+        workspace_id: &str,
+    ) -> Result<KnowledgeDialogueLedger, WorkspaceError> {
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let knowledge_body = lifecycle
+            .knowledge_body
+            .ok_or(WorkspaceError::MissingCurrentKnowledgeBody)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let mut inquiries = read_nested_records::<KnowledgeInquiryRecord>(
+            &workspace_root.join("dialogue/inquiries"),
+            "inquiry.json",
+        )?;
+        for inquiry in &inquiries {
+            verify_knowledge_inquiry(inquiry)?;
+        }
+        inquiries.retain(|inquiry| {
+            inquiry.workspace_id == workspace_id
+                && inquiry.knowledge_body_record_id == knowledge_body.record_id
+                && inquiry.knowledge_body_hash == knowledge_body.record_hash
+        });
+        inquiries.sort_by_key(|inquiry| inquiry.created_unix_ms);
+
+        let mut answers = read_nested_records::<KnowledgeAnswerRecord>(
+            &workspace_root.join("dialogue/answers"),
+            "answer.json",
+        )?;
+        for answer in &answers {
+            verify_knowledge_answer(answer)?;
+        }
+        answers.retain(|answer| {
+            answer.workspace_id == workspace_id
+                && answer.knowledge_body_record_id == knowledge_body.record_id
+        });
+        answers.sort_by_key(|answer| answer.created_unix_ms);
+
+        let items = inquiries
+            .into_iter()
+            .map(|inquiry| KnowledgeDialogueItem {
+                answers: answers
+                    .iter()
+                    .filter(|answer| answer.inquiry_id == inquiry.inquiry_id)
+                    .cloned()
+                    .collect(),
+                inquiry,
+            })
+            .collect();
+        Ok(KnowledgeDialogueLedger {
+            workspace_id: workspace_id.to_owned(),
+            knowledge_body_record_id: knowledge_body.record_id,
+            knowledge_body_hash: knowledge_body.record_hash,
+            items,
+        })
+    }
+
+    pub fn create_owner_inquiry(
+        &self,
+        workspace_id: &str,
+        stance: KnowledgeInquiryStance,
+        target: KnowledgeInquiryTarget,
+        question: &str,
+        author_confirmed_model_projection: bool,
+    ) -> Result<KnowledgeInquiryRecord, WorkspaceError> {
+        if !author_confirmed_model_projection {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        let question = question.trim();
+        if question.is_empty() || question.chars().count() > 4_000 {
+            return Err(WorkspaceError::InvalidKnowledgeInquiry);
+        }
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let knowledge_body = lifecycle
+            .knowledge_body
+            .ok_or(WorkspaceError::MissingCurrentKnowledgeBody)?;
+        let inquiry_id = Uuid::new_v4().to_string();
+        let created_unix_ms = unix_time_ms()?;
+        let external_actor_label = None;
+        let external_transmission = "author_confirmed_model_projection".to_owned();
+        let payload = KnowledgeInquiryPayload {
+            schema_version: KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+            inquiry_id: &inquiry_id,
+            workspace_id,
+            knowledge_body_record_id: &knowledge_body.record_id,
+            knowledge_body_hash: &knowledge_body.record_hash,
+            snapshot_version: knowledge_body.snapshot.snapshot_version,
+            origin: KnowledgeInquiryOrigin::Owner,
+            stance,
+            target,
+            question,
+            external_actor_label: &external_actor_label,
+            created_unix_ms,
+            external_transmission: &external_transmission,
+        };
+        let record_hash = hash_serializable(&payload)?;
+        let record = KnowledgeInquiryRecord {
+            schema_version: KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+            inquiry_id: inquiry_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            knowledge_body_record_id: knowledge_body.record_id,
+            knowledge_body_hash: knowledge_body.record_hash,
+            snapshot_version: knowledge_body.snapshot.snapshot_version,
+            origin: KnowledgeInquiryOrigin::Owner,
+            stance,
+            target,
+            question: question.to_owned(),
+            external_actor_label,
+            created_unix_ms,
+            record_hash,
+            external_transmission,
+        };
+        let workspace_root = self.projects_root().join(workspace_id);
+        write_immutable_record(
+            &workspace_root.join("dialogue/inquiries"),
+            &inquiry_id,
+            "inquiry.json",
+            &record,
+        )?;
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "knowledge_inquiry_created",
+            &manifest.workspace,
+            created_unix_ms,
+        )?;
+        Ok(record)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_model_answer(
+        &self,
+        workspace_id: &str,
+        inquiry_id: &str,
+        model_slot: &str,
+        provider_label: &str,
+        model: &str,
+        answer: &str,
+        source_anchors: &[crate::VersionedObjectReference],
+    ) -> Result<KnowledgeAnswerRecord, WorkspaceError> {
+        let provider_label = provider_label.trim();
+        let model = model.trim();
+        let answer = answer.trim();
+        if !matches!(model_slot, "primary" | "fallback_1" | "fallback_2")
+            || provider_label.is_empty()
+            || provider_label.chars().count() > 100
+            || model.is_empty()
+            || model.chars().count() > 200
+            || answer.is_empty()
+            || answer.chars().count() > 24_000
+        {
+            return Err(WorkspaceError::InvalidKnowledgeAnswer);
+        }
+        let ledger = self.knowledge_dialogue(workspace_id)?;
+        if !ledger
+            .items
+            .iter()
+            .any(|item| item.inquiry.inquiry_id == inquiry_id)
+        {
+            return Err(WorkspaceError::KnowledgeInquiryNotFound);
+        }
+        let answer_id = Uuid::new_v4().to_string();
+        let created_unix_ms = unix_time_ms()?;
+        let external_transmission = "performed_to_configured_model".to_owned();
+        let payload = KnowledgeAnswerPayload {
+            schema_version: KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+            answer_id: &answer_id,
+            inquiry_id,
+            workspace_id,
+            knowledge_body_record_id: &ledger.knowledge_body_record_id,
+            model_slot,
+            provider_label,
+            model,
+            answer,
+            source_anchors,
+            created_unix_ms,
+            external_transmission: &external_transmission,
+        };
+        let record_hash = hash_serializable(&payload)?;
+        let record = KnowledgeAnswerRecord {
+            schema_version: KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+            answer_id: answer_id.clone(),
+            inquiry_id: inquiry_id.to_owned(),
+            workspace_id: workspace_id.to_owned(),
+            knowledge_body_record_id: ledger.knowledge_body_record_id,
+            model_slot: model_slot.to_owned(),
+            provider_label: provider_label.to_owned(),
+            model: model.to_owned(),
+            answer: answer.to_owned(),
+            source_anchors: source_anchors.to_vec(),
+            created_unix_ms,
+            record_hash,
+            external_transmission,
+        };
+        let workspace_root = self.projects_root().join(workspace_id);
+        write_immutable_record(
+            &workspace_root.join("dialogue/answers"),
+            &answer_id,
+            "answer.json",
+            &record,
+        )?;
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "knowledge_model_answer_recorded",
+            &manifest.workspace,
+            created_unix_ms,
+        )?;
+        Ok(record)
+    }
+
     pub fn revision_draft(&self, workspace_id: &str) -> Result<RevisionDraft, WorkspaceError> {
         let history = self.version_history(workspace_id)?;
         let current = history
@@ -1647,6 +1913,67 @@ fn verify_knowledge_body_record(record: &KnowledgeBodyRecord) -> Result<(), Work
     Ok(())
 }
 
+fn verify_knowledge_inquiry(record: &KnowledgeInquiryRecord) -> Result<(), WorkspaceError> {
+    let payload = KnowledgeInquiryPayload {
+        schema_version: record.schema_version,
+        inquiry_id: &record.inquiry_id,
+        workspace_id: &record.workspace_id,
+        knowledge_body_record_id: &record.knowledge_body_record_id,
+        knowledge_body_hash: &record.knowledge_body_hash,
+        snapshot_version: record.snapshot_version,
+        origin: record.origin,
+        stance: record.stance,
+        target: record.target,
+        question: &record.question,
+        external_actor_label: &record.external_actor_label,
+        created_unix_ms: record.created_unix_ms,
+        external_transmission: &record.external_transmission,
+    };
+    if record.schema_version != KNOWLEDGE_DIALOGUE_SCHEMA_VERSION
+        || record.inquiry_id.trim().is_empty()
+        || record.question.trim().is_empty()
+        || record.question.chars().count() > 4_000
+        || hash_serializable(&payload)? != record.record_hash
+    {
+        return Err(WorkspaceError::InvalidManifest(
+            "知识体问题记录完整性验证失败".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_knowledge_answer(record: &KnowledgeAnswerRecord) -> Result<(), WorkspaceError> {
+    let payload = KnowledgeAnswerPayload {
+        schema_version: record.schema_version,
+        answer_id: &record.answer_id,
+        inquiry_id: &record.inquiry_id,
+        workspace_id: &record.workspace_id,
+        knowledge_body_record_id: &record.knowledge_body_record_id,
+        model_slot: &record.model_slot,
+        provider_label: &record.provider_label,
+        model: &record.model,
+        answer: &record.answer,
+        source_anchors: &record.source_anchors,
+        created_unix_ms: record.created_unix_ms,
+        external_transmission: &record.external_transmission,
+    };
+    if record.schema_version != KNOWLEDGE_DIALOGUE_SCHEMA_VERSION
+        || record.answer_id.trim().is_empty()
+        || record.inquiry_id.trim().is_empty()
+        || record.answer.trim().is_empty()
+        || !matches!(
+            record.model_slot.as_str(),
+            "primary" | "fallback_1" | "fallback_2"
+        )
+        || hash_serializable(&payload)? != record.record_hash
+    {
+        return Err(WorkspaceError::InvalidManifest(
+            "知识体模型回答记录完整性验证失败".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn copy_and_hash(source_path: &Path, destination: &Path) -> Result<(String, u64), WorkspaceError> {
     let mut source = BufReader::new(File::open(source_path)?);
     let mut destination = BufWriter::new(
@@ -1959,7 +2286,10 @@ mod tests {
     use super::{
         make_tree_writable, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
     };
-    use crate::{ReadinessOutcome, RevisionApplication, RevisionChangeInput, RevisionFieldKind};
+    use crate::{
+        KnowledgeInquiryStance, KnowledgeInquiryTarget, ReadinessOutcome, RevisionApplication,
+        RevisionChangeInput, RevisionFieldKind,
+    };
     use std::{
         fs::{self, File},
         io::Write,
@@ -2516,6 +2846,61 @@ Synthetic method.",
             .unwrap();
         super::verify_knowledge_body_record(&legacy_knowledge).unwrap();
 
+        assert!(matches!(
+            store.create_owner_inquiry(
+                &workspace.id,
+                KnowledgeInquiryStance::Question,
+                KnowledgeInquiryTarget::Claim,
+                "当前 Claim 有哪些限制？",
+                false,
+            ),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+        assert!(matches!(
+            store.create_owner_inquiry(
+                &workspace.id,
+                KnowledgeInquiryStance::Question,
+                KnowledgeInquiryTarget::Claim,
+                "   ",
+                true,
+            ),
+            Err(WorkspaceError::InvalidKnowledgeInquiry)
+        ));
+        let inquiry = store
+            .create_owner_inquiry(
+                &workspace.id,
+                KnowledgeInquiryStance::Challenge,
+                KnowledgeInquiryTarget::Claim,
+                "当前证据是否足以支持这个 Claim？",
+                true,
+            )
+            .unwrap();
+        let answer = store
+            .record_model_answer(
+                &workspace.id,
+                &inquiry.inquiry_id,
+                "fallback_1",
+                "Synthetic Provider",
+                "synthetic-model",
+                "现有知识体只建立了来源边界，尚未形成正式 EvidenceRelation。",
+                &[],
+            )
+            .unwrap();
+        let dialogue = store.knowledge_dialogue(&workspace.id).unwrap();
+        assert_eq!(dialogue.items.len(), 1);
+        assert_eq!(dialogue.items[0].inquiry, inquiry);
+        assert_eq!(dialogue.items[0].answers, vec![answer.clone()]);
+        assert_eq!(
+            answer.external_transmission,
+            "performed_to_configured_model"
+        );
+        let mut tampered_answer = answer;
+        tampered_answer.answer = "tampered".to_owned();
+        assert!(super::verify_knowledge_answer(&tampered_answer)
+            .unwrap_err()
+            .to_string()
+            .contains("完整性验证失败"));
+
         let reclassified = store
             .finalize_knowledge_body(&workspace.id, "engineering_technology")
             .unwrap();
@@ -2532,6 +2917,11 @@ Synthetic method.",
         assert_eq!(recovered.attestation, Some(attestation));
         assert_eq!(recovered.submission, Some(submission));
         assert_eq!(recovered.knowledge_body, Some(reclassified.clone()));
+        assert!(store
+            .knowledge_dialogue(&workspace.id)
+            .unwrap()
+            .items
+            .is_empty());
         let mut tampered_knowledge = reclassified;
         tampered_knowledge.submission_id = "tampered".to_owned();
         assert!(super::verify_knowledge_body_record(&tampered_knowledge)

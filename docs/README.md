@@ -11,6 +11,7 @@
 - [学术知识体演进路线](academic-knowledge-body-roadmap.md)：从本地稿件工作区到作者控制的 AI 与发布网络对象。
 - [学术知识体服务模型](knowledge-body-service-model.md)：平台服务对象、生命周期、写回原则、授权投影和商业含义。
 - [学术知识体关联网络模型](knowledge-body-network-model.md)：单体边界、独立 AIReviewReport 版本、八类跨体声明协议和三级空间视图。
+- [知识体问答与作者自带模型](knowledge-body-dialogue-and-model-routing.md)：主模型与双备选、系统密钥库、最小投影、问答账本和外部反馈边界。
 - [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。
 
 ## 技术与体验

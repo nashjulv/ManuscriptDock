@@ -18,3 +18,4 @@ Each ADR contains status, context, decision, consequences, and links to supersed
 - [0004 — Signed rule packs and readiness snapshots](0004-signed-rule-packs-and-readiness-snapshots.md)
 - [0005 — Local manuscript version library](0005-local-manuscript-version-library.md)
 - [0006 — Local lifecycle records and seven-step state machine](0006-local-lifecycle-records.md)
+- [0007 — Author-controlled model routing and knowledge-body dialogue](0007-author-controlled-model-routing.md)

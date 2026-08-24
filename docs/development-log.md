@@ -748,3 +748,32 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
 - Frontend coverage verifies the finalize action remains disabled until the author selects a
   discipline, sends the confirmed code through the Rust boundary, and renders the full hash and
   `ClassificationAssignment` on completion.
+
+## 2026-08-25 — Knowledge-body dialogue and author-controlled model routing
+
+### Delivered
+
+- Added the dialogue desk below the spatial knowledge-body view, with author questions classified
+  as recognition, question, or challenge and targeted to an exact knowledge object.
+- Added exactly three model slots: one primary and two ordered fallbacks. Rust owns HTTPS endpoint
+  validation, bounded requests, response parsing, and failover; localhost services may use HTTP.
+- Stored API keys in macOS Keychain or Windows Credential Manager and kept plaintext credentials out
+  of settings files, IPC responses, workspaces, audit events, errors, and dialogue records.
+- Sent only an author-confirmed minimum KnowledgeBody projection, never the source file or path.
+- Persisted immutable, hash-verified inquiry and answer records bound to the current knowledge-body
+  record, hash, and snapshot. Model failure leaves a truthful unanswered local inquiry.
+- Reserved a separate external-reader surface for recognition, questions, and challenges without
+  exposing an unauthenticated network endpoint or inventing feedback.
+
+### Verification
+
+- Frontend coverage configures all three visible slots, saves a synthetic primary Key through the
+  narrow command contract, asks a Claim challenge, renders the recorded answer, and verifies the
+  external surface remains reserved.
+- Rust coverage verifies dialogue hashes and record recovery, rejects invalid or tampered records,
+  isolates old dialogue after reclassification, validates the exact three-slot contract, and rejects
+  insecure remote HTTP endpoints.
+- `npm run check` passed 13 frontend tests, 45 Rust tests, TypeScript, Vite, rustfmt, and warning-free
+  Clippy. The native macOS debug application rebuilt successfully.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc` passed with the repository's Windows
+  SDK toolchain, including Credential Manager and the HTTPS model client.
