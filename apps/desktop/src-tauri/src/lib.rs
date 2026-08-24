@@ -1,10 +1,10 @@
 use manuscript_core::{
-    bundled_rule_pack_catalog, bundled_submission_element_catalog, AcademicKnowledgeBodySnapshot,
-    KnowledgeBodyRecord, LocalAttestation, ManuscriptSelection, ReadinessEvaluation,
-    RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
-    SubmissionElementCatalog, SubmissionExport, SubmissionRecord, VersionComparison,
-    VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCreation, WorkspaceLifecycle,
-    WorkspaceStore,
+    bundled_rule_pack_catalog, bundled_submission_element_catalog, discipline_catalog,
+    AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, KnowledgeBodyRecord, LocalAttestation,
+    ManuscriptSelection, ReadinessEvaluation, RevisionApplication, RevisionChangeInput,
+    RevisionDraft, RulePackCatalog, StructureAnalysis, SubmissionElementCatalog, SubmissionExport,
+    SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, WorkspaceCatalog,
+    WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
@@ -188,12 +188,18 @@ async fn record_manual_submission(
 #[tauri::command]
 async fn finalize_knowledge_body(
     workspace_id: String,
+    discipline_code: String,
     app: AppHandle,
 ) -> Result<KnowledgeBodyRecord, String> {
     let root = workspace_root(&app)?;
     WorkspaceStore::new(root)
-        .finalize_knowledge_body(&workspace_id)
+        .finalize_knowledge_body(&workspace_id, &discipline_code)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_discipline_index() -> Result<Vec<DisciplineCatalogItem>, String> {
+    Ok(discipline_catalog())
 }
 
 #[tauri::command]
@@ -337,6 +343,7 @@ pub fn run() {
             export_submission_package,
             record_manual_submission,
             finalize_knowledge_body,
+            list_discipline_index,
             save_manuscript_version,
             restore_manuscript_version,
             compare_manuscript_versions,

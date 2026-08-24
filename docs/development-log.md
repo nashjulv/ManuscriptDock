@@ -722,3 +722,29 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
   recheck, creates attestation, exports the handoff, records submission, restores a finalized
   knowledge body, and exercises the three spatial knowledge views.
 - TypeScript, Vite, rustfmt, Rust tests, Clippy, and the Tauri desktop build remain release gates.
+
+## 2026-08-24 — Author-confirmed discipline index and knowledge-body hash
+
+### Delivered
+
+- Added a bilingual 12-item `ManuscriptDock Discipline Index v1.0` catalog. Knowledge-body
+  finalization now requires the author to choose a primary discipline; no model or title-based
+  inference runs in this release.
+- Persisted the choice as a versioned, author-confirmed `ClassificationAssignment`. Reclassification
+  keeps its stable assignment ID, advances the version, and creates a new immutable knowledge-body
+  record instead of rewriting history.
+- Extended the knowledge-body SHA-256 payload to cover the classification, snapshot, attestation,
+  and submission references. The final operation pane now displays the full 64-character hash,
+  discipline code and labels, index scheme, protocol version, author-confirmed status, and record ID.
+- Kept legacy records without classification readable. They open in an explicit completion state
+  where the author can add a discipline and create a new hashed record.
+- Reserved future model support for evidence-backed candidate classifications only; author
+  confirmation remains required before a candidate can become current.
+
+### Verification
+
+- Rust coverage rejects unknown codes, verifies catalog stability, restores classified records,
+  detects tampering, and confirms reclassification advances the assignment and changes the hash.
+- Frontend coverage verifies the finalize action remains disabled until the author selects a
+  discipline, sends the confirmed code through the Rust boundary, and renders the full hash and
+  `ClassificationAssignment` on completion.

@@ -552,6 +552,50 @@ describe("App", () => {
     expect(invokeMock).toHaveBeenCalledWith("record_manual_submission", { workspaceId: workspace.id, target: "Synthetic Journal", receipt: "SYN-2026", authorConfirmed: true });
   });
 
+  it("requires an author-selected discipline and displays the full knowledge-body hash", async () => {
+    isTauriMock.mockReturnValue(true);
+    const workspace = { id: "classified-workspace", manuscript: { name: "classified-study.tex", extension: "tex", kind: "latex", sizeBytes: 1024, modifiedUnixMs: null }, contentHash: "6".repeat(64), importedUnixMs: Date.UTC(2026, 7, 24, 8, 0), snapshotVersion: 1 };
+    const reference = (objectId: string, objectType: string, version: number) => ({ objectId, objectType, version });
+    const claim = reference("claim:classified", "claim", 1);
+    const anchor = reference("anchor:classified", "source_anchor", 1);
+    const method = reference("method:classified", "method", 0);
+    const snapshot = {
+      schemaVersion: 1, knowledgeBodyId: "kb:classified", snapshotVersion: 1, manuscript: reference("artifact:classified", "artifact_version", 1),
+      claim: { claim, proposition: { ...reference("proposition:classified", "proposition", 0), state: "pending" }, conditions: { ...reference("scope:classified", "scope", 0), state: "pending" }, evidence: { ...reference("evidence:classified", "evidence", 0), state: "pending" }, sources: { ...anchor, state: "established" }, status: { ...reference("status:classified", "status", 1), state: "established" } },
+      objects: { artifactVersion: reference("artifact:classified", "artifact_version", 1), claim, scope: reference("scope:classified", "scope", 0), method, result: reference("result:classified", "result", 0), evidenceRelation: reference("evidence-relation:classified", "evidence_relation", 0), sourceAnchor: anchor, aiReviewReport: null, provenance: reference("provenance:classified", "provenance", 1), knowledgeBodySnapshot: reference("snapshot:classified", "knowledge_body_snapshot", 1) },
+      aiReviewReport: null, aiReviewHistory: { reportId: "review:classified", currentVersion: null, versions: [] },
+      network: { bodies: [{ body: reference("kb:classified", "knowledge_body", 1), displayId: "K-A", title: "Classified Study", role: "current_study", claim, sourceAnchor: anchor, method }], assertions: [], supportedRelations: ["citation", "claim_relation", "evidence_relation", "method_transfer", "reproduction", "alignment", "version_relation", "classification"] },
+      externalTransmission: "not_performed",
+    };
+    const attestation = { attestationId: "attestation-classified", workspaceId: workspace.id, manuscriptVersion: 1, manuscriptHash: workspace.contentHash, readinessReportId: "report-classified", readinessOutputSnapshotVersion: 1, readinessOutcome: "ready", attestedUnixMs: Date.UTC(2026, 7, 24, 8, 10), statement: "synthetic", recordHash: "a".repeat(64), externalTransmission: "not_performed" };
+    const submission = { submissionId: "submission-classified", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: null, submittedUnixMs: Date.UTC(2026, 7, 24, 8, 20), statement: "synthetic", recordHash: "b".repeat(64), externalTransmission: "not_performed" };
+    const classification = { assignmentId: "classification-classified", version: 1, scheme: "ManuscriptDock Discipline Index", schemeVersion: "1.0", code: "life_sciences", label: "生命科学", labelEn: "Life sciences", status: "author_confirmed", basis: "author_selection" };
+    const record = { recordId: "knowledge-classified", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 8, 30), disciplineClassification: classification, snapshot, recordHash: "f".repeat(64), externalTransmission: "not_performed" };
+    invokeMock.mockImplementation((command) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation, submission, knowledgeBody: null });
+      if (command === "get_knowledge_body_snapshot") return Promise.resolve(snapshot);
+      if (command === "list_discipline_index") return Promise.resolve([{ code: "life_sciences", label: "生命科学", labelEn: "Life sciences" }]);
+      if (command === "finalize_knowledge_body") return Promise.resolve(record);
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /classified-study\.tex/ }));
+    await user.click(screen.getByRole("button", { name: "知识体" }));
+    const finalize = await screen.findByRole("button", { name: "确认分类并固化知识体" });
+    expect(finalize).toBeDisabled();
+    await user.selectOptions(screen.getByRole("combobox", { name: "学科索引分类" }), "life_sciences");
+    expect(finalize).toBeEnabled();
+    await user.click(finalize);
+
+    expect(await screen.findByRole("heading", { name: "知识体哈希与学科索引" })).toBeVisible();
+    expect(screen.getByText("生命科学")).toBeVisible();
+    expect(screen.getByText("f".repeat(64))).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("finalize_knowledge_body", { workspaceId: workspace.id, disciplineCode: "life_sciences" });
+  });
+
   it("exposes the staged workspace and author-controlled knowledge body", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = {
@@ -582,10 +626,12 @@ describe("App", () => {
     };
     const attestation = { attestationId: "attestation-1", workspaceId: workspace.id, manuscriptVersion: 1, manuscriptHash: workspace.contentHash, readinessReportId: "report-1", readinessOutputSnapshotVersion: 1, readinessOutcome: "ready", attestedUnixMs: Date.UTC(2026, 7, 24, 5, 0), statement: "synthetic", recordHash: "a".repeat(64), externalTransmission: "not_performed" };
     const submission = { submissionId: "submission-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: "SYN-1", submittedUnixMs: Date.UTC(2026, 7, 24, 5, 30), statement: "synthetic", recordHash: "b".repeat(64), externalTransmission: "not_performed" };
-    const knowledgeBody = { recordId: "knowledge-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 6, 0), snapshot: knowledgeSnapshot, recordHash: "c".repeat(64), externalTransmission: "not_performed" };
+    const disciplineClassification = { assignmentId: "classification-1", version: 1, scheme: "ManuscriptDock Discipline Index", schemeVersion: "1.0", code: "computer_information_sciences", label: "计算机与信息科学", labelEn: "Computer and information sciences", status: "author_confirmed", basis: "author_selection" };
+    const knowledgeBody = { recordId: "knowledge-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 6, 0), disciplineClassification, snapshot: knowledgeSnapshot, recordHash: "c".repeat(64), externalTransmission: "not_performed" };
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
       if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation, submission, knowledgeBody });
+      if (command === "list_discipline_index") return Promise.resolve([disciplineClassification]);
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
@@ -597,6 +643,11 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "知识体" }));
     expect(await screen.findByRole("heading", { name: "知识体与关联网络" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "知识体哈希与学科索引" })).toBeVisible();
+    expect(screen.getByText("计算机与信息科学")).toBeVisible();
+    expect(screen.getByText("computer_information_sciences")).toBeVisible();
+    expect(screen.getByText("c".repeat(64))).toBeVisible();
+    expect(screen.getByText("ClassificationAssignment · v1")).toBeVisible();
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("ArtifactVersion · v3");
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("Scope · v3");
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("KnowledgeBodySnapshot · S7");

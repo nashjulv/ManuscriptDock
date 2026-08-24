@@ -84,7 +84,14 @@ MVP 存证是本机加密完整性记录，不宣称上链、公证或第三方�
 只有当前版本已完成存证和投稿登记后，才能把本次生命周期固化为不可变
 `KnowledgeBodySnapshot`。它固定引用稿件、结构、检查、修订、存证和投稿的具体版本，
 并继续保持 Claim、Scope、Method、Result、EvidenceRelation、SourceAnchor、
-AIReviewReport 和 Provenance 的对象边界。
+AIReviewReport 和 Provenance 的对象边界。固化前由作者从 `ManuscriptDock Discipline
+Index v1.0` 选择主要学科，形成状态为 `author_confirmed` 的
+`ClassificationAssignment`；当前版本不得根据标题或摘要自动猜测学科。未来模型只能提出
+带依据的候选分类，作者确认后才形成新的分类版本。
+
+知识体记录生成独立的 SHA-256 哈希，覆盖知识体快照、学科分类、存证标识和投稿标识。
+最终页完整显示 64 位哈希与分类协议版本。该哈希用于本地完整性复验，不等同于区块链、
+公证、第三方时间戳或科学真实性证明。
 
 ## 4. 恢复与失效规则
 
@@ -111,6 +118,10 @@ AIReviewReport 和 Provenance 的对象边界。
 6. 导出投稿交付包；
 7. 登记一次手工投稿；
 8. 固化并查看知识体快照。
+
+第 8 步必须验证：未选择学科时不能固化；选择后显示作者确认分类、
+`ClassificationAssignment` 版本和完整 64 位知识体 SHA-256。重新分类创建新记录并推进
+分类版本，不覆盖旧记录。
 
 自动化测试覆盖状态恢复、版本失效、存证绑定、投稿前置条件、导出内容和知识体固化；桌面
 构建继续验证 WebView 不获得任意文件系统能力。

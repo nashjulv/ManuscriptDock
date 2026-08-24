@@ -3,6 +3,94 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt};
 
 pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 1;
+pub const DISCIPLINE_INDEX_SCHEME: &str = "ManuscriptDock Discipline Index";
+pub const DISCIPLINE_INDEX_VERSION: &str = "1.0";
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisciplineCatalogItem {
+    pub code: String,
+    pub label: String,
+    pub label_en: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisciplineClassification {
+    pub assignment_id: String,
+    pub version: u32,
+    pub scheme: String,
+    pub scheme_version: String,
+    pub code: String,
+    pub label: String,
+    pub label_en: String,
+    pub status: String,
+    pub basis: String,
+}
+
+const DISCIPLINE_INDEX: [(&str, &str, &str); 12] = [
+    ("multidisciplinary", "综合与跨学科", "Multidisciplinary"),
+    (
+        "mathematics_statistics",
+        "数学与统计学",
+        "Mathematics and statistics",
+    ),
+    (
+        "computer_information_sciences",
+        "计算机与信息科学",
+        "Computer and information sciences",
+    ),
+    (
+        "physical_sciences",
+        "物理与天文学",
+        "Physical sciences and astronomy",
+    ),
+    (
+        "chemistry_materials",
+        "化学与材料科学",
+        "Chemistry and materials science",
+    ),
+    (
+        "earth_environmental_sciences",
+        "地球与环境科学",
+        "Earth and environmental sciences",
+    ),
+    ("life_sciences", "生命科学", "Life sciences"),
+    (
+        "medicine_health_sciences",
+        "医学与健康科学",
+        "Medicine and health sciences",
+    ),
+    (
+        "engineering_technology",
+        "工程与技术",
+        "Engineering and technology",
+    ),
+    (
+        "agriculture_veterinary",
+        "农业与兽医学",
+        "Agriculture and veterinary sciences",
+    ),
+    ("social_sciences", "社会科学", "Social sciences"),
+    ("humanities_arts", "人文与艺术", "Humanities and arts"),
+];
+
+pub fn discipline_catalog() -> Vec<DisciplineCatalogItem> {
+    DISCIPLINE_INDEX
+        .iter()
+        .map(|(code, label, label_en)| DisciplineCatalogItem {
+            code: (*code).to_owned(),
+            label: (*label).to_owned(),
+            label_en: (*label_en).to_owned(),
+        })
+        .collect()
+}
+
+pub fn discipline_catalog_item(code: &str) -> Option<DisciplineCatalogItem> {
+    discipline_catalog()
+        .into_iter()
+        .find(|item| item.code == code)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -528,6 +616,27 @@ mod tests {
         assert_eq!(protocols.len(), 8);
         assert_eq!(protocols[0], RelationProtocol::CitationAssertion);
         assert_eq!(protocols[7], RelationProtocol::ClassificationAssignment);
+    }
+
+    #[test]
+    fn exposes_a_stable_bilingual_author_classification_catalog() {
+        let catalog = discipline_catalog();
+        let codes = catalog
+            .iter()
+            .map(|item| item.code.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(catalog.len(), 12);
+        assert_eq!(codes.len(), catalog.len());
+        assert!(catalog.iter().all(|item| {
+            !item.code.trim().is_empty()
+                && !item.label.trim().is_empty()
+                && !item.label_en.trim().is_empty()
+        }));
+        assert_eq!(
+            discipline_catalog_item("life_sciences").unwrap().label,
+            "生命科学"
+        );
     }
 
     #[test]

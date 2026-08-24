@@ -5,11 +5,13 @@ mod structure;
 mod workspace;
 
 pub use knowledge::{
-    local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot, AiReviewReportHistory,
-    AiReviewReportVersion, AiReviewStatus, AssertionBasis, AssertionStatus, ClaimElementReference,
-    ClaimFiveTuple, ElementState, KnowledgeBodyError, KnowledgeBodyNetwork, KnowledgeBodyNode,
+    discipline_catalog, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
+    AiReviewReportHistory, AiReviewReportVersion, AiReviewStatus, AssertionBasis, AssertionStatus,
+    ClaimElementReference, ClaimFiveTuple, DisciplineCatalogItem, DisciplineClassification,
+    ElementState, KnowledgeBodyError, KnowledgeBodyNetwork, KnowledgeBodyNode,
     KnowledgeBodyObjectSet, KnowledgeBodyRole, KnowledgeObjectType, NetworkAssertion, RelationKind,
-    RelationProtocol, VersionedObjectReference, KNOWLEDGE_BODY_SCHEMA_VERSION,
+    RelationProtocol, VersionedObjectReference, DISCIPLINE_INDEX_SCHEME, DISCIPLINE_INDEX_VERSION,
+    KNOWLEDGE_BODY_SCHEMA_VERSION,
 };
 pub use readiness::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, ExternalTransmission,

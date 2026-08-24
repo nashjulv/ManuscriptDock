@@ -1,6 +1,10 @@
 use crate::{
     inspect_manuscript,
-    knowledge::{local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot, KnowledgeBodyError},
+    knowledge::{
+        discipline_catalog_item, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
+        DisciplineClassification, KnowledgeBodyError, DISCIPLINE_INDEX_SCHEME,
+        DISCIPLINE_INDEX_VERSION,
+    },
     readiness::{
         evaluate_readiness, render_readiness_html, ReadinessError, READINESS_REPORT_VERSION,
     },
@@ -164,6 +168,8 @@ pub struct KnowledgeBodyRecord {
     pub attestation_id: String,
     pub submission_id: String,
     pub finalized_unix_ms: u64,
+    #[serde(default)]
+    pub discipline_classification: Option<DisciplineClassification>,
     pub snapshot: AcademicKnowledgeBodySnapshot,
     pub record_hash: String,
     pub external_transmission: String,
@@ -199,6 +205,7 @@ pub enum WorkspaceError {
     InvalidSubmissionTarget,
     MissingCurrentAttestation,
     MissingCurrentSubmission,
+    InvalidDisciplineClassification,
     InvalidExportDestination,
     ExportDestinationExists,
     TimeBeforeUnixEpoch,
@@ -237,6 +244,9 @@ impl fmt::Display for WorkspaceError {
             }
             Self::MissingCurrentSubmission => {
                 write!(formatter, "当前论文版本尚未登记投稿记录")
+            }
+            Self::InvalidDisciplineClassification => {
+                write!(formatter, "请选择有效的学科索引分类后再固化知识体")
             }
             Self::InvalidExportDestination => write!(formatter, "请选择可写入的导出文件夹"),
             Self::ExportDestinationExists => {
@@ -363,6 +373,19 @@ struct SubmissionPayload<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LegacyKnowledgeBodyPayload<'a> {
+    record_id: &'a str,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    attestation_id: &'a str,
+    submission_id: &'a str,
+    finalized_unix_ms: u64,
+    snapshot: &'a AcademicKnowledgeBodySnapshot,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct KnowledgeBodyPayload<'a> {
     record_id: &'a str,
     workspace_id: &'a str,
@@ -370,6 +393,7 @@ struct KnowledgeBodyPayload<'a> {
     attestation_id: &'a str,
     submission_id: &'a str,
     finalized_unix_ms: u64,
+    discipline_classification: &'a DisciplineClassification,
     snapshot: &'a AcademicKnowledgeBodySnapshot,
     external_transmission: &'a str,
 }
@@ -1069,7 +1093,10 @@ impl WorkspaceStore {
     pub fn finalize_knowledge_body(
         &self,
         workspace_id: &str,
+        discipline_code: &str,
     ) -> Result<KnowledgeBodyRecord, WorkspaceError> {
+        let discipline = discipline_catalog_item(discipline_code.trim())
+            .ok_or(WorkspaceError::InvalidDisciplineClassification)?;
         let lifecycle = self.lifecycle(workspace_id)?;
         let attestation = lifecycle
             .attestation
@@ -1077,15 +1104,48 @@ impl WorkspaceStore {
         let submission = lifecycle
             .submission
             .ok_or(WorkspaceError::MissingCurrentSubmission)?;
-        if let Some(existing) = lifecycle.knowledge_body {
-            return Ok(existing);
+        let existing = lifecycle.knowledge_body;
+        if let Some(existing_record) = &existing {
+            if existing_record
+                .discipline_classification
+                .as_ref()
+                .is_some_and(|classification| classification.code == discipline.code)
+            {
+                return Ok(existing_record.clone());
+            }
         }
         let workspace_root = self.projects_root().join(workspace_id);
         let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
-        let snapshot = local_knowledge_body_snapshot(&manifest.workspace);
+        let snapshot = existing
+            .as_ref()
+            .map(|record| record.snapshot.clone())
+            .unwrap_or_else(|| local_knowledge_body_snapshot(&manifest.workspace));
         snapshot.validate()?;
+        let previous_classification = existing
+            .as_ref()
+            .and_then(|record| record.discipline_classification.as_ref());
+        let discipline_classification = DisciplineClassification {
+            assignment_id: previous_classification
+                .map(|classification| classification.assignment_id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            version: previous_classification
+                .map(|classification| classification.version + 1)
+                .unwrap_or(1),
+            scheme: DISCIPLINE_INDEX_SCHEME.to_owned(),
+            scheme_version: DISCIPLINE_INDEX_VERSION.to_owned(),
+            code: discipline.code,
+            label: discipline.label,
+            label_en: discipline.label_en,
+            status: "author_confirmed".to_owned(),
+            basis: "author_selection".to_owned(),
+        };
         let record_id = Uuid::new_v4().to_string();
-        let finalized_unix_ms = unix_time_ms()?;
+        let finalized_unix_ms = unix_time_ms()?.max(
+            existing
+                .as_ref()
+                .map(|record| record.finalized_unix_ms.saturating_add(1))
+                .unwrap_or(0),
+        );
         let external_transmission = "not_performed".to_owned();
         let payload = KnowledgeBodyPayload {
             record_id: &record_id,
@@ -1094,6 +1154,7 @@ impl WorkspaceStore {
             attestation_id: &attestation.attestation_id,
             submission_id: &submission.submission_id,
             finalized_unix_ms,
+            discipline_classification: &discipline_classification,
             snapshot: &snapshot,
             external_transmission: &external_transmission,
         };
@@ -1105,6 +1166,7 @@ impl WorkspaceStore {
             attestation_id: attestation.attestation_id,
             submission_id: submission.submission_id,
             finalized_unix_ms,
+            discipline_classification: Some(discipline_classification),
             snapshot,
             record_hash,
             external_transmission,
@@ -1536,17 +1598,48 @@ fn verify_submission_record(record: &SubmissionRecord) -> Result<(), WorkspaceEr
 
 fn verify_knowledge_body_record(record: &KnowledgeBodyRecord) -> Result<(), WorkspaceError> {
     record.snapshot.validate()?;
-    let payload = KnowledgeBodyPayload {
-        record_id: &record.record_id,
-        workspace_id: &record.workspace_id,
-        manuscript_version: record.manuscript_version,
-        attestation_id: &record.attestation_id,
-        submission_id: &record.submission_id,
-        finalized_unix_ms: record.finalized_unix_ms,
-        snapshot: &record.snapshot,
-        external_transmission: &record.external_transmission,
+    let expected_hash = match &record.discipline_classification {
+        Some(classification) => {
+            let catalog_item = discipline_catalog_item(&classification.code).ok_or_else(|| {
+                WorkspaceError::InvalidManifest("知识体学科索引记录无效".to_owned())
+            })?;
+            if classification.version == 0
+                || classification.assignment_id.trim().is_empty()
+                || classification.label != catalog_item.label
+                || classification.label_en != catalog_item.label_en
+                || classification.scheme != DISCIPLINE_INDEX_SCHEME
+                || classification.scheme_version != DISCIPLINE_INDEX_VERSION
+                || classification.status != "author_confirmed"
+                || classification.basis != "author_selection"
+            {
+                return Err(WorkspaceError::InvalidManifest(
+                    "知识体学科索引记录无效".to_owned(),
+                ));
+            }
+            hash_serializable(&KnowledgeBodyPayload {
+                record_id: &record.record_id,
+                workspace_id: &record.workspace_id,
+                manuscript_version: record.manuscript_version,
+                attestation_id: &record.attestation_id,
+                submission_id: &record.submission_id,
+                finalized_unix_ms: record.finalized_unix_ms,
+                discipline_classification: classification,
+                snapshot: &record.snapshot,
+                external_transmission: &record.external_transmission,
+            })?
+        }
+        None => hash_serializable(&LegacyKnowledgeBodyPayload {
+            record_id: &record.record_id,
+            workspace_id: &record.workspace_id,
+            manuscript_version: record.manuscript_version,
+            attestation_id: &record.attestation_id,
+            submission_id: &record.submission_id,
+            finalized_unix_ms: record.finalized_unix_ms,
+            snapshot: &record.snapshot,
+            external_transmission: &record.external_transmission,
+        })?,
     };
-    if hash_serializable(&payload)? != record.record_hash {
+    if expected_hash != record.record_hash {
         return Err(WorkspaceError::InvalidManifest(
             "知识体快照记录完整性验证失败".to_owned(),
         ));
@@ -2391,16 +2484,55 @@ Synthetic method.",
                 true,
             )
             .unwrap();
-        let knowledge = store.finalize_knowledge_body(&workspace.id).unwrap();
+        assert!(matches!(
+            store.finalize_knowledge_body(&workspace.id, "unknown-discipline"),
+            Err(WorkspaceError::InvalidDisciplineClassification)
+        ));
+        let knowledge = store
+            .finalize_knowledge_body(&workspace.id, "computer_information_sciences")
+            .unwrap();
         assert_eq!(knowledge.attestation_id, attestation.attestation_id);
         assert_eq!(knowledge.submission_id, submission.submission_id);
         assert_eq!(knowledge.snapshot.manuscript.version, 1);
+        let classification = knowledge.discipline_classification.as_ref().unwrap();
+        assert_eq!(classification.code, "computer_information_sciences");
+        assert_eq!(classification.version, 1);
+        assert_eq!(classification.status, "author_confirmed");
+        assert_eq!(knowledge.record_hash.len(), 64);
+
+        let mut legacy_knowledge = knowledge.clone();
+        legacy_knowledge.discipline_classification = None;
+        legacy_knowledge.record_hash =
+            super::hash_serializable(&super::LegacyKnowledgeBodyPayload {
+                record_id: &legacy_knowledge.record_id,
+                workspace_id: &legacy_knowledge.workspace_id,
+                manuscript_version: legacy_knowledge.manuscript_version,
+                attestation_id: &legacy_knowledge.attestation_id,
+                submission_id: &legacy_knowledge.submission_id,
+                finalized_unix_ms: legacy_knowledge.finalized_unix_ms,
+                snapshot: &legacy_knowledge.snapshot,
+                external_transmission: &legacy_knowledge.external_transmission,
+            })
+            .unwrap();
+        super::verify_knowledge_body_record(&legacy_knowledge).unwrap();
+
+        let reclassified = store
+            .finalize_knowledge_body(&workspace.id, "engineering_technology")
+            .unwrap();
+        let reclassified_assignment = reclassified.discipline_classification.as_ref().unwrap();
+        assert_eq!(
+            reclassified_assignment.assignment_id,
+            classification.assignment_id
+        );
+        assert_eq!(reclassified_assignment.version, 2);
+        assert_eq!(reclassified_assignment.code, "engineering_technology");
+        assert_ne!(reclassified.record_hash, knowledge.record_hash);
 
         let recovered = store.lifecycle(&workspace.id).unwrap();
         assert_eq!(recovered.attestation, Some(attestation));
         assert_eq!(recovered.submission, Some(submission));
-        assert_eq!(recovered.knowledge_body, Some(knowledge.clone()));
-        let mut tampered_knowledge = knowledge;
+        assert_eq!(recovered.knowledge_body, Some(reclassified.clone()));
+        let mut tampered_knowledge = reclassified;
         tampered_knowledge.submission_id = "tampered".to_owned();
         assert!(super::verify_knowledge_body_record(&tampered_knowledge)
             .unwrap_err()
