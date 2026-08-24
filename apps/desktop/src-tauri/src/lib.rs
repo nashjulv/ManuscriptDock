@@ -1,8 +1,10 @@
 use manuscript_core::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, AcademicKnowledgeBodySnapshot,
-    ManuscriptSelection, ReadinessEvaluation, RevisionApplication, RevisionChangeInput,
-    RevisionDraft, RulePackCatalog, StructureAnalysis, SubmissionElementCatalog, VersionComparison,
-    VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCreation, WorkspaceStore,
+    KnowledgeBodyRecord, LocalAttestation, ManuscriptSelection, ReadinessEvaluation,
+    RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
+    SubmissionElementCatalog, SubmissionExport, SubmissionRecord, VersionComparison,
+    VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCreation, WorkspaceLifecycle,
+    WorkspaceStore,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
@@ -125,6 +127,72 @@ async fn get_knowledge_body_snapshot(
     let root = workspace_root(&app)?;
     WorkspaceStore::new(root)
         .knowledge_body_snapshot(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_workspace_lifecycle(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<WorkspaceLifecycle, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .lifecycle(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_local_attestation(
+    workspace_id: String,
+    author_confirmed: bool,
+    app: AppHandle,
+) -> Result<LocalAttestation, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .create_local_attestation(&workspace_id, author_confirmed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn export_submission_package(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<Option<SubmissionExport>, String> {
+    let Some(folder) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let destination = folder
+        .into_path()
+        .map_err(|error| format!("无法读取导出文件夹：{error}"))?;
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .export_submission_package(&workspace_id, &destination)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn record_manual_submission(
+    workspace_id: String,
+    target: String,
+    receipt: Option<String>,
+    author_confirmed: bool,
+    app: AppHandle,
+) -> Result<SubmissionRecord, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .record_manual_submission(&workspace_id, &target, receipt.as_deref(), author_confirmed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn finalize_knowledge_body(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<KnowledgeBodyRecord, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .finalize_knowledge_body(&workspace_id)
         .map_err(|error| error.to_string())
 }
 
@@ -264,6 +332,11 @@ pub fn run() {
             list_workspaces,
             get_version_history,
             get_knowledge_body_snapshot,
+            get_workspace_lifecycle,
+            create_local_attestation,
+            export_submission_package,
+            record_manual_submission,
+            finalize_knowledge_body,
             save_manuscript_version,
             restore_manuscript_version,
             compare_manuscript_versions,

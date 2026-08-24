@@ -333,40 +333,51 @@ describe("App", () => {
           externalTransmission: "not_performed",
         },
       });
+    const structureReport = {
+      analysisVersion: 2, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1, quality: "complete",
+      title: "Synthetic Evidence Study", authors: ["Ada Author", "Ben Researcher"], abstractPresent: true, abstractText: "A compact synthetic abstract.", keywordsPresent: true,
+      sections: [{ level: 1, heading: "Introduction" }, { level: 1, heading: "Methods" }], figureCount: 1, tableCount: 2, referencesPresent: true,
+      declarations: ["data_availability"], pageCount: null, wordCount: 428, warnings: [],
+    };
+    const readinessReport = {
+      reportVersion: 1, reportId: "readiness-report", workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1,
+      outputSnapshotVersion: 1, generatedUnixMs: Date.UTC(2026, 7, 24, 3, 0), outcome: "needs_attention", passedCount: 6, warningCount: 1, blockedCount: 0, confirmationCount: 1,
+      findings: [{ ruleId: "initial.keywords.recommended", rulePackId: "md.stage.initial-submission", classification: "recommendation", status: "warning", message: "补充关键词有助于投稿系统录入与检索。", messageEn: "Adding keywords helps submission-system entry and discovery.", sourceLocation: "document.keywords" }],
+      rulePacks: [{ id: "md.stage.initial-submission", version: "1.0.0", coverage: "C", stage: "initial_submission", sourceLabel: "ManuscriptDock 通用初投稿准备规则", sourceLabelEn: "ManuscriptDock general initial-submission rules", signatureVerified: true }],
+      externalTransmission: "not_performed",
+    };
+    const ieeeRule = { id: "md.publisher.ieee", version: "1.0.0", coverage: "B", stage: "initial_submission", region: "global", category: "publisher", sourceLabel: "IEEE 期刊通用稿件结构", sourceLabelEn: "IEEE journal article structure baseline", description: "检查 IEEE 期刊文章的通用结构。", descriptionEn: "Checks common IEEE journal-article structure.", sourceUrls: ["https://journals.ieeeauthorcenter.ieee.org/"], verifiedAt: "2026-08-24", signatureVerified: true };
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((command) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "list_rule_packs") return Promise.resolve({ rulePacks: [ieeeRule] });
+      if (command === "analyze_workspace") return Promise.resolve({ status: "completed", report: structureReport });
+      if (command === "evaluate_readiness") return Promise.resolve({ status: "completed", report: readinessReport });
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: /structured-study\.tex/ }));
-    await user.click(screen.getByRole("button", { name: "结构" }));
-    await user.click(screen.getByRole("button", { name: "开始结构提取" }));
+    await user.click(screen.getByRole("button", { name: "检查" }));
+    await user.click(screen.getByRole("button", { name: "提取论文结构" }));
 
     expect(await screen.findByRole("heading", { name: "Synthetic Evidence Study" })).toBeVisible();
-    expect(screen.getByText("完整提取")).toBeVisible();
     expect(screen.getAllByText("Ada Author · Ben Researcher").length).toBeGreaterThan(0);
     expect(screen.getByText("A compact synthetic abstract.")).toBeVisible();
-    expect(screen.getByRole("list", { name: "必要结构检测结果" })).toHaveTextContent("作者已检测");
     expect(screen.getByRole("list", { name: "检测到的章节" })).toHaveTextContent("Methods");
     expect(invokeMock).toHaveBeenLastCalledWith("analyze_workspace", {
       workspaceId: workspace.id,
     });
 
-    await user.click(screen.getByRole("button", { name: "选择检查标准" }));
-    const ieeeRule = await screen.findByRole("checkbox", { name: /IEEE 期刊通用稿件结构/ });
-    await user.click(ieeeRule);
-    await user.click(screen.getByRole("button", { name: "核对投稿要素" }));
-    expect(await screen.findByRole("heading", { name: "核对出版社投稿要素" })).toBeVisible();
-    expect(screen.getByText("单段摘要")).toBeVisible();
-    expect(screen.getByText("ORCID")).toBeVisible();
-    expect(screen.getByLabelText("论文标题")).toHaveValue("Synthetic Evidence Study");
-    expect(invokeMock).toHaveBeenCalledWith("list_submission_elements", { rulePackIds: ["md.publisher.ieee"] });
-    expect(invokeMock).toHaveBeenCalledWith("get_revision_draft", { workspaceId: workspace.id });
-    await user.click(screen.getByRole("button", { name: "进入投稿检查" }));
-    await user.click(screen.getByRole("button", { name: "开始检查" }));
+    const ieeeOption = await screen.findByRole("checkbox", { name: /IEEE 期刊通用稿件结构/ });
+    await user.click(ieeeOption);
+    await user.click(screen.getByRole("button", { name: "运行投稿检查" }));
 
     expect(await screen.findByRole("heading", { name: "仍有事项需要处理" })).toBeVisible();
     expect(screen.getByRole("list", { name: "投稿检查明细" })).toHaveTextContent("补充关键词");
-    expect(screen.getByText(/来源可信，内容未被篡改/)).toBeVisible();
-    expect(screen.getAllByText(/未发生外部传输/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/完整性已校验/)).toBeVisible();
     expect(invokeMock).toHaveBeenLastCalledWith("evaluate_readiness", {
       workspaceId: workspace.id,
       rulePackIds: ["md.publisher.ieee"],
@@ -416,6 +427,7 @@ describe("App", () => {
     let historyCalls = 0;
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [original], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: original.id, currentVersion: original.snapshotVersion, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
       if (command === "get_version_history") {
         historyCalls += 1;
         return Promise.resolve(historyCalls === 1
@@ -473,12 +485,23 @@ describe("App", () => {
     const revised = { ...workspace, contentHash: "4".repeat(64), snapshotVersion: 2 };
     const draft = { workspaceId: workspace.id, baseVersion: 1, format: "tex", fields: [{ field: "title", label: "论文标题", labelEn: "Manuscript title", value: "Original title", editable: true, limitation: null, limitationEn: null }], warnings: [] };
     const revisedDraft = { ...draft, baseVersion: 2, fields: [{ ...draft.fields[0], value: "Revised title" }] };
+    const structureReport = { analysisVersion: 4, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1, quality: "complete", title: "Original title", authors: [], abstractPresent: true, abstractText: "Abstract", keywordsPresent: true, sections: [], figureCount: 0, tableCount: 0, referencesPresent: true, declarations: [], pageCount: null, wordCount: 20, warnings: [] };
+    const readinessReport = { reportVersion: 1, reportId: "report-v1", workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1, outputSnapshotVersion: 1, generatedUnixMs: Date.UTC(2026, 7, 24, 6, 10), outcome: "needs_attention", passedCount: 1, warningCount: 1, blockedCount: 0, confirmationCount: 0, findings: [], rulePacks: [], externalTransmission: "not_performed" };
+    const revisedStructure = { ...structureReport, sourceContentHash: revised.contentHash, sourceSnapshotVersion: 2, title: "Revised title" };
+    const revisedReadiness = { ...readinessReport, reportId: "report-v2", sourceContentHash: revised.contentHash, sourceSnapshotVersion: 2, outputSnapshotVersion: 2 };
+    const v1 = { version: 1, parentVersion: null, manuscript: workspace.manuscript, contentHash: workspace.contentHash, createdUnixMs: workspace.importedUnixMs, note: "", origin: "imported", restoredFromVersion: null };
+    const v2 = { version: 2, parentVersion: 1, manuscript: revised.manuscript, contentHash: revised.contentHash, createdUnixMs: Date.UTC(2026, 7, 24, 6, 30), note: "投稿优化修订台：1 项修改", origin: "revision", restoredFromVersion: null };
     let draftCalls = 0;
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport, readinessReport, attestation: null, submission: null, knowledgeBody: null });
       if (command === "list_submission_elements") return Promise.resolve({ elements: [], rulePacks: [] });
       if (command === "get_revision_draft") { draftCalls += 1; return Promise.resolve(draftCalls === 1 ? draft : revisedDraft); }
-      if (command === "apply_manuscript_revision") return Promise.resolve({ status: "created", workspace: revised, version: { version: 2, parentVersion: 1, manuscript: revised.manuscript, contentHash: revised.contentHash, createdUnixMs: Date.UTC(2026, 7, 24, 6, 30), note: "投稿优化修订台：1 项修改", origin: "revision", restoredFromVersion: null }, revisionSet: { revisionId: "revision-set", workspaceId: workspace.id, baseVersion: 1, outputVersion: 2, createdUnixMs: Date.UTC(2026, 7, 24, 6, 30), changes: [{ field: "title", before: "Original title", after: "Revised title", basis: "author_edit", status: "accepted" }], externalTransmission: "not_performed" } });
+      if (command === "apply_manuscript_revision") return Promise.resolve({ status: "created", workspace: revised, version: v2, revisionSet: { revisionId: "revision-set", workspaceId: workspace.id, baseVersion: 1, outputVersion: 2, createdUnixMs: Date.UTC(2026, 7, 24, 6, 30), changes: [{ field: "title", before: "Original title", after: "Revised title", basis: "author_edit", status: "accepted" }], externalTransmission: "not_performed" } });
+      if (command === "analyze_workspace") return Promise.resolve({ status: "completed", report: revisedStructure });
+      if (command === "evaluate_readiness") return Promise.resolve({ status: "completed", report: revisedReadiness });
+      if (command === "get_version_history") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, versions: [v1, v2] });
+      if (command === "compare_manuscript_versions") return Promise.resolve({ workspaceId: workspace.id, fromVersion: 1, toVersion: 2, identical: false, fromContentHash: workspace.contentHash, toContentHash: revised.contentHash, titleBefore: "Original title", titleAfter: "Revised title", wordCountDelta: 0, figureCountDelta: 0, tableCountDelta: 0, addedSections: [], removedSections: [], addedDeclarations: [], removedDeclarations: [], externalTransmission: "not_performed" });
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
@@ -488,9 +511,45 @@ describe("App", () => {
     const title = await screen.findByLabelText("论文标题");
     await user.clear(title); await user.type(title, "Revised title");
     expect(screen.getByText("保存前预览")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "保存为新版本" }));
-    expect(await screen.findByText(/已保存为 v2/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "保存新版本并复查" }));
+    expect(await screen.findByText(/已保存 v2，并完成当前版本复查/)).toBeVisible();
+    expect(screen.getByRole("heading", { name: "核验当前版本与历史" })).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("apply_manuscript_revision", { workspaceId: workspace.id, baseVersion: 1, changes: [{ field: "title", after: "Revised title" }] });
+  });
+
+  it("creates local attestation, exports the handoff, and records manual submission", async () => {
+    isTauriMock.mockReturnValue(true);
+    const workspace = { id: "lifecycle-workspace", manuscript: { name: "lifecycle.tex", extension: "tex", kind: "latex", sizeBytes: 2048, modifiedUnixMs: null }, contentHash: "9".repeat(64), importedUnixMs: Date.UTC(2026, 7, 24, 7, 0), snapshotVersion: 2 };
+    const structureReport = { analysisVersion: 4, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 2, quality: "complete", title: "Lifecycle Study", authors: ["Author"], abstractPresent: true, abstractText: "Abstract", keywordsPresent: true, sections: [], figureCount: 0, tableCount: 0, referencesPresent: true, declarations: [], pageCount: null, wordCount: 100, warnings: [] };
+    const readinessReport = { reportVersion: 1, reportId: "report-current", workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 2, outputSnapshotVersion: 2, generatedUnixMs: Date.UTC(2026, 7, 24, 7, 10), outcome: "ready", passedCount: 5, warningCount: 0, blockedCount: 0, confirmationCount: 0, findings: [], rulePacks: [], externalTransmission: "not_performed" };
+    const attestation = { attestationId: "attestation-current", workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, readinessReportId: readinessReport.reportId, readinessOutputSnapshotVersion: 2, readinessOutcome: "ready", attestedUnixMs: Date.UTC(2026, 7, 24, 7, 20), statement: "confirmed", recordHash: "7".repeat(64), externalTransmission: "not_performed" };
+    const submission = { submissionId: "submission-current", workspaceId: workspace.id, manuscriptVersion: 2, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: "SYN-2026", submittedUnixMs: Date.UTC(2026, 7, 24, 7, 30), statement: "recorded", recordHash: "8".repeat(64), externalTransmission: "not_performed" };
+    invokeMock.mockImplementation((command) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport, readinessReport, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "create_local_attestation") return Promise.resolve(attestation);
+      if (command === "export_submission_package") return Promise.resolve({ packageName: "ManuscriptDock-lifecycl-v2", manuscriptVersion: 2, attestationId: attestation.attestationId, files: ["manuscript.tex", "readiness-report.json", "readiness-preview.html", "local-attestation.json", "submission-manifest.json"], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
+      if (command === "record_manual_submission") return Promise.resolve(submission);
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /lifecycle\.tex/ }));
+    await user.click(screen.getByRole("button", { name: "存证" }));
+    await user.click(await screen.findByRole("checkbox", { name: /我已核对当前稿件/ }));
+    await user.click(screen.getByRole("button", { name: "创建本地存证" }));
+    expect(await screen.findByRole("heading", { name: "v2 已完成存证" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "进入投稿" }));
+    await user.click(screen.getByRole("button", { name: "选择导出文件夹" }));
+    expect(await screen.findByText(/已导出 ManuscriptDock-lifecycl-v2/)).toBeVisible();
+    await user.type(screen.getByLabelText("期刊、会议或预印本平台"), "Synthetic Journal");
+    await user.type(screen.getByLabelText("稿件号或回执（可选）"), "SYN-2026");
+    await user.click(screen.getByRole("checkbox", { name: /我确认已经在上述外部系统完成投稿/ }));
+    await user.click(screen.getByRole("button", { name: "登记投稿记录" }));
+    expect(await screen.findByRole("heading", { name: "Synthetic Journal" })).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("create_local_attestation", { workspaceId: workspace.id, authorConfirmed: true });
+    expect(invokeMock).toHaveBeenCalledWith("export_submission_package", { workspaceId: workspace.id });
+    expect(invokeMock).toHaveBeenCalledWith("record_manual_submission", { workspaceId: workspace.id, target: "Synthetic Journal", receipt: "SYN-2026", authorConfirmed: true });
   });
 
   it("exposes the staged workspace and author-controlled knowledge body", async () => {
@@ -521,24 +580,27 @@ describe("App", () => {
       network: { bodies, assertions: [assertion("reproduction:1", "reproduction", "ReproductionAssertion", 0, 1), assertion("conflict:1", "claim_relation", "ClaimRelationAssertion", 1, 2), assertion("transfer:1", "method_transfer", "MethodRelationAssertion", 0, 3), assertion("citation:1", "citation", "CitationAssertion", 1, 4), assertion("classification:1", "classification", "ClassificationAssignment", 3, 4), assertion("evidence:1", "evidence_relation", "EvidenceRelation", 2, 4)], supportedRelations: ["citation", "claim_relation", "evidence_relation", "method_transfer", "reproduction", "alignment", "version_relation", "classification"] },
       externalTransmission: "not_performed",
     };
-    invokeMock.mockImplementation((command) => Promise.resolve(command === "list_rule_packs" ? { rulePacks: [] } : command === "get_knowledge_body_snapshot" ? knowledgeSnapshot : { workspaces: [workspace], warnings: [] }) as never);
+    const attestation = { attestationId: "attestation-1", workspaceId: workspace.id, manuscriptVersion: 1, manuscriptHash: workspace.contentHash, readinessReportId: "report-1", readinessOutputSnapshotVersion: 1, readinessOutcome: "ready", attestedUnixMs: Date.UTC(2026, 7, 24, 5, 0), statement: "synthetic", recordHash: "a".repeat(64), externalTransmission: "not_performed" };
+    const submission = { submissionId: "submission-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: "SYN-1", submittedUnixMs: Date.UTC(2026, 7, 24, 5, 30), statement: "synthetic", recordHash: "b".repeat(64), externalTransmission: "not_performed" };
+    const knowledgeBody = { recordId: "knowledge-1", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 6, 0), snapshot: knowledgeSnapshot, recordHash: "c".repeat(64), externalTransmission: "not_performed" };
+    invokeMock.mockImplementation((command) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation, submission, knowledgeBody });
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: /navigation-study\.pdf/ }));
     expect(screen.getByRole("navigation", { name: "论文工作阶段" })).toBeVisible();
-    expect(screen.getByRole("tabpanel", { name: "原稿 证据" })).toHaveTextContent("只读");
-
-    await user.click(screen.getByRole("button", { name: "目标" }));
-    expect(screen.getByRole("heading", { name: "选择适用于这篇论文的标准" })).toBeVisible();
+    expect(screen.getByRole("tabpanel", { name: "导入 证据" })).toHaveTextContent("只读");
 
     await user.click(screen.getByRole("button", { name: "知识体" }));
     expect(await screen.findByRole("heading", { name: "知识体与关联网络" })).toBeVisible();
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("ArtifactVersion · v3");
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("Scope · v3");
     expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("KnowledgeBodySnapshot · S7");
-    expect(screen.getByRole("heading", { name: "AIReviewReport" }).parentElement?.parentElement).toHaveTextContent("v2");
-    expect(screen.getByText(/内部保留 2 个审核版本/)).toBeVisible();
+    expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("AIReviewReport · v2");
 
     await user.click(screen.getByRole("tab", { name: "证据" }));
     expect(screen.getByRole("tab", { name: "证据" })).toHaveAttribute("aria-selected", "true");

@@ -17,3 +17,4 @@ Each ADR contains status, context, decision, consequences, and links to supersed
 - [0003 — Deterministic structure extraction](0003-deterministic-structure-extraction.md)
 - [0004 — Signed rule packs and readiness snapshots](0004-signed-rule-packs-and-readiness-snapshots.md)
 - [0005 — Local manuscript version library](0005-local-manuscript-version-library.md)
+- [0006 — Local lifecycle records and seven-step state machine](0006-local-lifecycle-records.md)

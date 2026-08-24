@@ -688,3 +688,37 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
 - A user-scoped local validation reran the existing 107-page PDF without transmission. Structure v4
   retained the title, identified 47 author names, and recovered a 2,268-character unlabelled abstract
   candidate with an explicit confirmation warning. No manuscript content entered the repository.
+
+## 2026-08-24 — End-to-end seven-step manuscript lifecycle
+
+### Delivered
+
+- Replaced the module-oriented eight-screen rail with the author task path: Import, Check, Revise,
+  Version, Attest, Submit, and Knowledge Body.
+- Consolidated structure extraction, rule selection, and itemized readiness findings into one
+  progressive Check stage.
+- Added lifecycle recovery for the current manuscript fingerprint. Reopening a workspace now
+  restores matching structure, readiness, attestation, submission, and finalized knowledge-body
+  records without rerunning work or borrowing artifacts from another version.
+- Made structured revision save, re-extract, and rerun the same rules before continuing to Version.
+  Importing or restoring another version invalidates all current downstream state while preserving
+  historical files and records.
+- Added author-confirmed local attestation records bound to manuscript version/hash and the current
+  readiness report. Each record has its own SHA-256, is read-only, is verified again on recovery,
+  and explicitly does not claim blockchain notarization or scientific truth.
+- Added explicit-folder export of a submission handoff containing the manuscript, JSON findings,
+  HTML preview, attestation, and manifest. Export never overwrites an existing package.
+- Added author-confirmed manual submission records for journal/platform target and optional receipt;
+  ManuscriptDock records but does not impersonate the external submission system.
+- Added immutable knowledge-body finalization after submission, binding the snapshot to the exact
+  attestation and submission record without network publication.
+
+### Verification
+
+- Rust lifecycle coverage completes check, attestation, export, submission, and knowledge-body
+  finalization; recovers all current records; rejects missing confirmations; detects changed record
+  content; and proves a new manuscript head has no inherited downstream state.
+- Frontend coverage now follows the consolidated check flow, verifies revision plus automatic
+  recheck, creates attestation, exports the handoff, records submission, restores a finalized
+  knowledge body, and exercises the three spatial knowledge views.
+- TypeScript, Vite, rustfmt, Rust tests, Clippy, and the Tauri desktop build remain release gates.

@@ -436,6 +436,31 @@ h1, h2, h3, p { margin-top: 0; }
 .error-notice span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
 .error-notice button { height: 30px; padding: 0 10px; color: var(--danger); background: transparent; border: 1px solid #d9c3bf; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 500; }
 
+/* Seven-step lifecycle */
+.check-structure-summary { margin-bottom: 18px; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.check-structure-summary > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.check-structure-summary > header span { color: var(--text-muted); font-size: 11px; }
+.check-structure-summary > header h3 { margin: 3px 0 0; font-size: 15px; font-weight: 500; }
+.check-structure-summary > header > strong { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+.secondary-action-row { display: flex; justify-content: flex-end; margin-top: 12px; }
+.secondary-button { min-height: 36px; padding: 0 12px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 7px; cursor: pointer; font-size: 13px; }
+.secondary-button:hover:not(:disabled) { background: var(--panel-strong); }
+.confirmation-control { min-height: 44px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; margin: 16px 0; padding: 12px; color: var(--text-secondary); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 20px; }
+.confirmation-control input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+.lifecycle-record { margin: 16px 0; padding: 0; border-top: 1px solid var(--border); }
+.lifecycle-record > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.lifecycle-record dt { color: var(--text-muted); font-size: 11px; }
+.lifecycle-record dd { margin: 0; overflow-wrap: anywhere; font-size: 12px; }
+.submission-action-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 16px 0; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.submission-action-card > div > span, .submission-record-form header span { color: var(--text-muted); font-size: 11px; }
+.submission-action-card h3, .submission-record-form h3 { margin: 2px 0 4px; font-size: 14px; font-weight: 500; }
+.submission-action-card p { max-width: 46ch; margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.submission-record-form { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.submission-record-form header { margin-bottom: 14px; }
+.submission-record-form > label:not(.confirmation-control) { display: block; margin: 12px 0 5px; color: var(--text-secondary); font-size: 12px; }
+.submission-record-form > input { width: 100%; min-height: 40px; padding: 8px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 7px; font: inherit; font-size: 13px; }
+.submission-record-form > input:focus { border-color: var(--text-secondary); outline: 2px solid var(--border-strong); outline-offset: 1px; }
+
 @media (max-width: 959px) {
   .product-bar { grid-template-columns: minmax(0, 1fr) auto; }
   .current-manuscript { display: none; }
@@ -498,6 +523,9 @@ h1, h2, h3, p { margin-top: 0; }
   .claim-element { width: 94px; }
   .element-sphere { width: 58px; height: 58px; }
   .claim-element > em { max-width: 92px; font-size: 8px; }
+  .submission-action-card { align-items: stretch; flex-direction: column; }
+  .submission-action-card .secondary-button, .submission-record-form .primary-button { width: 100%; min-height: 44px; }
+  .lifecycle-record > div { grid-template-columns: 1fr; gap: 3px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -25,8 +25,10 @@ pub use structure::{
     AnalysisQuality, SectionSummary, StructureAnalysis, StructureError, StructureReport,
 };
 pub use workspace::{
-    ManuscriptVersionSummary, VersionComparison, VersionCreation, VersionHistory, VersionOrigin,
-    WorkspaceCatalog, WorkspaceCreation, WorkspaceError, WorkspaceStore, WorkspaceSummary,
+    KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, SubmissionExport,
+    SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, VersionOrigin,
+    WorkspaceCatalog, WorkspaceCreation, WorkspaceError, WorkspaceLifecycle, WorkspaceStore,
+    WorkspaceSummary,
 };
 
 use serde::{Deserialize, Serialize};

@@ -68,7 +68,7 @@ pub enum RuleClassification {
     AuthorConfirmation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingStatus {
     Passed,
@@ -77,7 +77,7 @@ pub enum FindingStatus {
     Confirmation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadinessOutcome {
     Ready,
@@ -85,7 +85,7 @@ pub enum ReadinessOutcome {
     Blocked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleFinding {
     pub rule_id: String,
@@ -97,7 +97,7 @@ pub struct RuleFinding {
     pub source_location: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePackReference {
     pub id: String,
@@ -167,13 +167,13 @@ pub struct SubmissionElementCatalog {
     pub rule_packs: Vec<RulePackReference>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalTransmission {
     NotPerformed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadinessReport {
     pub report_version: u32,

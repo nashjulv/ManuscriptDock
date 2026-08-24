@@ -1,15 +1,15 @@
 use crate::{
     inspect_manuscript,
-    knowledge::{local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot},
+    knowledge::{local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot, KnowledgeBodyError},
     readiness::{
         evaluate_readiness, render_readiness_html, ReadinessError, READINESS_REPORT_VERSION,
     },
     revision::{apply_revision, extract_revision_fields},
     structure::{extract_structure, StructureError, STRUCTURE_ANALYSIS_VERSION},
-    ManuscriptSummary, ReadinessReport, RevisionApplication, RevisionChangeInput, RevisionDraft,
-    RevisionError, RevisionSet, StructureReport,
+    ManuscriptSummary, ReadinessOutcome, ReadinessReport, RevisionApplication, RevisionChangeInput,
+    RevisionDraft, RevisionError, RevisionSet, StructureReport,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
@@ -113,6 +113,74 @@ pub struct VersionComparison {
     pub external_transmission: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAttestation {
+    pub attestation_id: String,
+    pub workspace_id: String,
+    pub manuscript_version: u32,
+    pub manuscript_hash: String,
+    pub readiness_report_id: String,
+    pub readiness_output_snapshot_version: u32,
+    pub readiness_outcome: ReadinessOutcome,
+    pub attested_unix_ms: u64,
+    pub statement: String,
+    pub record_hash: String,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionRecord {
+    pub submission_id: String,
+    pub workspace_id: String,
+    pub manuscript_version: u32,
+    pub attestation_id: String,
+    pub target: String,
+    pub receipt: Option<String>,
+    pub submitted_unix_ms: u64,
+    pub statement: String,
+    pub record_hash: String,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionExport {
+    pub package_name: String,
+    pub manuscript_version: u32,
+    pub attestation_id: String,
+    pub files: Vec<String>,
+    pub exported_unix_ms: u64,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBodyRecord {
+    pub record_id: String,
+    pub workspace_id: String,
+    pub manuscript_version: u32,
+    pub attestation_id: String,
+    pub submission_id: String,
+    pub finalized_unix_ms: u64,
+    pub snapshot: AcademicKnowledgeBodySnapshot,
+    pub record_hash: String,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceLifecycle {
+    pub workspace_id: String,
+    pub current_version: u32,
+    pub structure_report: Option<StructureReport>,
+    pub readiness_report: Option<ReadinessReport>,
+    pub attestation: Option<LocalAttestation>,
+    pub submission: Option<SubmissionRecord>,
+    pub knowledge_body: Option<KnowledgeBodyRecord>,
+}
+
 #[derive(Debug)]
 pub enum WorkspaceError {
     Io(io::Error),
@@ -121,10 +189,18 @@ pub enum WorkspaceError {
     Structure(StructureError),
     Readiness(ReadinessError),
     Revision(RevisionError),
+    Knowledge(KnowledgeBodyError),
     SourceChangedDuringImport,
     VersionNotFound(u32),
     VersionFormatMismatch,
     VersionNoteTooLong,
+    MissingCurrentReadiness,
+    AuthorConfirmationRequired,
+    InvalidSubmissionTarget,
+    MissingCurrentAttestation,
+    MissingCurrentSubmission,
+    InvalidExportDestination,
+    ExportDestinationExists,
     TimeBeforeUnixEpoch,
 }
 
@@ -137,6 +213,7 @@ impl fmt::Display for WorkspaceError {
             Self::Structure(error) => write!(formatter, "{error}"),
             Self::Readiness(error) => write!(formatter, "{error}"),
             Self::Revision(error) => write!(formatter, "{error}"),
+            Self::Knowledge(error) => write!(formatter, "{error}"),
             Self::SourceChangedDuringImport => {
                 write!(formatter, "导入期间源稿件发生变化，请重新选择后再试")
             }
@@ -146,6 +223,25 @@ impl fmt::Display for WorkspaceError {
                 "新版本必须与当前稿件保持相同文件类型；格式转换应作为投稿输出保存"
             ),
             Self::VersionNoteTooLong => write!(formatter, "版本说明不能超过 200 个字符"),
+            Self::MissingCurrentReadiness => {
+                write!(formatter, "当前论文版本尚未完成投稿检查，请先重新检查")
+            }
+            Self::AuthorConfirmationRequired => {
+                write!(formatter, "需要作者明确确认后才能创建记录")
+            }
+            Self::InvalidSubmissionTarget => {
+                write!(formatter, "投稿目标不能为空，且不能超过 200 个字符")
+            }
+            Self::MissingCurrentAttestation => {
+                write!(formatter, "当前论文版本尚未完成本地存证")
+            }
+            Self::MissingCurrentSubmission => {
+                write!(formatter, "当前论文版本尚未登记投稿记录")
+            }
+            Self::InvalidExportDestination => write!(formatter, "请选择可写入的导出文件夹"),
+            Self::ExportDestinationExists => {
+                write!(formatter, "目标文件夹中已存在同名投稿包，未覆盖任何文件")
+            }
             Self::TimeBeforeUnixEpoch => write!(formatter, "系统时间无效，无法创建审计记录"),
         }
     }
@@ -158,6 +254,7 @@ impl Error for WorkspaceError {
             Self::Structure(error) => Some(error),
             Self::Readiness(error) => Some(error),
             Self::Revision(error) => Some(error),
+            Self::Knowledge(error) => Some(error),
             _ => None,
         }
     }
@@ -184,6 +281,12 @@ impl From<ReadinessError> for WorkspaceError {
 impl From<RevisionError> for WorkspaceError {
     fn from(error: RevisionError) -> Self {
         Self::Revision(error)
+    }
+}
+
+impl From<KnowledgeBodyError> for WorkspaceError {
+    fn from(error: KnowledgeBodyError) -> Self {
+        Self::Knowledge(error)
     }
 }
 
@@ -227,6 +330,63 @@ struct AuditEvent<'a> {
     occurred_unix_ms: u64,
     workspace_id: &'a str,
     snapshot_version: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttestationPayload<'a> {
+    attestation_id: &'a str,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    manuscript_hash: &'a str,
+    readiness_report_id: &'a str,
+    readiness_output_snapshot_version: u32,
+    readiness_outcome: ReadinessOutcome,
+    attested_unix_ms: u64,
+    statement: &'a str,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionPayload<'a> {
+    submission_id: &'a str,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    attestation_id: &'a str,
+    target: &'a str,
+    receipt: &'a Option<String>,
+    submitted_unix_ms: u64,
+    statement: &'a str,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnowledgeBodyPayload<'a> {
+    record_id: &'a str,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    attestation_id: &'a str,
+    submission_id: &'a str,
+    finalized_unix_ms: u64,
+    snapshot: &'a AcademicKnowledgeBodySnapshot,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionPackageManifest<'a> {
+    schema_version: u32,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    manuscript_hash: &'a str,
+    readiness_report_id: &'a str,
+    attestation_id: &'a str,
+    attestation_hash: &'a str,
+    created_unix_ms: u64,
+    files: &'a [String],
+    external_transmission: &'a str,
 }
 
 impl WorkspaceStore {
@@ -639,6 +799,331 @@ impl WorkspaceStore {
         result
     }
 
+    pub fn lifecycle(&self, workspace_id: &str) -> Result<WorkspaceLifecycle, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let structure_report = read_current_structure_report(&workspace_root, &manifest.workspace)?;
+        let readiness_report = read_current_readiness_report(&workspace_root, &manifest.workspace)?;
+        let attestation = match &readiness_report {
+            Some(report) => read_current_attestation(&workspace_root, &manifest.workspace, report)?,
+            None => None,
+        };
+        let submission = match &attestation {
+            Some(attestation) => {
+                read_current_submission(&workspace_root, &manifest.workspace, attestation)?
+            }
+            None => None,
+        };
+        let knowledge_body = match &submission {
+            Some(submission) => {
+                read_current_knowledge_body(&workspace_root, &manifest.workspace, submission)?
+            }
+            None => None,
+        };
+        Ok(WorkspaceLifecycle {
+            workspace_id: workspace_id.to_owned(),
+            current_version: manifest.workspace.snapshot_version,
+            structure_report,
+            readiness_report,
+            attestation,
+            submission,
+            knowledge_body,
+        })
+    }
+
+    pub fn create_local_attestation(
+        &self,
+        workspace_id: &str,
+        author_confirmed: bool,
+    ) -> Result<LocalAttestation, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let report = lifecycle
+            .readiness_report
+            .ok_or(WorkspaceError::MissingCurrentReadiness)?;
+        if let Some(existing) = lifecycle.attestation {
+            return Ok(existing);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let attestation_id = Uuid::new_v4().to_string();
+        let attested_unix_ms = unix_time_ms()?;
+        let statement = "作者确认当前稿件版本、检查报告及待确认事项构成本次本地存证边界；该记录不证明研究结论为真。".to_owned();
+        let external_transmission = "not_performed".to_owned();
+        let payload = AttestationPayload {
+            attestation_id: &attestation_id,
+            workspace_id,
+            manuscript_version: manifest.workspace.snapshot_version,
+            manuscript_hash: &manifest.workspace.content_hash,
+            readiness_report_id: &report.report_id,
+            readiness_output_snapshot_version: report.output_snapshot_version,
+            readiness_outcome: report.outcome,
+            attested_unix_ms,
+            statement: &statement,
+            external_transmission: &external_transmission,
+        };
+        let record_hash = hash_serializable(&payload)?;
+        let record = LocalAttestation {
+            attestation_id: attestation_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            manuscript_version: manifest.workspace.snapshot_version,
+            manuscript_hash: manifest.workspace.content_hash.clone(),
+            readiness_report_id: report.report_id,
+            readiness_output_snapshot_version: report.output_snapshot_version,
+            readiness_outcome: report.outcome,
+            attested_unix_ms,
+            statement,
+            record_hash,
+            external_transmission,
+        };
+        write_immutable_record(
+            &workspace_root.join("attestations"),
+            &attestation_id,
+            "attestation.json",
+            &record,
+        )?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "local_attestation_created",
+            &manifest.workspace,
+            attested_unix_ms,
+        )?;
+        Ok(record)
+    }
+
+    pub fn export_submission_package(
+        &self,
+        workspace_id: &str,
+        destination: &Path,
+    ) -> Result<SubmissionExport, WorkspaceError> {
+        if !destination.is_dir() {
+            return Err(WorkspaceError::InvalidExportDestination);
+        }
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let report = lifecycle
+            .readiness_report
+            .ok_or(WorkspaceError::MissingCurrentReadiness)?;
+        let attestation = lifecycle
+            .attestation
+            .ok_or(WorkspaceError::MissingCurrentAttestation)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let package_name = format!(
+            "ManuscriptDock-{}-v{}",
+            &workspace_id[..8],
+            manifest.workspace.snapshot_version
+        );
+        let final_root = destination.join(&package_name);
+        if final_root.exists() {
+            return Err(WorkspaceError::ExportDestinationExists);
+        }
+        let temporary_root = destination.join(format!(".manuscriptdock-{}.tmp", Uuid::new_v4()));
+        fs::create_dir(&temporary_root)?;
+        let exported_unix_ms = unix_time_ms()?;
+        let files = vec![
+            format!("manuscript.{}", manifest.workspace.manuscript.extension),
+            "readiness-report.json".to_owned(),
+            "readiness-preview.html".to_owned(),
+            "local-attestation.json".to_owned(),
+            "submission-manifest.json".to_owned(),
+        ];
+        let result = (|| {
+            let snapshot = self.source_snapshot_path(workspace_id)?;
+            verify_snapshot(&snapshot, &manifest.workspace)?;
+            fs::copy(&snapshot, temporary_root.join(&files[0]))?;
+            let report_root = readiness_output_root(&workspace_root, &report.report_id);
+            fs::copy(
+                report_root.join(format!("readiness-v{}.json", report.report_version)),
+                temporary_root.join(&files[1]),
+            )?;
+            fs::copy(
+                report_root.join("preview.html"),
+                temporary_root.join(&files[2]),
+            )?;
+            fs::copy(
+                workspace_root
+                    .join("attestations")
+                    .join(&attestation.attestation_id)
+                    .join("attestation.json"),
+                temporary_root.join(&files[3]),
+            )?;
+            let package_manifest = SubmissionPackageManifest {
+                schema_version: 1,
+                workspace_id,
+                manuscript_version: manifest.workspace.snapshot_version,
+                manuscript_hash: &manifest.workspace.content_hash,
+                readiness_report_id: &report.report_id,
+                attestation_id: &attestation.attestation_id,
+                attestation_hash: &attestation.record_hash,
+                created_unix_ms: exported_unix_ms,
+                files: &files[..4],
+                external_transmission: "not_performed",
+            };
+            write_json(&temporary_root.join(&files[4]), &package_manifest)?;
+            fs::rename(&temporary_root, &final_root)?;
+            append_audit_event(
+                &workspace_root.join("audit.jsonl"),
+                "submission_package_exported",
+                &manifest.workspace,
+                exported_unix_ms,
+            )?;
+            Ok(SubmissionExport {
+                package_name,
+                manuscript_version: manifest.workspace.snapshot_version,
+                attestation_id: attestation.attestation_id,
+                files,
+                exported_unix_ms,
+                external_transmission: "not_performed".to_owned(),
+            })
+        })();
+        if temporary_root.exists() {
+            let _ = remove_generated_directory(&temporary_root);
+        }
+        result
+    }
+
+    pub fn record_manual_submission(
+        &self,
+        workspace_id: &str,
+        target: &str,
+        receipt: Option<&str>,
+        author_confirmed: bool,
+    ) -> Result<SubmissionRecord, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        let target = target.trim();
+        if target.is_empty() || target.chars().count() > 200 {
+            return Err(WorkspaceError::InvalidSubmissionTarget);
+        }
+        let receipt = receipt
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        if receipt
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 200)
+        {
+            return Err(WorkspaceError::InvalidSubmissionTarget);
+        }
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let attestation = lifecycle
+            .attestation
+            .ok_or(WorkspaceError::MissingCurrentAttestation)?;
+        if let Some(existing) = lifecycle.submission {
+            return Ok(existing);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let submission_id = Uuid::new_v4().to_string();
+        let submitted_unix_ms = unix_time_ms()?;
+        let statement =
+            "作者确认已在外部投稿系统完成提交；ManuscriptDock 仅保存本地登记，不执行网络投稿。"
+                .to_owned();
+        let external_transmission = "not_performed".to_owned();
+        let payload = SubmissionPayload {
+            submission_id: &submission_id,
+            workspace_id,
+            manuscript_version: manifest.workspace.snapshot_version,
+            attestation_id: &attestation.attestation_id,
+            target,
+            receipt: &receipt,
+            submitted_unix_ms,
+            statement: &statement,
+            external_transmission: &external_transmission,
+        };
+        let record_hash = hash_serializable(&payload)?;
+        let record = SubmissionRecord {
+            submission_id: submission_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            manuscript_version: manifest.workspace.snapshot_version,
+            attestation_id: attestation.attestation_id,
+            target: target.to_owned(),
+            receipt,
+            submitted_unix_ms,
+            statement,
+            record_hash,
+            external_transmission,
+        };
+        write_immutable_record(
+            &workspace_root.join("submissions"),
+            &submission_id,
+            "submission.json",
+            &record,
+        )?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "manual_submission_recorded",
+            &manifest.workspace,
+            submitted_unix_ms,
+        )?;
+        Ok(record)
+    }
+
+    pub fn finalize_knowledge_body(
+        &self,
+        workspace_id: &str,
+    ) -> Result<KnowledgeBodyRecord, WorkspaceError> {
+        let lifecycle = self.lifecycle(workspace_id)?;
+        let attestation = lifecycle
+            .attestation
+            .ok_or(WorkspaceError::MissingCurrentAttestation)?;
+        let submission = lifecycle
+            .submission
+            .ok_or(WorkspaceError::MissingCurrentSubmission)?;
+        if let Some(existing) = lifecycle.knowledge_body {
+            return Ok(existing);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let snapshot = local_knowledge_body_snapshot(&manifest.workspace);
+        snapshot.validate()?;
+        let record_id = Uuid::new_v4().to_string();
+        let finalized_unix_ms = unix_time_ms()?;
+        let external_transmission = "not_performed".to_owned();
+        let payload = KnowledgeBodyPayload {
+            record_id: &record_id,
+            workspace_id,
+            manuscript_version: manifest.workspace.snapshot_version,
+            attestation_id: &attestation.attestation_id,
+            submission_id: &submission.submission_id,
+            finalized_unix_ms,
+            snapshot: &snapshot,
+            external_transmission: &external_transmission,
+        };
+        let record_hash = hash_serializable(&payload)?;
+        let record = KnowledgeBodyRecord {
+            record_id: record_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            manuscript_version: manifest.workspace.snapshot_version,
+            attestation_id: attestation.attestation_id,
+            submission_id: submission.submission_id,
+            finalized_unix_ms,
+            snapshot,
+            record_hash,
+            external_transmission,
+        };
+        write_immutable_record(
+            &workspace_root.join("knowledge"),
+            &record_id,
+            "knowledge-body.json",
+            &record,
+        )?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "knowledge_body_finalized",
+            &manifest.workspace,
+            finalized_unix_ms,
+        )?;
+        Ok(record)
+    }
+
     pub fn revision_draft(&self, workspace_id: &str) -> Result<RevisionDraft, WorkspaceError> {
         let history = self.version_history(workspace_id)?;
         let current = history
@@ -840,6 +1325,235 @@ impl WorkspaceStore {
     }
 }
 
+fn read_current_structure_report(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+) -> Result<Option<StructureReport>, WorkspaceError> {
+    let hash_prefix = workspace
+        .content_hash
+        .get(..12)
+        .ok_or_else(|| WorkspaceError::InvalidManifest("内容指纹长度无效".to_owned()))?;
+    let path = workspace_root.join("analysis").join(format!(
+        "structure-v{STRUCTURE_ANALYSIS_VERSION}-{hash_prefix}.json"
+    ));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let report: StructureReport = read_json(&path)?;
+    if report.workspace_id != workspace.id
+        || report.source_content_hash != workspace.content_hash
+        || report.source_snapshot_version != workspace.snapshot_version
+    {
+        return Ok(None);
+    }
+    Ok(Some(report))
+}
+
+fn read_current_readiness_report(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+) -> Result<Option<ReadinessReport>, WorkspaceError> {
+    let mut reports = read_nested_records::<ReadinessReport>(
+        &workspace_root.join("outputs"),
+        &format!("readiness-v{READINESS_REPORT_VERSION}.json"),
+    )?;
+    reports.retain(|report| {
+        report.workspace_id == workspace.id
+            && report.source_content_hash == workspace.content_hash
+            && report.source_snapshot_version == workspace.snapshot_version
+    });
+    reports.sort_by_key(|report| report.generated_unix_ms);
+    Ok(reports.pop())
+}
+
+fn read_current_attestation(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+    report: &ReadinessReport,
+) -> Result<Option<LocalAttestation>, WorkspaceError> {
+    let mut records = read_nested_records::<LocalAttestation>(
+        &workspace_root.join("attestations"),
+        "attestation.json",
+    )?;
+    for record in &records {
+        verify_attestation_record(record)?;
+    }
+    records.retain(|record| {
+        record.workspace_id == workspace.id
+            && record.manuscript_version == workspace.snapshot_version
+            && record.manuscript_hash == workspace.content_hash
+            && record.readiness_report_id == report.report_id
+    });
+    records.sort_by_key(|record| record.attested_unix_ms);
+    Ok(records.pop())
+}
+
+fn read_current_submission(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+    attestation: &LocalAttestation,
+) -> Result<Option<SubmissionRecord>, WorkspaceError> {
+    let mut records = read_nested_records::<SubmissionRecord>(
+        &workspace_root.join("submissions"),
+        "submission.json",
+    )?;
+    for record in &records {
+        verify_submission_record(record)?;
+    }
+    records.retain(|record| {
+        record.workspace_id == workspace.id
+            && record.manuscript_version == workspace.snapshot_version
+            && record.attestation_id == attestation.attestation_id
+    });
+    records.sort_by_key(|record| record.submitted_unix_ms);
+    Ok(records.pop())
+}
+
+fn read_current_knowledge_body(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+    submission: &SubmissionRecord,
+) -> Result<Option<KnowledgeBodyRecord>, WorkspaceError> {
+    let mut records = read_nested_records::<KnowledgeBodyRecord>(
+        &workspace_root.join("knowledge"),
+        "knowledge-body.json",
+    )?;
+    for record in &records {
+        verify_knowledge_body_record(record)?;
+    }
+    records.retain(|record| {
+        record.workspace_id == workspace.id
+            && record.manuscript_version == workspace.snapshot_version
+            && record.submission_id == submission.submission_id
+    });
+    records.sort_by_key(|record| record.finalized_unix_ms);
+    let record = records.pop();
+    if let Some(record) = &record {
+        record.snapshot.validate()?;
+    }
+    Ok(record)
+}
+
+fn read_nested_records<T: DeserializeOwned>(
+    root: &Path,
+    file_name: &str,
+) -> Result<Vec<T>, WorkspaceError> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() || entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let path = entry.path().join(file_name);
+        if path.is_file() {
+            records.push(read_json(&path)?);
+        }
+    }
+    Ok(records)
+}
+
+fn readiness_output_root(workspace_root: &Path, report_id: &str) -> PathBuf {
+    workspace_root.join("outputs").join(report_id)
+}
+
+fn write_immutable_record(
+    collection_root: &Path,
+    record_id: &str,
+    file_name: &str,
+    value: &impl Serialize,
+) -> Result<(), WorkspaceError> {
+    fs::create_dir_all(collection_root)?;
+    let temporary_root = collection_root.join(format!(".{record_id}.tmp"));
+    let final_root = collection_root.join(record_id);
+    if final_root.exists() {
+        return Err(WorkspaceError::InvalidManifest(
+            "不可变记录标识已存在，未覆盖任何文件".to_owned(),
+        ));
+    }
+    fs::create_dir(&temporary_root)?;
+    let result = (|| {
+        let path = temporary_root.join(file_name);
+        write_json(&path, value)?;
+        set_readonly(&path)?;
+        fs::rename(&temporary_root, &final_root)?;
+        Ok(())
+    })();
+    if temporary_root.exists() {
+        let _ = remove_generated_directory(&temporary_root);
+    }
+    result
+}
+
+fn hash_serializable(value: &impl Serialize) -> Result<String, WorkspaceError> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| WorkspaceError::InvalidManifest(error.to_string()))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+fn verify_attestation_record(record: &LocalAttestation) -> Result<(), WorkspaceError> {
+    let payload = AttestationPayload {
+        attestation_id: &record.attestation_id,
+        workspace_id: &record.workspace_id,
+        manuscript_version: record.manuscript_version,
+        manuscript_hash: &record.manuscript_hash,
+        readiness_report_id: &record.readiness_report_id,
+        readiness_output_snapshot_version: record.readiness_output_snapshot_version,
+        readiness_outcome: record.readiness_outcome,
+        attested_unix_ms: record.attested_unix_ms,
+        statement: &record.statement,
+        external_transmission: &record.external_transmission,
+    };
+    if hash_serializable(&payload)? != record.record_hash {
+        return Err(WorkspaceError::InvalidManifest(
+            "本地存证记录完整性验证失败".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_submission_record(record: &SubmissionRecord) -> Result<(), WorkspaceError> {
+    let payload = SubmissionPayload {
+        submission_id: &record.submission_id,
+        workspace_id: &record.workspace_id,
+        manuscript_version: record.manuscript_version,
+        attestation_id: &record.attestation_id,
+        target: &record.target,
+        receipt: &record.receipt,
+        submitted_unix_ms: record.submitted_unix_ms,
+        statement: &record.statement,
+        external_transmission: &record.external_transmission,
+    };
+    if hash_serializable(&payload)? != record.record_hash {
+        return Err(WorkspaceError::InvalidManifest(
+            "投稿登记记录完整性验证失败".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn verify_knowledge_body_record(record: &KnowledgeBodyRecord) -> Result<(), WorkspaceError> {
+    record.snapshot.validate()?;
+    let payload = KnowledgeBodyPayload {
+        record_id: &record.record_id,
+        workspace_id: &record.workspace_id,
+        manuscript_version: record.manuscript_version,
+        attestation_id: &record.attestation_id,
+        submission_id: &record.submission_id,
+        finalized_unix_ms: record.finalized_unix_ms,
+        snapshot: &record.snapshot,
+        external_transmission: &record.external_transmission,
+    };
+    if hash_serializable(&payload)? != record.record_hash {
+        return Err(WorkspaceError::InvalidManifest(
+            "知识体快照记录完整性验证失败".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn copy_and_hash(source_path: &Path, destination: &Path) -> Result<(String, u64), WorkspaceError> {
     let mut source = BufReader::new(File::open(source_path)?);
     let mut destination = BufWriter::new(
@@ -934,6 +1648,12 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), WorkspaceError>
     writer.flush()?;
     writer.get_ref().sync_all()?;
     Ok(())
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, WorkspaceError> {
+    let reader = BufReader::new(File::open(path)?);
+    serde_json::from_reader(reader)
+        .map_err(|error| WorkspaceError::InvalidManifest(error.to_string()))
 }
 
 fn replace_json(path: &Path, value: &impl Serialize) -> Result<(), WorkspaceError> {
@@ -1143,7 +1863,9 @@ fn make_file_owner_writable(permissions: &mut fs::Permissions) {
 
 #[cfg(test)]
 mod tests {
-    use super::{make_tree_writable, VersionCreation, VersionOrigin, WorkspaceStore};
+    use super::{
+        make_tree_writable, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
+    };
     use crate::{ReadinessOutcome, RevisionApplication, RevisionChangeInput, RevisionFieldKind};
     use std::{
         fs::{self, File},
@@ -1610,5 +2332,99 @@ Synthetic method.",
         assert!(html.contains("未发生外部传输"));
         assert!(!json.contains(&temporary.path().display().to_string()));
         assert!(audit.contains("readiness_evaluated"));
+    }
+
+    #[test]
+    fn completes_and_recovers_the_local_submission_lifecycle() {
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("lifecycle.tex");
+        fs::write(
+            &source_path,
+            r"\title{Lifecycle Study}
+\author{Synthetic Author}
+\begin{abstract}Traceable evidence.\end{abstract}
+\keywords{workflow}
+\section{Introduction}
+\section{Methods}
+\section{Conflict of Interest}
+\section{Data Availability}
+\bibliography{synthetic}",
+        )
+        .unwrap();
+        let store_root = temporary.path().join("store");
+        let store = WorkspaceStore::new(&store_root);
+        let workspace = store.create_from_source(&source_path).unwrap();
+
+        store.analyze_structure(&workspace.id).unwrap();
+        let report = store.evaluate_readiness(&workspace.id, &[]).unwrap();
+        let checked = store.lifecycle(&workspace.id).unwrap();
+        assert_eq!(
+            checked
+                .readiness_report
+                .as_ref()
+                .map(|item| &item.report_id),
+            Some(&report.report_id)
+        );
+        assert!(matches!(
+            store.create_local_attestation(&workspace.id, false),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+
+        let attestation = store.create_local_attestation(&workspace.id, true).unwrap();
+        let export_root = temporary.path().join("exports");
+        fs::create_dir(&export_root).unwrap();
+        let export = store
+            .export_submission_package(&workspace.id, &export_root)
+            .unwrap();
+        let package_root = export_root.join(&export.package_name);
+        assert!(package_root.join("manuscript.tex").is_file());
+        assert!(package_root.join("readiness-report.json").is_file());
+        assert!(package_root.join("readiness-preview.html").is_file());
+        assert!(package_root.join("local-attestation.json").is_file());
+        assert!(package_root.join("submission-manifest.json").is_file());
+
+        let submission = store
+            .record_manual_submission(
+                &workspace.id,
+                "Synthetic Journal",
+                Some("SYN-2026-001"),
+                true,
+            )
+            .unwrap();
+        let knowledge = store.finalize_knowledge_body(&workspace.id).unwrap();
+        assert_eq!(knowledge.attestation_id, attestation.attestation_id);
+        assert_eq!(knowledge.submission_id, submission.submission_id);
+        assert_eq!(knowledge.snapshot.manuscript.version, 1);
+
+        let recovered = store.lifecycle(&workspace.id).unwrap();
+        assert_eq!(recovered.attestation, Some(attestation));
+        assert_eq!(recovered.submission, Some(submission));
+        assert_eq!(recovered.knowledge_body, Some(knowledge.clone()));
+        let mut tampered_knowledge = knowledge;
+        tampered_knowledge.submission_id = "tampered".to_owned();
+        assert!(super::verify_knowledge_body_record(&tampered_knowledge)
+            .unwrap_err()
+            .to_string()
+            .contains("完整性验证失败"));
+
+        fs::write(
+            &source_path,
+            r"\title{Lifecycle Study Revised}
+\begin{abstract}New evidence.\end{abstract}
+\keywords{workflow}
+\section{Introduction}
+\section{Methods}",
+        )
+        .unwrap();
+        store
+            .create_version_from_source(&workspace.id, &source_path, "new head")
+            .unwrap();
+        let new_head = store.lifecycle(&workspace.id).unwrap();
+        assert_eq!(new_head.current_version, 2);
+        assert!(new_head.structure_report.is_none());
+        assert!(new_head.readiness_report.is_none());
+        assert!(new_head.attestation.is_none());
+        assert!(new_head.submission.is_none());
+        assert!(new_head.knowledge_body.is_none());
     }
 }
