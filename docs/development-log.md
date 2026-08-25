@@ -832,3 +832,13 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
   synthetic knowledge-body question.
 - Rust coverage rejects documentation URLs and verifies the new-or-existing credential rule without
   touching a real credential store. All 14 frontend workflow tests and 48 Rust tests pass.
+
+## 2026-08-25 — Actionable model-provider failure messages
+
+- Confirmed against the provider's official error-code reference that the observed DeepSeek HTTP
+  402 response means insufficient account balance rather than a ManuscriptDock connection failure.
+- Replaced bare 400/401/402/403/404/422/429/5xx statuses with concise recovery guidance while
+  retaining the numeric status for support. Failover behavior is unchanged.
+- Added bilingual display for the most common billing, authorization, and rate-limit summaries.
+- Rust regression coverage now verifies billing, authentication, rate-limit, and unknown-status
+  messages. All 49 Rust tests pass.

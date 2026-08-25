@@ -61,7 +61,7 @@
 
 - 前端：14 个工作流测试通过，包括逐篇归档、恢复、永久删除确认、模型三槽设置、知识体
   问答和外部入口边界；TypeScript 类型检查和 Vite 生产构建通过。
-- Rust：48 个核心与桌面模型服务测试通过；rustfmt 和 Clippy `-D warnings` 通过。
+- Rust：49 个核心与桌面模型服务测试通过；rustfmt 和 Clippy `-D warnings` 通过。
 - 桌面：`tauri build --debug --no-bundle` 通过，生成本机调试可执行文件。
 - Windows：`cargo xwin check --workspace --target x86_64-pc-windows-msvc` 通过，覆盖 Windows
   Credential Manager、模型 HTTPS 客户端与完整桌面依赖图。

@@ -261,10 +261,9 @@ pub async fn ask_with_failover(
                     }
                 }
             }
-            Ok(response) => failures.push(format!(
-                "{} 返回 HTTP {}",
-                configured.role.as_str(),
-                response.status().as_u16()
+            Ok(response) => failures.push(http_failure_message(
+                configured.role,
+                response.status().as_u16(),
             )),
             Err(error) if error.is_timeout() => {
                 failures.push(format!("{} 连接超时", configured.role.as_str()))
@@ -276,6 +275,20 @@ pub async fn ask_with_failover(
         "主模型和备选模型均未完成回答：{}",
         failures.join("；")
     ))
+}
+
+fn http_failure_message(role: ModelSlotRole, status: u16) -> String {
+    let reason = match status {
+        400 => "请求格式未被模型服务接受，请检查模型兼容性",
+        401 | 403 => "API Key 无效或无权调用该模型，请检查提供方权限",
+        402 => "账户余额不足或计费未开通，请检查模型提供方账户余额",
+        404 => "未找到对话接口，请检查 API 地址",
+        422 => "请求参数未被模型服务接受，请检查模型名称和接口兼容性",
+        429 => "请求频率或账户限额已达到上限，请稍后重试或使用备选模型",
+        500..=599 => "模型服务暂时故障或繁忙，请稍后重试或使用备选模型",
+        _ => return format!("{} 返回 HTTP {status}", role.as_str()),
+    };
+    format!("{} {reason}（HTTP {status}）", role.as_str())
 }
 
 fn configured_models(root: &Path) -> Result<Vec<ConfiguredModel>, String> {
@@ -552,5 +565,19 @@ mod tests {
         let mut clearing = enabled;
         clearing[0].clear_api_key = true;
         assert!(validate_credential_requirements(&clearing, |_| Ok(true)).is_err());
+    }
+
+    #[test]
+    fn explains_provider_http_failures_with_recovery_actions() {
+        assert_eq!(
+            http_failure_message(ModelSlotRole::Primary, 402),
+            "primary 账户余额不足或计费未开通，请检查模型提供方账户余额（HTTP 402）"
+        );
+        assert!(http_failure_message(ModelSlotRole::Fallback1, 401).contains("API Key 无效"));
+        assert!(http_failure_message(ModelSlotRole::Fallback2, 429).contains("使用备选模型"));
+        assert_eq!(
+            http_failure_message(ModelSlotRole::Primary, 418),
+            "primary 返回 HTTP 418"
+        );
     }
 }
