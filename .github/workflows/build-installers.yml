@@ -7,7 +7,7 @@ on:
       - "desktop-v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -25,12 +25,14 @@ jobs:
             artifact-path: |
               target/universal-apple-darwin/release/bundle/dmg/*.dmg
               target/universal-apple-darwin/release/bundle/macos/*.app
+            release-files: target/universal-apple-darwin/release/bundle/dmg/*.dmg
           - name: Windows x64
             platform: windows-latest
             rust-targets: x86_64-pc-windows-msvc
             build-command: npm run bundle:windows
             artifact-name: ManuscriptDock-Windows-x64
             artifact-path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            release-files: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
 
     steps:
       - uses: actions/checkout@v7
@@ -61,3 +63,8 @@ jobs:
           path: ${{ matrix.artifact-path }}
           if-no-files-found: error
 
+      - name: Attach installer to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.release-files }}
