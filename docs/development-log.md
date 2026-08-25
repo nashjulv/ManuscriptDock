@@ -808,3 +808,27 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
   confirmation, deletes only the exact active or archived synthetic workspace, and proves an
   injected symbolic link cannot change or remove its external target. All 47 Rust core and desktop
   tests pass.
+
+## 2026-08-25 — Actionable model enablement and DeepSeek preset
+
+### Delivered
+
+- Diagnosed the local unavailable state without reading or exposing a credential: the saved
+  DeepSeek slot used the documentation website as its base URL and no Key was available to the app.
+- Separated an author's Enabled preference from the actual Ready state. Every slot now reports a
+  concrete missing field, wrong endpoint, missing Key, unsaved readiness, or enabled state.
+- Made the no-model composer action open Model Settings directly and explain the exact recovery
+  path instead of presenting a disabled “Configure first” button.
+- Added a one-click DeepSeek preset using the current official OpenAI-compatible base URL and model,
+  while keeping API Key entry author-controlled. Both UI and Rust reject the DeepSeek documentation
+  host as an API endpoint.
+- Required every enabled slot to have either a newly entered or already stored Key before settings
+  can be saved. Clearing a Key and enabling the same slot is rejected.
+
+### Verification
+
+- Frontend coverage opens settings from the unavailable composer, applies the DeepSeek preset,
+  remains blocked until a Key is entered, saves the complete wire payload, and completes a
+  synthetic knowledge-body question.
+- Rust coverage rejects documentation URLs and verifies the new-or-existing credential rule without
+  touching a real credential store. All 14 frontend workflow tests and 48 Rust tests pass.

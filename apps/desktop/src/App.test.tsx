@@ -754,20 +754,22 @@ describe("App", () => {
     expect(document.querySelectorAll(".network-body")).toHaveLength(5);
     expect(document.querySelectorAll(".network-assertion")).toHaveLength(6);
 
-    await user.click(screen.getByRole("button", { name: /模型设置/ }));
+    expect(screen.getByRole("button", { name: "打开模型设置" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "打开模型设置" }));
     expect(screen.getByText("1 个主模型，2 个备选模型")).toBeVisible();
     expect(screen.getByText("主模型")).toBeVisible();
     expect(screen.getByText("备选模型 1")).toBeVisible();
     expect(screen.getByText("备选模型 2")).toBeVisible();
     const primarySlot = screen.getByRole("group", { name: "主模型" });
-    await user.click(within(primarySlot).getByRole("checkbox", { name: "启用此槽位" }));
-    await user.type(within(primarySlot).getByLabelText("提供方名称"), "Synthetic AI");
-    await user.type(within(primarySlot).getByLabelText("API 地址"), "https://api.synthetic.example/v1");
-    await user.type(within(primarySlot).getByLabelText("模型名称"), "synthetic-reasoner");
+    await user.click(within(primarySlot).getByRole("button", { name: "使用 DeepSeek 官方配置" }));
+    expect(within(primarySlot).getByLabelText("提供方名称")).toHaveValue("DeepSeek");
+    expect(within(primarySlot).getByLabelText("API 地址")).toHaveValue("https://api.deepseek.com");
+    expect(within(primarySlot).getByLabelText("模型名称")).toHaveValue("deepseek-v4-flash");
+    expect(screen.getByRole("button", { name: "请先补全启用项" })).toBeDisabled();
     await user.type(within(primarySlot).getByLabelText("API Key"), "synthetic-secret");
     await user.click(screen.getByRole("button", { name: "保存模型设置" }));
     expect(await screen.findByText(/API Key 仅保存在系统凭据库/)).toBeVisible();
-    expect(invokeMock).toHaveBeenCalledWith("save_model_settings", { slots: expect.arrayContaining([expect.objectContaining({ role: "primary", enabled: true, apiKey: "synthetic-secret" })]) });
+    expect(invokeMock).toHaveBeenCalledWith("save_model_settings", { slots: expect.arrayContaining([expect.objectContaining({ role: "primary", enabled: true, providerLabel: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", apiKey: "synthetic-secret" })]) });
 
     await user.selectOptions(screen.getByLabelText("提问类型"), "challenge");
     await user.selectOptions(screen.getByLabelText("针对对象"), "claim");

@@ -161,6 +161,7 @@ pub fn save_settings(
     inputs: Vec<ModelSlotInput>,
 ) -> Result<ModelSettingsSummary, String> {
     validate_inputs(&inputs)?;
+    validate_credential_requirements(&inputs, key_exists)?;
     fs::create_dir_all(root).map_err(|error| format!("无法创建模型设置目录：{error}"))?;
     for input in &inputs {
         let entry = credential_entry(input.role)?;
@@ -347,6 +348,26 @@ fn validate_inputs(inputs: &[ModelSlotInput]) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_credential_requirements(
+    inputs: &[ModelSlotInput],
+    mut stored_key_exists: impl FnMut(ModelSlotRole) -> Result<bool, String>,
+) -> Result<(), String> {
+    for input in inputs.iter().filter(|input| input.enabled) {
+        let has_new_key = input
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|key| !key.is_empty());
+        if input.clear_api_key || (!has_new_key && !stored_key_exists(input.role)?) {
+            return Err(format!(
+                "{} 已启用，但尚未提供 API Key；请输入 Key 后再保存",
+                input.role.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn chat_endpoint(base_url: &str) -> Result<Url, String> {
     let parsed = Url::parse(base_url).map_err(|_| "模型 API 地址无效".to_owned())?;
     if !parsed.username().is_empty()
@@ -357,6 +378,11 @@ fn chat_endpoint(base_url: &str) -> Result<Url, String> {
         return Err("模型 API 地址不能包含账号、密码、查询参数或片段".to_owned());
     }
     let host = parsed.host_str().unwrap_or_default();
+    if host.eq_ignore_ascii_case("api-docs.deepseek.com") {
+        return Err(
+            "当前填写的是 DeepSeek 文档地址；API 地址应为 https://api.deepseek.com".to_owned(),
+        );
+    }
     let is_local = matches!(host, "localhost" | "127.0.0.1" | "::1");
     if parsed.scheme() != "https" && !(parsed.scheme() == "http" && is_local) {
         return Err("远程模型 API 必须使用 HTTPS；只有本机 localhost 可以使用 HTTP".to_owned());
@@ -502,5 +528,29 @@ mod tests {
                 .as_str(),
             "https://models.example/v1/chat/completions"
         );
+        assert!(chat_endpoint("https://api-docs.deepseek.com/zh-cn")
+            .unwrap_err()
+            .contains("文档地址"));
+    }
+
+    #[test]
+    fn enabled_slots_require_a_new_or_existing_api_key() {
+        let enabled = vec![
+            input(ModelSlotRole::Primary, true, "https://models.example/v1"),
+            input(ModelSlotRole::Fallback1, false, ""),
+            input(ModelSlotRole::Fallback2, false, ""),
+        ];
+        assert!(validate_credential_requirements(&enabled, |_| Ok(false))
+            .unwrap_err()
+            .contains("尚未提供 API Key"));
+
+        let mut with_new_key = enabled.clone();
+        with_new_key[0].api_key = Some("synthetic-secret".to_owned());
+        validate_credential_requirements(&with_new_key, |_| Ok(false)).unwrap();
+        validate_credential_requirements(&enabled, |_| Ok(true)).unwrap();
+
+        let mut clearing = enabled;
+        clearing[0].clear_api_key = true;
+        assert!(validate_credential_requirements(&clearing, |_| Ok(true)).is_err());
     }
 }

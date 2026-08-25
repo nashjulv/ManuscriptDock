@@ -1468,6 +1468,7 @@ function KnowledgeSpatialMap({ workspace, structureReport, readinessReport, know
 }
 
 const MODEL_SLOT_ROLES: ModelSlotRole[] = ["primary", "fallback_1", "fallback_2"];
+const DEEPSEEK_PRESET = { providerLabel: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" } as const;
 const INQUIRY_TARGETS: KnowledgeInquiryTarget[] = ["knowledge_body", "claim", "scope", "method", "result", "evidence_relation", "source_anchor", "ai_review_report", "provenance"];
 
 function emptyModelSlot(role: ModelSlotRole): ModelSlotDraft {
@@ -1491,6 +1492,14 @@ function inquiryTargetLabel(target: KnowledgeInquiryTarget, locale: Locale) {
     knowledge_body: ["知识体整体", "Knowledge body"], claim: ["Claim 主张", "Claim"], scope: ["Scope 适用范围", "Scope"], method: ["Method 方法", "Method"], result: ["Result 结果", "Result"], evidence_relation: ["EvidenceRelation 证据关系", "EvidenceRelation"], source_anchor: ["SourceAnchor 来源锚点", "SourceAnchor"], ai_review_report: ["AIReviewReport 审核报告", "AIReviewReport"], provenance: ["Provenance 来源记录", "Provenance"],
   };
   return localize(locale, labels[target][0], labels[target][1]);
+}
+
+function isDeepSeekDocumentationUrl(value: string) {
+  try {
+    return new URL(value).hostname.toLowerCase() === "api-docs.deepseek.com";
+  } catch {
+    return false;
+  }
 }
 
 function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace: WorkspaceSummary; knowledgeBodyRecord: KnowledgeBodyRecord | null }) {
@@ -1536,11 +1545,23 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
   }, [workspace.id, knowledgeBodyRecord?.recordId]);
 
   const configuredSlots = settings?.slots.filter((slot) => slot.enabled && slot.hasApiKey && slot.providerLabel && slot.baseUrl && slot.model) ?? [];
+  const invalidEnabledDraft = slotDrafts.some((slot) => slot.enabled && (
+    !slot.providerLabel.trim() || !slot.baseUrl.trim() || !slot.model.trim()
+    || isDeepSeekDocumentationUrl(slot.baseUrl)
+    || slot.clearApiKey
+    || (!slot.hasApiKey && !slot.apiKey.trim())
+  ));
   const ownerItems = ledger?.items.filter((item) => item.inquiry.origin === "owner") ?? [];
   const externalItems = ledger?.items.filter((item) => item.inquiry.origin === "external") ?? [];
 
   const updateSlot = <K extends keyof ModelSlotDraft>(role: ModelSlotRole, field: K, value: ModelSlotDraft[K]) => {
     setSlotDrafts((current) => current.map((slot) => slot.role === role ? { ...slot, [field]: value } : slot));
+  };
+
+  const applyDeepSeekPreset = (role: ModelSlotRole) => {
+    setSlotDrafts((current) => current.map((slot) => slot.role === role
+      ? { ...slot, enabled: true, ...DEEPSEEK_PRESET }
+      : slot));
   };
 
   const saveSettings = async () => {
@@ -1590,21 +1611,22 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
   return <section className="knowledge-dialogue" aria-labelledby="knowledge-dialogue-title">
     <header className="knowledge-dialogue-header">
       <div><p>{text("知识体自动服务", "Knowledge-body assistance")}</p><h2 id="knowledge-dialogue-title">{text("向这个知识体提问", "Ask this knowledge body")}</h2></div>
-      <button className="model-settings-button" type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>{text("模型设置", "Model settings")}<span>{configuredSlots.length}/3</span></button>
+      <button className="model-settings-button" type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>{text("模型设置", "Model settings")}<span>{text(`${configuredSlots.length}/3 可用`, `${configuredSlots.length}/3 ready`)}</span></button>
     </header>
 
     {settingsOpen ? <section className="model-settings" aria-labelledby="model-settings-title">
       <header><div><h3 id="model-settings-title">{text("1 个主模型，2 个备选模型", "One primary and two fallback models")}</h3><p>{text("按主模型 → 备选 1 → 备选 2 自动尝试。接口需兼容 OpenAI Chat Completions。", "Automatic order: primary → fallback 1 → fallback 2. Endpoints must support OpenAI Chat Completions.")}</p></div><span>{settings?.secureStore ?? text("系统凭据库", "System credential store")}</span></header>
       <div className="model-slot-grid">{slotDrafts.map((slot) => <fieldset className="model-slot" key={slot.role}>
         <legend>{modelSlotLabel(slot.role, locale)}</legend>
+        <div className="model-slot-heading"><span className={`model-slot-status ${slot.enabled && !(!slot.providerLabel.trim() || !slot.baseUrl.trim() || !slot.model.trim() || isDeepSeekDocumentationUrl(slot.baseUrl) || slot.clearApiKey || (!slot.hasApiKey && !slot.apiKey.trim())) ? "is-ready" : ""}`}>{!slot.enabled ? text("未启用", "Disabled") : !slot.providerLabel.trim() || !slot.baseUrl.trim() || !slot.model.trim() ? text("配置不完整", "Incomplete") : isDeepSeekDocumentationUrl(slot.baseUrl) ? text("API 地址错误", "Wrong API URL") : slot.clearApiKey || (!slot.hasApiKey && !slot.apiKey.trim()) ? text("缺少 API Key", "API key required") : slot.apiKey.trim() ? text("保存后可用", "Ready after save") : text("已启用", "Enabled")}</span><button type="button" onClick={() => applyDeepSeekPreset(slot.role)}>{text("使用 DeepSeek 官方配置", "Use DeepSeek preset")}</button></div>
         <label className="model-enabled"><input type="checkbox" checked={slot.enabled} onChange={(event) => updateSlot(slot.role, "enabled", event.target.checked)} />{text("启用此槽位", "Enable this slot")}</label>
         <label>{text("提供方名称", "Provider label")}<input value={slot.providerLabel} onChange={(event) => updateSlot(slot.role, "providerLabel", event.target.value)} placeholder={text("例如：OpenAI", "e.g. OpenAI")} /></label>
-        <label>{text("API 地址", "API base URL")}<input value={slot.baseUrl} onChange={(event) => updateSlot(slot.role, "baseUrl", event.target.value)} placeholder="https://api.example.com/v1" inputMode="url" /></label>
+        <label>{text("API 地址", "API base URL")}<input aria-label={text("API 地址", "API base URL")} value={slot.baseUrl} aria-invalid={isDeepSeekDocumentationUrl(slot.baseUrl)} onChange={(event) => updateSlot(slot.role, "baseUrl", event.target.value)} placeholder="https://api.example.com/v1" inputMode="url" />{isDeepSeekDocumentationUrl(slot.baseUrl) ? <span className="model-field-error" role="alert">{text("这是 DeepSeek 文档页，不是 API。请改用 https://api.deepseek.com", "This is the DeepSeek documentation site, not its API. Use https://api.deepseek.com")}</span> : null}</label>
         <label>{text("模型名称", "Model name")}<input value={slot.model} onChange={(event) => updateSlot(slot.role, "model", event.target.value)} placeholder="model-id" /></label>
-        <label>{text("API Key", "API key")}<input type="password" autoComplete="new-password" value={slot.apiKey} onChange={(event) => { updateSlot(slot.role, "apiKey", event.target.value); updateSlot(slot.role, "clearApiKey", false); }} placeholder={slot.hasApiKey ? text("已安全保存；留空表示保留", "Stored securely; leave blank to retain") : text("输入后保存到系统凭据库", "Saved to the system credential store")} /></label>
+        <label>{text("API Key", "API key")}<input aria-label={text("API Key", "API key")} type="password" autoComplete="new-password" value={slot.apiKey} aria-invalid={slot.enabled && !slot.hasApiKey && !slot.apiKey.trim()} onChange={(event) => { updateSlot(slot.role, "apiKey", event.target.value); updateSlot(slot.role, "clearApiKey", false); }} placeholder={slot.hasApiKey ? text("已安全保存；留空表示保留", "Stored securely; leave blank to retain") : text("输入后保存到系统凭据库", "Saved to the system credential store")} />{slot.enabled && !slot.hasApiKey && !slot.apiKey.trim() ? <span className="model-field-error" role="alert">{text("启用模型需要 API Key；输入后点击“保存模型设置”。", "An API key is required. Enter it, then save the model settings.")}</span> : null}</label>
         <label className="model-clear-key"><input type="checkbox" checked={slot.clearApiKey} onChange={(event) => updateSlot(slot.role, "clearApiKey", event.target.checked)} disabled={!slot.hasApiKey} />{text("删除已保存的 Key", "Delete saved key")}</label>
       </fieldset>)}</div>
-      <div className="model-settings-actions"><p>{text("应用界面不会读取或回显明文 Key。仅在作者主动提问时调用模型。", "The interface never reads or reveals plaintext keys. Models are called only after an author submits a question.")}</p><button className="primary-button" type="button" disabled={isSavingSettings} onClick={() => void saveSettings()}>{isSavingSettings ? text("保存中…", "Saving…") : text("保存模型设置", "Save model settings")}</button></div>
+      <div className="model-settings-actions"><p>{text("应用界面不会读取或回显明文 Key。仅在作者主动提问时调用模型。", "The interface never reads or reveals plaintext keys. Models are called only after an author submits a question.")}</p><button className="primary-button" type="button" disabled={isSavingSettings || invalidEnabledDraft} onClick={() => void saveSettings()}>{isSavingSettings ? text("保存中…", "Saving…") : invalidEnabledDraft ? text("请先补全启用项", "Complete enabled slots") : text("保存模型设置", "Save model settings")}</button></div>
     </section> : null}
 
     {error ? <p className="dialogue-message dialogue-error" role="alert">{error}</p> : null}
@@ -1620,7 +1642,8 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
       <form className="knowledge-composer" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
         <div className="composer-controls"><label>{text("提问类型", "Stance")}<select value={stance} onChange={(event) => setStance(event.target.value as KnowledgeInquiryStance)}><option value="recognition">{text("认可", "Recognition")}</option><option value="question">{text("疑问", "Question")}</option><option value="challenge">{text("挑战", "Challenge")}</option></select></label><label>{text("针对对象", "Target")}<select value={target} onChange={(event) => setTarget(event.target.value as KnowledgeInquiryTarget)}>{INQUIRY_TARGETS.map((item) => <option value={item} key={item}>{inquiryTargetLabel(item, locale)}</option>)}</select></label></div>
         <label className="composer-question"><span>{text("问题或需求", "Question or request")}</span><textarea rows={3} maxLength={4000} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={text("例如：这个 Claim 目前缺少哪些来源锚点？", "For example: Which source anchors are still missing for this Claim?")} disabled={!knowledgeBodyRecord || isAsking} /></label>
-        <div className="composer-submit"><p>{text("本次只发送知识体投影与问题，不发送源文件；回答不会自动改写知识体。", "Only the knowledge-body projection and question are sent, never the source file; answers cannot automatically modify the knowledge body.")}</p><button className="primary-button" type="submit" disabled={!knowledgeBodyRecord || !question.trim() || configuredSlots.length === 0 || isAsking}>{isAsking ? text("模型回答中…", "Model is answering…") : configuredSlots.length === 0 ? text("先设置模型", "Configure a model first") : text("询问知识体", "Ask knowledge body")}</button></div>
+        <div className="composer-submit"><p>{text("本次只发送知识体投影与问题，不发送源文件；回答不会自动改写知识体。", "Only the knowledge-body projection and question are sent, never the source file; answers cannot automatically modify the knowledge body.")}</p><button className="primary-button" type={configuredSlots.length === 0 ? "button" : "submit"} disabled={!knowledgeBodyRecord || isAsking || (configuredSlots.length > 0 && !question.trim())} onClick={configuredSlots.length === 0 && knowledgeBodyRecord ? () => setSettingsOpen(true) : undefined}>{isAsking ? text("模型回答中…", "Model is answering…") : !knowledgeBodyRecord ? text("先固化知识体", "Finalize knowledge body first") : configuredSlots.length === 0 ? text("打开模型设置", "Open model settings") : text("询问知识体", "Ask knowledge body")}</button></div>
+        {knowledgeBodyRecord && configuredSlots.length === 0 ? <p className="composer-disabled-note">{text("还没有可用模型：启用槽位、填写正确 API 地址与 Key，并保存设置。", "No model is ready: enable a slot, enter a valid API URL and key, then save.")}</p> : null}
         {!knowledgeBodyRecord ? <p className="composer-disabled-note">{text("先固化当前知识体，问答才会绑定到准确的快照与哈希。", "Finalize the current knowledge body first so dialogue can bind to its exact snapshot and hash.")}</p> : null}
       </form>
     </div> : <ExternalFeedbackReserve items={externalItems} />}
