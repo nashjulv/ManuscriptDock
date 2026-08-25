@@ -46,6 +46,11 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
+      - name: Install Rust targets for workspace toolchain
+        run: rustup target add ${RUST_TARGETS//,/ }
+        env:
+          RUST_TARGETS: ${{ matrix.rust-targets }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
