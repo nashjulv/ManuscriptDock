@@ -47,6 +47,7 @@ jobs:
           targets: ${{ matrix.rust-targets }}
 
       - name: Install Rust targets for workspace toolchain
+        shell: bash
         run: rustup target add ${RUST_TARGETS//,/ }
         env:
           RUST_TARGETS: ${{ matrix.rust-targets }}
