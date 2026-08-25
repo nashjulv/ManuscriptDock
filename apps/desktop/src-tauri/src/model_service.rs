@@ -14,10 +14,12 @@ const KEYRING_SERVICE: &str = "com.manuscriptdock.model-api";
 const SETTINGS_FILE: &str = "model-settings.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ModelSlotRole {
+    #[serde(rename = "primary")]
     Primary,
+    #[serde(rename = "fallback_1")]
     Fallback1,
+    #[serde(rename = "fallback_2")]
     Fallback2,
 }
 
@@ -456,6 +458,22 @@ mod tests {
 
     #[test]
     fn requires_one_primary_and_two_distinct_fallback_slots() {
+        assert_eq!(
+            serde_json::to_string(&ModelSlotRole::Primary).unwrap(),
+            "\"primary\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelSlotRole::Fallback1).unwrap(),
+            "\"fallback_1\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ModelSlotRole::Fallback2).unwrap(),
+            "\"fallback_2\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ModelSlotRole>("\"fallback_1\"").unwrap(),
+            ModelSlotRole::Fallback1
+        );
         let valid = vec![
             input(ModelSlotRole::Primary, true, "https://models.example/v1"),
             input(ModelSlotRole::Fallback1, false, ""),

@@ -777,3 +777,9 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
   Clippy. The native macOS debug application rebuilt successfully.
 - `cargo xwin check --workspace --target x86_64-pc-windows-msvc` passed with the repository's Windows
   SDK toolchain, including Credential Manager and the HTTPS model client.
+
+### Protocol correction
+
+- Fixed the desktop command contract so the two fallback roles use the explicit stable wire names
+  `fallback_1` and `fallback_2`. Added bidirectional serialization assertions to prevent the Rust
+  enum names and TypeScript command payload from drifting again.
