@@ -32,6 +32,7 @@ type WorkspaceCreation =
 
 interface WorkspaceCatalog {
   workspaces: WorkspaceSummary[];
+  archivedWorkspaces: WorkspaceSummary[];
   warnings: string[];
 }
 
@@ -338,7 +339,7 @@ interface WorkspaceLifecycle {
 type SelectionState = "idle" | "selecting" | "selected" | "error";
 type WorkspaceStage = "source" | "check" | "revision" | "versions" | "attestation" | "submission" | "knowledge";
 type MobilePane = "operation" | "evidence";
-type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning";
+type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning" | "more" | "archive" | "trash" | "restore";
 
 const WORKSPACE_STAGES: Array<{ id: WorkspaceStage; zh: string; en: string; shortZh: string; shortEn: string }> = [
   { id: "source", zh: "导入", en: "Import", shortZh: "导入", shortEn: "Import" },
@@ -384,6 +385,10 @@ function Icon({ name }: { name: IconName }) {
     knowledge: <><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></>,
     arrow: <><path d="M5 12h14M14 7l5 5-5 5" /></>,
     warning: <><path d="M12 4 3.8 19h16.4z" /><path d="M12 9v4M12 16.5v.1" /></>,
+    more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+    archive: <><path d="M4 7h16v13H4z" /><path d="M3 3h18v4H3z" /><path d="M9 11h6" /></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
+    restore: <><path d="M4 4v6h6" /><path d="M5.5 15a7 7 0 1 0 .5-7" /><path d="M12 9v4l3 2" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
 }
@@ -445,7 +450,11 @@ function ManuscriptDockApp() {
   const [manuscript, setManuscript] = useState<ManuscriptSummary | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceSummary | null>(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [archivedWorkspaces, setArchivedWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [catalogWarnings, setCatalogWarnings] = useState<string[]>([]);
+  const [workspaceManagementBusyId, setWorkspaceManagementBusyId] = useState<string | null>(null);
+  const [workspaceManagementNotice, setWorkspaceManagementNotice] = useState<string | null>(null);
+  const [workspaceManagementError, setWorkspaceManagementError] = useState<string | null>(null);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -496,7 +505,7 @@ function ManuscriptDockApp() {
   useEffect(() => {
     if (!isTauri()) return;
     void invoke<WorkspaceCatalog>("list_workspaces")
-      .then((catalog) => { setRecentWorkspaces(catalog.workspaces); setCatalogWarnings(catalog.warnings); })
+      .then((catalog) => { setRecentWorkspaces(catalog.workspaces); setArchivedWorkspaces(catalog.archivedWorkspaces ?? []); setCatalogWarnings(catalog.warnings); })
       .catch(() => { setCatalogWarnings([text("最近的本地工作区暂时无法读取", "Recent local workspaces could not be loaded")]); });
   }, []);
 
@@ -758,6 +767,33 @@ function ManuscriptDockApp() {
     hydrateLifecycle(workspace);
   }
 
+  async function manageWorkspace(action: "archive" | "restore" | "delete", workspace: WorkspaceSummary, archived: boolean) {
+    if (workspaceManagementBusyId) return false;
+    setWorkspaceManagementBusyId(workspace.id);
+    setWorkspaceManagementNotice(null);
+    setWorkspaceManagementError(null);
+    try {
+      const command = action === "archive" ? "archive_workspace" : action === "restore" ? "restore_workspace" : "delete_workspace";
+      const catalog = await invoke<WorkspaceCatalog>(command, action === "delete"
+        ? { workspaceId: workspace.id, archived, authorConfirmed: true }
+        : { workspaceId: workspace.id });
+      setRecentWorkspaces(catalog.workspaces);
+      setArchivedWorkspaces(catalog.archivedWorkspaces ?? []);
+      setCatalogWarnings(catalog.warnings);
+      setWorkspaceManagementNotice(action === "archive"
+        ? text(`已归档《${workspace.manuscript.name}》`, `Archived “${workspace.manuscript.name}”`)
+        : action === "restore"
+          ? text(`已恢复《${workspace.manuscript.name}》`, `Restored “${workspace.manuscript.name}”`)
+          : text(`已永久删除《${workspace.manuscript.name}》`, `Permanently deleted “${workspace.manuscript.name}”`));
+      return true;
+    } catch (error) {
+      setWorkspaceManagementError(localizeBackendText(locale, normalizeError(error)));
+      return false;
+    } finally {
+      setWorkspaceManagementBusyId(null);
+    }
+  }
+
   function openWorkspaceHome() {
     if (!activeWorkspace) return;
     setActiveWorkspace(null);
@@ -956,7 +992,7 @@ function ManuscriptDockApp() {
                 <article className="track-card"><span>01</span><h2>{text("源稿不变", "Source stays unchanged")}</h2><p>{text("所有处理基于版本化工作副本，原稿始终保持只读。", "All processing uses versioned working copies; the source remains read-only.")}</p></article>
                 <article className="track-card"><span>02</span><h2>{text("传输可见", "Transfers stay visible")}</h2><p>{text("联网、模型调用和外发均在执行前说明对象与范围。", "Network, model, and outbound actions disclose their destination and scope before execution.")}</p></article>
               </section>
-              {recentWorkspaces.length > 0 || catalogWarnings.length > 0 ? <RecentWorkspaces workspaces={recentWorkspaces} warnings={catalogWarnings.map((warning) => localizeBackendText(locale, warning))} onOpen={openRecentWorkspace} /> : null}
+              {recentWorkspaces.length > 0 || archivedWorkspaces.length > 0 || catalogWarnings.length > 0 || workspaceManagementNotice || workspaceManagementError ? <RecentWorkspaces workspaces={recentWorkspaces} archivedWorkspaces={archivedWorkspaces} warnings={catalogWarnings.map((warning) => localizeBackendText(locale, warning))} busyId={workspaceManagementBusyId} notice={workspaceManagementNotice} error={workspaceManagementError} onOpen={openRecentWorkspace} onManage={manageWorkspace} /> : null}
             </div>
           </main>
 
@@ -1041,9 +1077,54 @@ function LiveStatus({ selecting, analyzing, evaluating }: { selecting: boolean; 
   return <div className="sr-only" role="status" aria-live="polite">{selecting ? text("正在打开系统文件选择器", "Opening the system file picker") : analyzing ? text("正在解析论文结构", "Analyzing manuscript structure") : evaluating ? text("正在检查投稿准备", "Checking submission readiness") : ""}</div>;
 }
 
-function RecentWorkspaces({ workspaces, warnings, onOpen }: { workspaces: WorkspaceSummary[]; warnings: string[]; onOpen: (workspace: WorkspaceSummary) => void }) {
+function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, notice, error, onOpen, onManage }: { workspaces: WorkspaceSummary[]; archivedWorkspaces: WorkspaceSummary[]; warnings: string[]; busyId: string | null; notice: string | null; error: string | null; onOpen: (workspace: WorkspaceSummary) => void; onManage: (action: "archive" | "restore" | "delete", workspace: WorkspaceSummary, archived: boolean) => Promise<boolean>; }) {
   const { locale, text } = useI18n();
-  return <section className="recent-section" aria-labelledby="recent-heading"><div className="section-heading"><div><p className="field-kicker">{text("设备上的记录", "Records on this device")}</p><h2 id="recent-heading">{text("最近工作区", "Recent workspaces")}</h2></div><span>{locale === "zh-CN" ? `${workspaces.length} 个` : workspaces.length}</span></div>{workspaces.length > 0 ? <ul className="recent-list">{workspaces.slice(0, 5).map((workspace) => <li key={workspace.id}><button type="button" onClick={() => onOpen(workspace)}><span className="recent-file-icon" aria-hidden="true"><Icon name="file" /></span><span className="recent-file-copy"><strong>{workspace.manuscript.name}</strong><span>{text("源快照", "Source snapshot")} v{workspace.snapshotVersion} · {formatModifiedDate(workspace.importedUnixMs, locale)}</span></span><code>{workspace.contentHash.slice(0, 8)}</code><Icon name="arrow" /></button></li>)}</ul> : null}{warnings.map((warning) => <p className="catalog-warning" key={warning}>{warning}</p>)}</section>;
+  const [view, setView] = useState<"recent" | "archived">("recent");
+  const [menuWorkspaceId, setMenuWorkspaceId] = useState<string | null>(null);
+  const [deleteWorkspaceId, setDeleteWorkspaceId] = useState<string | null>(null);
+  const archived = view === "archived";
+  const visibleWorkspaces = archived ? archivedWorkspaces : workspaces;
+
+  useEffect(() => {
+    if (!menuWorkspaceId && !deleteWorkspaceId) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuWorkspaceId(null);
+        setDeleteWorkspaceId(null);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [menuWorkspaceId, deleteWorkspaceId]);
+
+  const perform = async (action: "archive" | "restore" | "delete", workspace: WorkspaceSummary) => {
+    const completed = await onManage(action, workspace, archived);
+    if (completed) {
+      setMenuWorkspaceId(null);
+      setDeleteWorkspaceId(null);
+    }
+  };
+
+  return <section className="recent-section" aria-labelledby="recent-heading">
+    <div className="section-heading"><div><p className="field-kicker">{text("设备上的记录", "Records on this device")}</p><h2 id="recent-heading">{text("最近工作区", "Recent workspaces")}</h2></div><span>{locale === "zh-CN" ? `${workspaces.length + archivedWorkspaces.length} 个` : workspaces.length + archivedWorkspaces.length}</span></div>
+    <div className="workspace-catalog-tabs" role="tablist" aria-label={text("工作区状态", "Workspace status")}><button type="button" role="tab" aria-selected={view === "recent"} onClick={() => { setView("recent"); setMenuWorkspaceId(null); setDeleteWorkspaceId(null); }}>{text("最近工作区", "Recent workspaces")}<span>{workspaces.length}</span></button><button type="button" role="tab" aria-selected={view === "archived"} onClick={() => { setView("archived"); setMenuWorkspaceId(null); setDeleteWorkspaceId(null); }}>{text("已归档", "Archived")}<span>{archivedWorkspaces.length}</span></button></div>
+    {notice ? <p className="workspace-management-message" role="status">{notice}</p> : null}
+    {error ? <p className="workspace-management-message workspace-management-error" role="alert">{error}</p> : null}
+    {visibleWorkspaces.length > 0 ? <ul className="recent-list">{visibleWorkspaces.slice(0, 20).map((workspace) => {
+      const isBusy = busyId === workspace.id;
+      const menuOpen = menuWorkspaceId === workspace.id;
+      const confirmingDelete = deleteWorkspaceId === workspace.id;
+      return <li key={workspace.id}>
+        <div className="workspace-row">
+          <button className="workspace-open-button" type="button" onClick={() => onOpen(workspace)} disabled={archived || isBusy} aria-label={archived ? text(`${workspace.manuscript.name} 已归档`, `${workspace.manuscript.name} is archived`) : text(`打开 ${workspace.manuscript.name}`, `Open ${workspace.manuscript.name}`)}><span className="recent-file-icon" aria-hidden="true"><Icon name="file" /></span><span className="recent-file-copy"><strong>{workspace.manuscript.name}</strong><span>{archived ? text("已归档 · 恢复后可继续工作", "Archived · Restore to continue") : text("源快照", "Source snapshot")} {archived ? "" : `v${workspace.snapshotVersion} · ${formatModifiedDate(workspace.importedUnixMs, locale)}`}</span></span><code>{workspace.contentHash.slice(0, 8)}</code>{!archived ? <Icon name="arrow" /> : null}</button>
+          <button className="workspace-manage-button" type="button" aria-label={text(`管理 ${workspace.manuscript.name}`, `Manage ${workspace.manuscript.name}`)} aria-expanded={menuOpen} aria-controls={`workspace-menu-${workspace.id}`} disabled={isBusy} onClick={() => { setMenuWorkspaceId(menuOpen ? null : workspace.id); setDeleteWorkspaceId(null); }}><Icon name="more" /><span>{isBusy ? text("处理中", "Working") : text("管理", "Manage")}</span></button>
+          {menuOpen ? <div className="workspace-management-menu" id={`workspace-menu-${workspace.id}`} role="menu" aria-label={text(`${workspace.manuscript.name} 管理操作`, `Management actions for ${workspace.manuscript.name}`)}><button type="button" role="menuitem" onClick={() => void perform(archived ? "restore" : "archive", workspace)}><Icon name={archived ? "restore" : "archive"} />{archived ? text("恢复到最近工作区", "Restore to recent") : text("归档工作区", "Archive workspace")}</button><button className="workspace-delete-action" type="button" role="menuitem" onClick={() => { setDeleteWorkspaceId(workspace.id); setMenuWorkspaceId(null); }}><Icon name="trash" />{text("永久删除…", "Delete permanently…")}</button></div> : null}
+        </div>
+        {confirmingDelete ? <div className="workspace-delete-confirm" role="group" aria-labelledby={`delete-title-${workspace.id}`}><div><strong id={`delete-title-${workspace.id}`}>{text("永久删除这个论文工作区？", "Permanently delete this manuscript workspace?")}</strong><p>{text("将删除全部论文版本、分析、检查、存证、投稿和知识体问答记录。此操作无法撤销。", "All manuscript versions, analyses, checks, attestations, submissions, and knowledge-body dialogue will be deleted. This cannot be undone.")}</p></div><div><button type="button" onClick={() => setDeleteWorkspaceId(null)} disabled={isBusy}>{text("取消", "Cancel")}</button><button className="confirm-delete-button" type="button" onClick={() => void perform("delete", workspace)} disabled={isBusy}><Icon name="trash" />{isBusy ? text("正在删除…", "Deleting…") : text("确认永久删除", "Delete permanently")}</button></div></div> : null}
+      </li>;
+    })}</ul> : <div className="workspace-catalog-empty"><Icon name={archived ? "archive" : "file"} /><p>{archived ? text("还没有归档的论文工作区。", "No archived manuscript workspaces yet.") : text("最近工作区为空。", "No recent workspaces.")}</p></div>}
+    {warnings.map((warning) => <p className="catalog-warning" key={warning}>{warning}</p>)}
+  </section>;
 }
 
 function getStageDescription(stage: WorkspaceStage, locale: Locale) {

@@ -56,6 +56,7 @@ pub enum WorkspaceCreation {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCatalog {
     pub workspaces: Vec<WorkspaceSummary>,
+    pub archived_workspaces: Vec<WorkspaceSummary>,
     pub warnings: Vec<String>,
 }
 
@@ -196,6 +197,8 @@ pub struct WorkspaceLifecycle {
 pub enum WorkspaceError {
     Io(io::Error),
     InvalidWorkspaceId,
+    WorkspaceNotFound,
+    WorkspaceDestinationExists,
     InvalidManifest(String),
     Structure(StructureError),
     Readiness(ReadinessError),
@@ -225,6 +228,10 @@ impl fmt::Display for WorkspaceError {
         match self {
             Self::Io(error) => write!(formatter, "本地工作区写入失败：{error}"),
             Self::InvalidWorkspaceId => write!(formatter, "本地工作区标识无效"),
+            Self::WorkspaceNotFound => write!(formatter, "未找到需要管理的本地工作区"),
+            Self::WorkspaceDestinationExists => {
+                write!(formatter, "目标位置已存在同一工作区，未移动任何文件")
+            }
             Self::InvalidManifest(message) => write!(formatter, "本地工作区记录无效：{message}"),
             Self::Structure(error) => write!(formatter, "{error}"),
             Self::Readiness(error) => write!(formatter, "{error}"),
@@ -553,40 +560,108 @@ impl WorkspaceStore {
 
     pub fn list(&self) -> Result<WorkspaceCatalog, WorkspaceError> {
         let projects_root = self.projects_root();
-        if !projects_root.exists() {
-            return Ok(WorkspaceCatalog {
-                workspaces: Vec::new(),
-                warnings: Vec::new(),
-            });
-        }
-
+        let archived_projects_root = self.archived_projects_root();
         let mut workspaces = Vec::new();
+        let mut archived_workspaces = Vec::new();
         let mut warnings = Vec::new();
-        for entry in fs::read_dir(projects_root)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
+        for (collection_root, collection, label) in [
+            (&projects_root, &mut workspaces, "工作区"),
+            (
+                &archived_projects_root,
+                &mut archived_workspaces,
+                "归档工作区",
+            ),
+        ] {
+            if !collection_root.exists() {
                 continue;
             }
-
-            let directory_name = entry.file_name().to_string_lossy().into_owned();
-            if directory_name.starts_with('.') || Uuid::parse_str(&directory_name).is_err() {
-                continue;
-            }
-
-            match read_manifest(&entry.path().join("manifest.json")) {
-                Ok(manifest) if manifest.workspace.id == directory_name => {
-                    workspaces.push(manifest.workspace);
+            for entry in fs::read_dir(collection_root)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
                 }
-                Ok(_) => warnings.push(format!("工作区 {directory_name} 的标识不一致，已跳过")),
-                Err(_) => warnings.push(format!("工作区 {directory_name} 无法读取，已跳过")),
+
+                let directory_name = entry.file_name().to_string_lossy().into_owned();
+                if directory_name.starts_with('.') || Uuid::parse_str(&directory_name).is_err() {
+                    continue;
+                }
+
+                match read_manifest(&entry.path().join("manifest.json")) {
+                    Ok(manifest) if manifest.workspace.id == directory_name => {
+                        collection.push(manifest.workspace);
+                    }
+                    Ok(_) => {
+                        warnings.push(format!("{label} {directory_name} 的标识不一致，已跳过"))
+                    }
+                    Err(_) => warnings.push(format!("{label} {directory_name} 无法读取，已跳过")),
+                }
             }
         }
 
         workspaces.sort_by(|left, right| right.imported_unix_ms.cmp(&left.imported_unix_ms));
+        archived_workspaces
+            .sort_by(|left, right| right.imported_unix_ms.cmp(&left.imported_unix_ms));
         Ok(WorkspaceCatalog {
             workspaces,
+            archived_workspaces,
             warnings,
         })
+    }
+
+    pub fn archive_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCatalog, WorkspaceError> {
+        let (source_root, manifest) = self.workspace_for_management(workspace_id, false)?;
+        let archived_root = self.archived_projects_root();
+        fs::create_dir_all(&archived_root)?;
+        let destination_root = archived_root.join(workspace_id);
+        if destination_root.exists() {
+            return Err(WorkspaceError::WorkspaceDestinationExists);
+        }
+        append_audit_event(
+            &source_root.join("audit.jsonl"),
+            "workspace_archived",
+            &manifest.workspace,
+            unix_time_ms()?,
+        )?;
+        fs::rename(source_root, destination_root)?;
+        self.list()
+    }
+
+    pub fn restore_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCatalog, WorkspaceError> {
+        let (source_root, manifest) = self.workspace_for_management(workspace_id, true)?;
+        let projects_root = self.projects_root();
+        fs::create_dir_all(&projects_root)?;
+        let destination_root = projects_root.join(workspace_id);
+        if destination_root.exists() {
+            return Err(WorkspaceError::WorkspaceDestinationExists);
+        }
+        append_audit_event(
+            &source_root.join("audit.jsonl"),
+            "workspace_restored",
+            &manifest.workspace,
+            unix_time_ms()?,
+        )?;
+        fs::rename(source_root, destination_root)?;
+        self.list()
+    }
+
+    pub fn delete_workspace(
+        &self,
+        workspace_id: &str,
+        archived: bool,
+        author_confirmed: bool,
+    ) -> Result<WorkspaceCatalog, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        let (workspace_root, _) = self.workspace_for_management(workspace_id, archived)?;
+        remove_generated_directory(&workspace_root)?;
+        self.list()
     }
 
     pub fn source_snapshot_path(&self, workspace_id: &str) -> Result<PathBuf, WorkspaceError> {
@@ -1651,6 +1726,37 @@ impl WorkspaceStore {
     fn projects_root(&self) -> PathBuf {
         self.root.join("projects")
     }
+
+    fn archived_projects_root(&self) -> PathBuf {
+        self.root.join("archived-projects")
+    }
+
+    fn workspace_for_management(
+        &self,
+        workspace_id: &str,
+        archived: bool,
+    ) -> Result<(PathBuf, WorkspaceManifest), WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let collection_root = if archived {
+            self.archived_projects_root()
+        } else {
+            self.projects_root()
+        };
+        let workspace_root = collection_root.join(workspace_id);
+        let metadata =
+            fs::symlink_metadata(&workspace_root).map_err(|error| match error.kind() {
+                io::ErrorKind::NotFound => WorkspaceError::WorkspaceNotFound,
+                _ => WorkspaceError::Io(error),
+            })?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        Ok((workspace_root, manifest))
+    }
 }
 
 fn read_current_structure_report(
@@ -2257,10 +2363,14 @@ fn make_tree_writable(path: &Path) -> io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let entry_path = entry.path();
-        if entry.file_type()?.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             make_tree_writable(&entry_path)?;
         } else {
-            let mut permissions = fs::metadata(&entry_path)?.permissions();
+            let mut permissions = fs::symlink_metadata(&entry_path)?.permissions();
             if permissions.readonly() {
                 make_file_owner_writable(&mut permissions);
                 fs::set_permissions(entry_path, permissions)?;
@@ -2387,6 +2497,90 @@ mod tests {
         assert_eq!(catalog.warnings.len(), 1);
         assert!(catalog.warnings[0].contains(&workspace_id));
         assert!(!catalog.warnings[0].contains(&temporary.path().display().to_string()));
+    }
+
+    #[test]
+    fn archives_restores_and_deletes_only_author_confirmed_workspaces() {
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("managed-study.tex");
+        fs::write(&source_path, "\\title{Managed synthetic study}").unwrap();
+        let store_root = temporary.path().join("store");
+        let store = WorkspaceStore::new(&store_root);
+        let workspace = store.create_from_source(&source_path).unwrap();
+
+        let archived_catalog = store.archive_workspace(&workspace.id).unwrap();
+        assert!(archived_catalog.workspaces.is_empty());
+        assert_eq!(
+            archived_catalog.archived_workspaces,
+            vec![workspace.clone()]
+        );
+        assert!(!store_root.join("projects").join(&workspace.id).exists());
+        let archived_root = store_root.join("archived-projects").join(&workspace.id);
+        assert!(archived_root.exists());
+
+        let restored_catalog = store.restore_workspace(&workspace.id).unwrap();
+        assert_eq!(restored_catalog.workspaces, vec![workspace.clone()]);
+        assert!(restored_catalog.archived_workspaces.is_empty());
+        let restored_root = store_root.join("projects").join(&workspace.id);
+        let audit = fs::read_to_string(restored_root.join("audit.jsonl")).unwrap();
+        assert!(audit.contains("workspace_archived"));
+        assert!(audit.contains("workspace_restored"));
+
+        assert!(matches!(
+            store.delete_workspace(&workspace.id, false, false),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+        assert!(restored_root.exists());
+        let deleted_catalog = store.delete_workspace(&workspace.id, false, true).unwrap();
+        assert!(deleted_catalog.workspaces.is_empty());
+        assert!(!restored_root.exists());
+
+        let archived_only = store.create_from_source(&source_path).unwrap();
+        store.archive_workspace(&archived_only.id).unwrap();
+        let final_catalog = store
+            .delete_workspace(&archived_only.id, true, true)
+            .unwrap();
+        assert!(final_catalog.workspaces.is_empty());
+        assert!(final_catalog.archived_workspaces.is_empty());
+        assert!(!store_root
+            .join("archived-projects")
+            .join(archived_only.id)
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleting_a_workspace_does_not_follow_an_injected_symbolic_link() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("symlink-study.tex");
+        fs::write(&source_path, "\\title{Symlink boundary study}").unwrap();
+        let store_root = temporary.path().join("store");
+        let store = WorkspaceStore::new(&store_root);
+        let workspace = store.create_from_source(&source_path).unwrap();
+        let external_file = temporary.path().join("outside-workspace.txt");
+        fs::write(&external_file, "must remain untouched").unwrap();
+        fs::set_permissions(&external_file, fs::Permissions::from_mode(0o400)).unwrap();
+        symlink(
+            &external_file,
+            store_root
+                .join("projects")
+                .join(&workspace.id)
+                .join("injected-link"),
+        )
+        .unwrap();
+
+        store.delete_workspace(&workspace.id, false, true).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&external_file).unwrap(),
+            "must remain untouched"
+        );
+        assert_eq!(
+            fs::metadata(&external_file).unwrap().permissions().mode() & 0o777,
+            0o400
+        );
     }
 
     #[test]

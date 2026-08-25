@@ -175,6 +175,65 @@ describe("App", () => {
     expect(invokeMock).toHaveBeenCalledWith("list_workspaces");
   });
 
+  it("archives, restores, and confirms permanent deletion for each manuscript workspace", async () => {
+    isTauriMock.mockReturnValue(true);
+    const workspace = {
+      id: "managed-workspace",
+      manuscript: { name: "managed-study.tex", extension: "tex", kind: "latex", sizeBytes: 2048, modifiedUnixMs: null },
+      contentHash: "9".repeat(64),
+      importedUnixMs: Date.UTC(2026, 7, 25, 2, 0),
+      snapshotVersion: 2,
+    };
+    let catalog = { workspaces: [workspace], archivedWorkspaces: [] as typeof workspace[], warnings: [] as string[] };
+    invokeMock.mockImplementation((command) => {
+      if (command === "list_workspaces") return Promise.resolve(catalog);
+      if (command === "archive_workspace") {
+        catalog = { workspaces: [], archivedWorkspaces: [workspace], warnings: [] };
+        return Promise.resolve(catalog);
+      }
+      if (command === "restore_workspace") {
+        catalog = { workspaces: [workspace], archivedWorkspaces: [], warnings: [] };
+        return Promise.resolve(catalog);
+      }
+      if (command === "delete_workspace") {
+        catalog = { workspaces: [], archivedWorkspaces: [], warnings: [] };
+        return Promise.resolve(catalog);
+      }
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByText("managed-study.tex")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
+    await user.click(screen.getByRole("menuitem", { name: "归档工作区" }));
+    expect(await screen.findByText("已归档《managed-study.tex》")).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("archive_workspace", { workspaceId: workspace.id });
+
+    await user.click(screen.getByRole("tab", { name: /已归档/ }));
+    expect(screen.getByRole("button", { name: "managed-study.tex 已归档" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
+    await user.click(screen.getByRole("menuitem", { name: "恢复到最近工作区" }));
+    expect(await screen.findByText("已恢复《managed-study.tex》")).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("restore_workspace", { workspaceId: workspace.id });
+
+    await user.click(screen.getByRole("tab", { name: /最近工作区/ }));
+    await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
+    await user.click(screen.getByRole("menuitem", { name: "永久删除…" }));
+    expect(screen.getByText("永久删除这个论文工作区？")).toBeVisible();
+    expect(screen.getByText(/全部论文版本、分析、检查、存证、投稿和知识体问答记录/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText("永久删除这个论文工作区？")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
+    await user.click(screen.getByRole("menuitem", { name: "永久删除…" }));
+    await user.click(screen.getByRole("button", { name: "确认永久删除" }));
+    expect(await screen.findByText("已永久删除《managed-study.tex》")).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("delete_workspace", { workspaceId: workspace.id, archived: false, authorConfirmed: true });
+    expect(screen.getByText("最近工作区为空。")).toBeVisible();
+  });
+
   it("runs local structure and signed-rule readiness checks for a recovered workspace", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = {
@@ -359,7 +418,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: /structured-study\.tex/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 structured-study.tex" }));
     await user.click(screen.getByRole("button", { name: "检查" }));
     await user.click(screen.getByRole("button", { name: "提取论文结构" }));
 
@@ -459,7 +518,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: /study\.tex/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 study.tex" }));
     await user.click(screen.getByRole("button", { name: "版本" }));
     expect(await screen.findByRole("list", { name: "论文版本时间线" })).toHaveTextContent("v1");
 
@@ -506,7 +565,7 @@ describe("App", () => {
     });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /study\.tex/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 study.tex" }));
     await user.click(screen.getByRole("button", { name: "修订" }));
     const title = await screen.findByLabelText("论文标题");
     await user.clear(title); await user.type(title, "Revised title");
@@ -534,7 +593,7 @@ describe("App", () => {
     });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /lifecycle\.tex/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 lifecycle.tex" }));
     await user.click(screen.getByRole("button", { name: "存证" }));
     await user.click(await screen.findByRole("checkbox", { name: /我已核对当前稿件/ }));
     await user.click(screen.getByRole("button", { name: "创建本地存证" }));
@@ -588,7 +647,7 @@ describe("App", () => {
 
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /classified-study\.tex/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 classified-study.tex" }));
     await user.click(screen.getByRole("button", { name: "知识体" }));
     const finalize = await screen.findByRole("button", { name: "确认分类并固化知识体" });
     expect(finalize).toBeDisabled();
@@ -659,7 +718,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: /navigation-study\.pdf/ }));
+    await user.click(await screen.findByRole("button", { name: "打开 navigation-study.pdf" }));
     expect(screen.getByRole("navigation", { name: "论文工作阶段" })).toBeVisible();
     expect(screen.getByRole("tabpanel", { name: "导入 证据" })).toHaveTextContent("只读");
 

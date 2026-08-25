@@ -114,6 +114,41 @@ async fn list_workspaces(app: AppHandle) -> Result<WorkspaceCatalog, String> {
 }
 
 #[tauri::command]
+async fn archive_workspace(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<WorkspaceCatalog, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .archive_workspace(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn restore_workspace(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<WorkspaceCatalog, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .restore_workspace(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_workspace(
+    workspace_id: String,
+    archived: bool,
+    author_confirmed: bool,
+    app: AppHandle,
+) -> Result<WorkspaceCatalog, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .delete_workspace(&workspace_id, archived, author_confirmed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_version_history(
     workspace_id: String,
     app: AppHandle,
@@ -440,6 +475,9 @@ pub fn run() {
             select_manuscript,
             create_workspace,
             list_workspaces,
+            archive_workspace,
+            restore_workspace,
+            delete_workspace,
             get_version_history,
             get_knowledge_body_snapshot,
             get_workspace_lifecycle,

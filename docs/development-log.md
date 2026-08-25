@@ -783,3 +783,28 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
 - Fixed the desktop command contract so the two fallback roles use the explicit stable wire names
   `fallback_1` and `fallback_2`. Added bidirectional serialization assertions to prevent the Rust
   enum names and TypeScript command payload from drifting again.
+
+## 2026-08-25 — Per-manuscript archive and permanent deletion
+
+### Delivered
+
+- Added a separate Manage action to every manuscript in Recent Workspaces, preserving the full-row
+  Open action without nested interactive controls.
+- Added a reversible Archived view. Archive and restore move the complete local workspace between
+  validated collections and append `workspace_archived` or `workspace_restored` audit events.
+- Added an explicit inline confirmation before permanent deletion, with truthful scope covering
+  manuscript versions, analysis, attestation, submission, knowledge-body, and dialogue records.
+- Restricted Rust management commands to exact UUID directories that are not symbolic links and
+  whose manifest identity matches the requested workspace. Existing destinations are never
+  overwritten.
+- Kept external source manuscripts and separately exported submission packages outside the delete
+  boundary. The UI retains success or failure feedback even after the final row is removed.
+
+### Verification
+
+- Frontend coverage archives a synthetic manuscript, opens the Archived view, restores it, cancels
+  a deletion, and then confirms permanent deletion. All 14 workflow tests pass.
+- Rust coverage verifies archive and restore audit history, rejects deletion without author
+  confirmation, deletes only the exact active or archived synthetic workspace, and proves an
+  injected symbolic link cannot change or remove its external target. All 47 Rust core and desktop
+  tests pass.
