@@ -3,6 +3,36 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Classification-first PDF extraction and recognition routing
+
+- Evaluated Pandoc and kept it out of PDF ingestion because it has no PDF input reader; retained it
+  only as a future converter between author-confirmed structured formats.
+- Added the MIT-licensed `pdf-inspector 1.17.0` default Rust pipeline before the existing
+  `pdf-extract` and lopdf fallbacks.
+- Classified each PDF before interpreting extracted content and retained classification confidence,
+  table pages, column pages, encoding problems, and page-level recognition candidates across fallback
+  paths in the versioned structure-v5 report.
+- Used layout-aware Markdown headings and table delimiters for deterministic section normalization and
+  table counts while preserving PDF output as `limited` evidence.
+- Defined object-level routing: native text, formula regions, and table structure are preferred; only
+  missing or unreliable text goes to Chinese/English OCR, formulas to a formula recognizer, and tables
+  to a table-structure recognizer. Future fusion must retain page, bounds, producer, confidence, and
+  author-confirmation state and may not overwrite reliable native content.
+- Fixed the first text-OCR profile as mixed Simplified/Traditional Chinese plus English, while keeping
+  OCR visibly unavailable until the PDFium, ONNX Runtime, model, checksum, and cross-platform packaging
+  requirements are actually delivered.
+
+### Verification
+
+- `npm run check`: passed TypeScript checks, 15 frontend interaction tests, Vite production build,
+  rustfmt, 51 manuscript-core tests, 4 desktop Rust tests, and Clippy with warnings denied.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the complete Windows x64
+  dependency graph, including the new default Rust `pdf-inspector` path.
+- `npm run tauri -- build --debug --no-bundle`: produced the macOS debug desktop executable with
+  the structure-v5 parser.
+- The synthetic PDF regression verifies layout-aware extraction, `TextBased` classification, title,
+  author and abstract recovery; the Markdown regression verifies heading normalization and table count.
+
 ## 2026-08-30 — Local computer/AI journal matching
 
 - Adapted the PWC dynamic-fit proposal into a bounded local MVP between version management and

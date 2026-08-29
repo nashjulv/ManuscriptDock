@@ -9,6 +9,7 @@
 - [期刊匹配与投稿目标推荐](journal-matching-and-submission-targeting.md)：计算机/AI 期刊快照、本地可解释评分、国内外各三家推荐及调整后重算边界。
 - [最近工作区管理](local-workspace-management.md)：逐篇归档、恢复、永久删除及其数据与知识体边界。
 - [投稿优化修订台](submission-revision-desk.md)：面向投稿问题的结构化修订、差异确认、格式回写边界及版本闭环。
+- [PDF 提取与规整方案](pdf-extraction-and-normalization.md)：Pandoc 与 pdf-inspector 评估、分类优先、原生对象提取、缺失对象识别与可信合并边界。
 - [端到端论文生命周期](end-to-end-manuscript-lifecycle.md)：导入、检查、修订、版本、存证、投稿和知识体的状态合同、恢复规则与验收路径。
 - [学术知识体演进路线](academic-knowledge-body-roadmap.md)：从本地稿件工作区到作者控制的 AI 与发布网络对象。
 - [学术知识体服务模型](knowledge-body-service-model.md)：平台服务对象、生命周期、写回原则、授权投影和商业含义。

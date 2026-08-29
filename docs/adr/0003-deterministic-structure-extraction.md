@@ -16,10 +16,17 @@ than the source format permits.
 - Rust reads the immutable workspace snapshot and owns all parsers and result persistence.
 - TEX is parsed from commands and environments; DOCX is parsed from its WordprocessingML
   document; PDF uses deterministic page/text extraction with an explicit `limited` quality.
-- PDF text extraction first uses the MIT-licensed, pure-Rust `pdf-extract` font and ToUnicode
-  mapping path, then falls back to lopdf's basic content-stream extraction. An empty result from
-  both paths is the condition for marking the document as an OCR candidate; parser failure alone
-  is not treated as evidence that the PDF is scanned.
+- PDF processing first classifies the document and pages, then uses the MIT-licensed
+  `pdf-inspector` default Rust pipeline for native font, position, column, heading and table
+  extraction. It falls back to the existing `pdf-extract` font/ToUnicode mapping and lopdf
+  content-stream paths without discarding the classification evidence. Parser failure alone is not
+  treated as evidence that the PDF is scanned; mixed PDFs retain page-level, object-specific
+  recognition candidates.
+- OCR is not the first or universal extraction path. Readable native objects win. Missing text is
+  routed to Chinese/English text OCR, missing formulas require a formula recognizer, and missing
+  table structure requires a table recognizer. Future fusion records page, bounding box, object
+  type, producer and confidence; recognized content only fills gaps and never silently overwrites
+  reliable native content.
 - PDF titles combine the visible first-page text with document metadata, preferring the visible
   title when metadata contains only its prefix. Author extraction combines PDF Author metadata
   with conservative first-page name-line recognition and excludes affiliations, contacts and URLs.
@@ -37,8 +44,9 @@ than the source format permits.
   schema version and source-hash prefix; a JSONL audit event records every completed analysis.
 - The WebView receives the report but never the source path or an unrestricted file handle.
 - Parser limitations are warnings, not silently repaired content. OCR and AI suggestions remain
-  separate later capabilities. Structure analysis v4 adds author and abstract candidate fields in
-  a new snapshot while retaining earlier reports for provenance.
+  separate later capabilities. Structure analysis v4 added author and abstract candidate fields;
+  v5 adds the structured PDF classification, confidence, native extraction path, table/column pages,
+  encoding state and pages needing object recognition.
 
 ## Consequences
 

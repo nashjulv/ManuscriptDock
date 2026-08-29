@@ -852,6 +852,7 @@ mod tests {
             declarations: vec![],
             page_count: Some(12),
             word_count: 5000,
+            pdf_processing: None,
             warnings: vec![],
         }
     }

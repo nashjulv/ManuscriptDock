@@ -1066,6 +1066,7 @@ mod tests {
             ],
             page_count: None,
             word_count: 1200,
+            pdf_processing: None,
             warnings: Vec::new(),
         }
     }

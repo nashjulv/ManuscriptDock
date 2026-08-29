@@ -86,6 +86,16 @@ interface SectionSummary {
   heading: string;
 }
 
+interface PdfProcessingSummary {
+  classification: string;
+  confidencePercent: number;
+  nativeExtraction: string;
+  pagesNeedingRecognition: number[];
+  pagesWithTables: number[];
+  pagesWithColumns: number[];
+  hasEncodingIssues: boolean;
+}
+
 interface StructureReport {
   analysisVersion: number;
   workspaceId: string;
@@ -104,6 +114,7 @@ interface StructureReport {
   declarations: string[];
   pageCount: number | null;
   wordCount: number;
+  pdfProcessing?: PdfProcessingSummary;
   warnings: string[];
 }
 

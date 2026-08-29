@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
-pub const STRUCTURE_ANALYSIS_VERSION: u32 = 4;
+pub const STRUCTURE_ANALYSIS_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,6 +19,18 @@ pub enum AnalysisQuality {
 pub struct SectionSummary {
     pub level: u8,
     pub heading: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfProcessingSummary {
+    pub classification: String,
+    pub confidence_percent: u8,
+    pub native_extraction: String,
+    pub pages_needing_recognition: Vec<u32>,
+    pub pages_with_tables: Vec<u32>,
+    pub pages_with_columns: Vec<u32>,
+    pub has_encoding_issues: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -41,6 +53,8 @@ pub struct StructureReport {
     pub declarations: Vec<String>,
     pub page_count: Option<u32>,
     pub word_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf_processing: Option<PdfProcessingSummary>,
     pub warnings: Vec<String>,
 }
 
@@ -101,14 +115,27 @@ struct ExtractedStructure {
     declarations: Vec<String>,
     page_count: Option<u32>,
     word_count: u64,
+    pdf_processing: Option<PdfProcessingSummary>,
     warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PdfTextSource {
+    LayoutAwareInspector,
     EnhancedFontMapping,
     BasicContentStream,
     None,
+}
+
+impl PdfTextSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::LayoutAwareInspector => "layout_aware_native",
+            Self::EnhancedFontMapping => "enhanced_font_mapping",
+            Self::BasicContentStream => "basic_content_stream",
+            Self::None => "none",
+        }
+    }
 }
 
 pub(crate) fn extract_structure(
@@ -142,6 +169,7 @@ pub(crate) fn extract_structure(
         declarations: extracted.declarations,
         page_count: extracted.page_count,
         word_count: extracted.word_count,
+        pdf_processing: extracted.pdf_processing,
         warnings: extracted.warnings,
     })
 }
@@ -348,8 +376,11 @@ fn extract_pdf(path: &Path) -> Result<ExtractedStructure, StructureError> {
     let metadata_title = pdf_metadata_title(&document);
     let metadata_authors = pdf_metadata_authors(&document);
     let has_metadata_authors = !metadata_authors.is_empty();
-    let (text, text_source) = extract_pdf_text(path, &document, &page_numbers);
-    let mut extracted = infer_from_plain_text(&text);
+    let pdf_text = extract_pdf_text(path, &document, &page_numbers);
+    let mut extracted = match pdf_text.source {
+        PdfTextSource::LayoutAwareInspector => infer_from_inspector_markdown(&pdf_text.text),
+        _ => infer_from_plain_text(&pdf_text.text),
+    };
     extracted.title = choose_pdf_title(metadata_title, extracted.title.take());
     for author in metadata_authors {
         push_unique(&mut extracted.authors, &author);
@@ -374,7 +405,35 @@ fn extract_pdf(path: &Path) -> Result<ExtractedStructure, StructureError> {
     }
     extracted.quality = Some(AnalysisQuality::Limited);
     extracted.page_count = u32::try_from(page_numbers.len()).ok();
-    match text_source {
+    if let Some(classification) = &pdf_text.classification {
+        let confidence = pdf_text
+            .classification_confidence
+            .map(|value| format!("（置信度 {:.0}%）", value.clamp(0.0, 1.0) * 100.0))
+            .unwrap_or_default();
+        extracted.warnings.push(format!(
+            "PDF 文档分类：{classification}{confidence}；已优先执行原生结构提取"
+        ));
+    }
+    extracted.pdf_processing =
+        pdf_text
+            .classification
+            .as_ref()
+            .map(|classification| PdfProcessingSummary {
+                classification: classification.clone(),
+                confidence_percent: pdf_text
+                    .classification_confidence
+                    .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as u8)
+                    .unwrap_or_default(),
+                native_extraction: pdf_text.source.label().to_owned(),
+                pages_needing_recognition: pdf_text.pages_needing_ocr.clone(),
+                pages_with_tables: pdf_text.pages_with_tables.clone(),
+                pages_with_columns: pdf_text.pages_with_columns.clone(),
+                has_encoding_issues: pdf_text.has_encoding_issues,
+            });
+    match pdf_text.source {
+        PdfTextSource::LayoutAwareInspector => extracted.warnings.push(
+            "已使用布局感知 PDF 解析：按字体、坐标和分栏顺序规整文本；公式与复杂跨页表格仍需人工确认".to_owned(),
+        ),
         PdfTextSource::EnhancedFontMapping => extracted.warnings.push(
             "已使用增强字体映射读取 PDF 文本层；多栏顺序、公式和复杂版式仍需人工确认".to_owned(),
         ),
@@ -389,6 +448,30 @@ fn extract_pdf(path: &Path) -> Result<ExtractedStructure, StructureError> {
                 .warnings
                 .push("本次分析没有执行 OCR，源文件和现有快照均未改动".to_owned());
         }
+    }
+    if !pdf_text.pages_needing_ocr.is_empty() {
+        extracted.warnings.push(format!(
+            "检测到 {} 个页面需要 OCR 或字体解码复核：{}；当前版本未执行 OCR",
+            pdf_text.pages_needing_ocr.len(),
+            compact_page_ranges(&pdf_text.pages_needing_ocr)
+        ));
+    }
+    if pdf_text.has_encoding_issues {
+        extracted
+            .warnings
+            .push("检测到 PDF 字体编码异常；已保留可靠页面，异常页面需 OCR 或作者确认".to_owned());
+    }
+    if !pdf_text.pages_with_tables.is_empty() {
+        extracted.warnings.push(format!(
+            "原生表格候选页：{}；已优先保留版面结构，不使用文本 OCR 覆盖",
+            compact_page_ranges(&pdf_text.pages_with_tables)
+        ));
+    }
+    if !pdf_text.pages_with_columns.is_empty() {
+        extracted.warnings.push(format!(
+            "多栏版面候选页：{}；已按坐标重排阅读顺序",
+            compact_page_ranges(&pdf_text.pages_with_columns)
+        ));
     }
     if used_outline {
         extracted
@@ -416,25 +499,208 @@ fn extract_pdf(path: &Path) -> Result<ExtractedStructure, StructureError> {
     Ok(extracted)
 }
 
-fn extract_pdf_text(
-    path: &Path,
-    document: &Document,
-    page_numbers: &[u32],
-) -> (String, PdfTextSource) {
+struct PdfTextExtraction {
+    text: String,
+    source: PdfTextSource,
+    classification: Option<String>,
+    classification_confidence: Option<f32>,
+    pages_needing_ocr: Vec<u32>,
+    pages_with_tables: Vec<u32>,
+    pages_with_columns: Vec<u32>,
+    has_encoding_issues: bool,
+}
+
+fn extract_pdf_text(path: &Path, document: &Document, page_numbers: &[u32]) -> PdfTextExtraction {
+    let inspection = std::panic::catch_unwind(|| pdf_inspector::process_pdf(path))
+        .ok()
+        .and_then(Result::ok);
+    let classification = inspection
+        .as_ref()
+        .map(|result| format!("{:?}", result.pdf_type));
+    let classification_confidence = inspection.as_ref().map(|result| result.confidence);
+    let pages_needing_ocr = inspection
+        .as_ref()
+        .map(|result| result.pages_needing_ocr.clone())
+        .unwrap_or_default();
+    let pages_with_tables = inspection
+        .as_ref()
+        .map(|result| result.layout.pages_with_tables.clone())
+        .unwrap_or_default();
+    let pages_with_columns = inspection
+        .as_ref()
+        .map(|result| result.layout.pages_with_columns.clone())
+        .unwrap_or_default();
+    let has_encoding_issues = inspection
+        .as_ref()
+        .is_some_and(|result| result.has_encoding_issues);
+
+    if let Some(result) = &inspection {
+        let markdown = result.markdown.as_deref().unwrap_or_default();
+        if !markdown.trim().is_empty() {
+            return PdfTextExtraction {
+                text: markdown.to_owned(),
+                source: PdfTextSource::LayoutAwareInspector,
+                classification,
+                classification_confidence,
+                pages_needing_ocr,
+                pages_with_tables,
+                pages_with_columns,
+                has_encoding_issues,
+            };
+        }
+    }
     let enhanced = std::panic::catch_unwind(|| pdf_extract::extract_text(path))
         .ok()
         .and_then(Result::ok)
         .unwrap_or_default();
     if !enhanced.trim().is_empty() {
-        return (enhanced, PdfTextSource::EnhancedFontMapping);
+        return PdfTextExtraction {
+            text: enhanced,
+            source: PdfTextSource::EnhancedFontMapping,
+            classification,
+            classification_confidence,
+            pages_needing_ocr,
+            pages_with_tables,
+            pages_with_columns,
+            has_encoding_issues,
+        };
     }
 
     let basic = document.extract_text(page_numbers).unwrap_or_default();
     if basic.trim().is_empty() {
-        (String::new(), PdfTextSource::None)
+        PdfTextExtraction {
+            text: String::new(),
+            source: PdfTextSource::None,
+            classification,
+            classification_confidence,
+            pages_needing_ocr: if pages_needing_ocr.is_empty() {
+                page_numbers.to_vec()
+            } else {
+                pages_needing_ocr
+            },
+            pages_with_tables,
+            pages_with_columns,
+            has_encoding_issues,
+        }
     } else {
-        (basic, PdfTextSource::BasicContentStream)
+        PdfTextExtraction {
+            text: basic,
+            source: PdfTextSource::BasicContentStream,
+            classification,
+            classification_confidence,
+            pages_needing_ocr,
+            pages_with_tables,
+            pages_with_columns,
+            has_encoding_issues,
+        }
     }
+}
+
+fn infer_from_inspector_markdown(markdown: &str) -> ExtractedStructure {
+    let plain_text = markdown_plain_text(markdown);
+    let mut extracted = infer_from_plain_text(&plain_text);
+    let headings = markdown
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let marker_count = trimmed
+                .chars()
+                .take_while(|character| *character == '#')
+                .count();
+            if !(1..=4).contains(&marker_count)
+                || !trimmed
+                    .chars()
+                    .nth(marker_count)
+                    .is_some_and(char::is_whitespace)
+            {
+                return None;
+            }
+            let heading = normalize_line(trimmed[marker_count..].trim());
+            (!heading.is_empty() && heading.chars().count() <= 300).then_some(SectionSummary {
+                level: u8::try_from(marker_count).unwrap_or(1),
+                heading,
+            })
+        })
+        .collect::<Vec<_>>();
+    if let Some(first) = headings.first() {
+        if first.level == 1 {
+            extracted.title = Some(first.heading.clone());
+        }
+    }
+    let structural_headings = headings
+        .into_iter()
+        .skip_while(|heading| extracted.title.as_deref() == Some(heading.heading.as_str()))
+        .collect::<Vec<_>>();
+    if !structural_headings.is_empty() {
+        extracted.sections = structural_headings;
+    }
+    extracted.table_count = extracted.table_count.max(count_markdown_tables(markdown));
+    extracted
+}
+
+fn count_markdown_tables(markdown: &str) -> u32 {
+    markdown
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim().trim_matches('|').trim();
+            let cells = trimmed.split('|').map(str::trim).collect::<Vec<_>>();
+            cells.len() >= 2
+                && cells.iter().all(|cell| {
+                    let marker = cell.trim_matches(':').trim();
+                    marker.len() >= 3 && marker.chars().all(|character| character == '-')
+                })
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+fn markdown_plain_text(markdown: &str) -> String {
+    markdown
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                return None;
+            }
+            let without_heading = trimmed.trim_start_matches('#').trim_start();
+            let without_quote = without_heading.trim_start_matches('>').trim_start();
+            let without_list = without_quote
+                .strip_prefix("- ")
+                .or_else(|| without_quote.strip_prefix("* "))
+                .unwrap_or(without_quote);
+            let cleaned = without_list
+                .replace("**", "")
+                .replace("__", "")
+                .replace('`', "")
+                .replace('|', " ");
+            (!cleaned.trim().is_empty()).then_some(cleaned)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn compact_page_ranges(pages: &[u32]) -> String {
+    let mut pages = pages.to_vec();
+    pages.sort_unstable();
+    pages.dedup();
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < pages.len() {
+        let start = pages[index];
+        let mut end = start;
+        while index + 1 < pages.len() && pages[index + 1] == end.saturating_add(1) {
+            index += 1;
+            end = pages[index];
+        }
+        ranges.push(if start == end {
+            start.to_string()
+        } else {
+            format!("{start}-{end}")
+        });
+        index += 1;
+    }
+    ranges.join(", ")
 }
 
 fn pdf_metadata_title(document: &Document) -> Option<String> {
@@ -1219,10 +1485,14 @@ fn count_words(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        choose_pdf_title, decode_pdf_text_string, extract_tex, infer_from_plain_text,
-        parse_docx_xml, pdf_metadata_authors, pdf_metadata_title, AnalysisQuality,
+        choose_pdf_title, compact_page_ranges, decode_pdf_text_string, extract_pdf, extract_tex,
+        infer_from_inspector_markdown, infer_from_plain_text, markdown_plain_text, parse_docx_xml,
+        pdf_metadata_authors, pdf_metadata_title, AnalysisQuality,
     };
-    use lopdf::{dictionary, Document, Object};
+    use lopdf::{
+        content::{Content, Operation},
+        dictionary, Document, Object, Stream,
+    };
     use std::{fs, path::PathBuf, time::SystemTime};
 
     #[test]
@@ -1298,6 +1568,95 @@ mod tests {
         assert!(extracted.references_present);
         assert_eq!(extracted.figure_count, 1);
         assert_eq!(extracted.quality, Some(AnalysisQuality::Limited));
+    }
+
+    #[test]
+    fn normalizes_layout_aware_markdown_into_academic_structure() {
+        let markdown = "# Layout-Aware Research\n\nAda Author, Ben Researcher\n\n## Abstract\n\nThis paper evaluates a deterministic multi-column PDF extraction pipeline with enough words for a reliable abstract candidate.\n\n**Keywords:** PDF, layout\n\n## 1 Introduction\n\nBody text.\n\n### 1.1 Method\n\n| Metric | Value |\n| --- | --- |\n| Recall | 0.91 |\n\n## References";
+        let extracted = infer_from_inspector_markdown(markdown);
+
+        assert_eq!(extracted.title.as_deref(), Some("Layout-Aware Research"));
+        assert_eq!(extracted.authors, vec!["Ada Author", "Ben Researcher"]);
+        assert!(extracted.abstract_present);
+        assert_eq!(
+            extracted
+                .sections
+                .iter()
+                .map(|section| (section.level, section.heading.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (2, "Abstract"),
+                (2, "1 Introduction"),
+                (3, "1.1 Method"),
+                (2, "References")
+            ]
+        );
+        assert!(extracted.references_present);
+        assert_eq!(extracted.table_count, 1);
+        assert!(!markdown_plain_text(markdown).contains('|'));
+    }
+
+    #[test]
+    fn compacts_page_level_ocr_candidates() {
+        assert_eq!(compact_page_ranges(&[9, 3, 2, 4, 9, 12]), "2-4, 9, 12");
+        assert_eq!(compact_page_ranges(&[]), "");
+    }
+
+    #[test]
+    fn uses_layout_aware_extraction_for_a_synthetic_text_pdf() {
+        let path = synthetic_pdf_path();
+        let mut document = Document::with_version("1.7");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(
+            dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" },
+        );
+        let resources_id =
+            document.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+        let content = Content { operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 20.into()]),
+            Operation::new("Td", vec![60.into(), 780.into()]),
+            Operation::new("Tj", vec![Object::string_literal("Layout Aware Study")]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 11.into()]),
+            Operation::new("Td", vec![0.into(), (-30).into()]),
+            Operation::new("Tj", vec![Object::string_literal("Ada Author, Ben Researcher")]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 14.into()]),
+            Operation::new("Td", vec![0.into(), (-35).into()]),
+            Operation::new("Tj", vec![Object::string_literal("Abstract")]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 10.into()]),
+            Operation::new("Td", vec![0.into(), (-22).into()]),
+            Operation::new("Tj", vec![Object::string_literal("This paper evaluates reliable local PDF extraction for academic manuscripts.")]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 14.into()]),
+            Operation::new("Td", vec![0.into(), (-36).into()]),
+            Operation::new("Tj", vec![Object::string_literal("1 Introduction")]),
+            Operation::new("ET", vec![]),
+        ]}.encode().unwrap();
+        let content_id = document.add_object(Stream::new(dictionary! {}, content));
+        let page_id = document.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()], "Resources" => resources_id, "Contents" => content_id });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(
+                dictionary! { "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1 },
+            ),
+        );
+        let catalog_id =
+            document.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        document.trailer.set("Root", catalog_id);
+        document.save(&path).unwrap();
+
+        let extracted = extract_pdf(&path).unwrap();
+        let _ = fs::remove_file(path);
+
+        assert!(extracted.title.is_some());
+        assert!(extracted.abstract_present);
+        assert!(extracted
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("已使用布局感知 PDF 解析")));
+        assert!(extracted
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("PDF 文档分类：TextBased")));
     }
 
     #[test]
@@ -1424,5 +1783,13 @@ mod tests {
             "manuscriptdock-structure-{}-{nonce}.tex",
             std::process::id()
         ))
+    }
+
+    fn synthetic_pdf_path() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("manuscriptdock-structure-{nonce}.pdf"))
     }
 }
