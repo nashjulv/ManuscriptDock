@@ -11,6 +11,8 @@ run before each commit. It contains no real manuscripts or identifiable review m
   `M`, white canvas, and two manuscript lines.
 - Scaled the artwork to approximately 82% of the desktop icon canvas and centered its actual visual
   bounds so Dock, Finder, and installer surfaces retain consistent clear space.
+- Moved the two manuscript lines upward by 24 source pixels to improve the internal vertical balance
+  without changing their spacing, weight, or length.
 - Regenerated the complete Tauri icon family from that source for macOS, Windows, Linux, Android,
   and iOS packaging.
 - Kept the visual mark decorative beside the existing `投稿舱 ManuscriptDock` accessible name so
