@@ -805,26 +805,37 @@ describe("App", () => {
   it("recommends three domestic and three international journals and recalculates after adjustment", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = { id: "journal-workspace", manuscript: { name: "vision-study.tex", extension: "tex", kind: "latex", sizeBytes: 4096, modifiedUnixMs: null }, contentHash: "e".repeat(64), importedUnixMs: Date.UTC(2026, 7, 30), snapshotVersion: 2 };
-    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, scores: { topicScope: 100, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100 }, reasons: ["主题范围适配 100 分"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
+    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, estimatedSubmissionPreparationDays: 28, deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", scores: { institutionRules: null, topicScope: 100, specialtyFit: 96, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100, purposeFit: 85, timeFeasibility: 100 }, reasons: ["主题范围适配 100 分"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
     let runCount = 0;
     invokeMock.mockImplementation((command, args) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], archivedWorkspaces: [], warnings: [] });
       if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
-      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; return Promise.resolve({ schemaVersion: 1, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.0", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "not_configured_excluded_from_score", limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
+      if (command === "save_journal_recommendation_profile") { const profile = (args as { profile: Record<string, string> }).profile; return Promise.resolve({ ...profile, schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount + 1, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }); }
+      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; const recommendationProfile = { authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31", schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }; return Promise.resolve({ schemaVersion: 2, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.1", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, evaluatedUnixMs: Date.UTC(2026,7,30), recommendationProfile, deadlineDaysRemaining: 120, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "official_source_search_required_excluded_from_score", limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 vision-study.tex" }));
     await user.click(screen.getByRole("button", { name: "期刊匹配" }));
-    expect(screen.getByText(/综合适配分不是录用概率/)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "计算推荐" }));
+    expect(screen.getByText(/学校标准是重要依据/)).toBeVisible();
+    const calculateButton = screen.getByRole("button", { name: "保存档案并计算推荐" });
+    expect(calculateButton).toBeDisabled();
+    await user.type(screen.getByLabelText("投稿人姓名"), "测试作者");
+    await user.type(screen.getByLabelText("学校 / 机构"), "示例大学");
+    await user.type(screen.getByLabelText("学院或专业"), "计算机视觉");
+    await user.selectOptions(screen.getByLabelText("论文用途"), "graduation");
+    await user.type(screen.getByLabelText(/完成投稿截止日期/), "2099-12-31");
+    await user.click(calculateButton);
     expect(await screen.findByRole("heading", { name: "国内 3 家" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "国际 3 家" })).toBeVisible();
+    expect(screen.getByText(/学校规则尚未核验/)).toBeVisible();
     expect(screen.getByText(/jmr-1/)).toBeVisible();
     await user.selectOptions(screen.getByLabelText("研究方向"), "natural_language_processing");
-    await user.click(screen.getByRole("button", { name: "按调整重新计算" }));
+    expect(screen.queryByText(/jmr-1/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存档案并计算推荐" }));
     expect(await screen.findByText(/jmr-2/)).toBeVisible();
-    expect(invokeMock).toHaveBeenLastCalledWith("recommend_journals", { workspaceId: workspace.id, preferences: expect.objectContaining({ topic: "natural_language_processing" }) });
+    expect(invokeMock).toHaveBeenLastCalledWith("recommend_journals", { workspaceId: workspace.id, profileId: `jmp-${"a".repeat(20)}`, preferences: expect.objectContaining({ topic: "natural_language_processing" }) });
+    expect(invokeMock).toHaveBeenCalledWith("save_journal_recommendation_profile", { workspaceId: workspace.id, profile: expect.objectContaining({ authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31" }) });
   });
 });

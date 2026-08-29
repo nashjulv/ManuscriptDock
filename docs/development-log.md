@@ -3,6 +3,38 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Versioned submission context and institution-rule boundary
+
+- Added a required local submission profile before journal matching: author name, institution,
+  faculty/specialty, manuscript purpose, and submission-completion deadline. Each distinct profile is
+  an immutable JSON record and is referenced by the recommendation run.
+- Made every profile and preference change invalidate the visible result and produce a newly bound
+  run. Author name changes attribution only; no author-identity or institutional-prestige scoring is
+  permitted.
+- Added specialty, purpose, and deadline feasibility to deterministic scoring. Deadline feasibility
+  measures ManuscriptDock's internal submission-preparation allowance and does not claim to predict
+  review, acceptance, publication, or indexing dates.
+- Added the PWC institution-rule evidence contract and reserved the highest single weight, 24%, for
+  verified official rules. Missing or candidate-only sources are excluded and force a clearly marked
+  provisional shortlist; verified eligibility rules can block a candidate without hiding it.
+- Defined the future discovery boundary: search only after author authorization, prioritize official
+  institution/graduate-school/research-office/faculty pages, never treat search snippets as evidence,
+  and require source, scope, validity, original excerpt, verification, and rule-set version before
+  scoring.
+- Reworked the bilingual form and result cards with visible labels, 44px controls, narrow-screen
+  reflow, institution-rule status, remaining days, and specialty/purpose/timing components.
+
+### Verification
+
+- `npm run check`: passed TypeScript checks, 15 frontend interaction tests, Vite production build,
+  rustfmt, 57 manuscript-core tests, 4 desktop Rust tests, and Clippy with warnings denied.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the complete Windows x64
+  desktop dependency graph with the profile persistence and scoring contracts.
+- `npm run tauri -- build --debug --no-bundle`: produced the macOS debug desktop executable.
+- Browser review verified the two-column desktop form hierarchy and a 375px viewport with one-column
+  preference controls, 44px inputs, no horizontal overflow (`clientWidth = scrollWidth = 360`), and
+  a visible provisional institution-rule state.
+
 ## 2026-08-30 — Five-part single-paper KnowledgeBody architecture
 
 - Upgraded newly created `AcademicKnowledgeBodySnapshot` records to schema v2 while retaining read
