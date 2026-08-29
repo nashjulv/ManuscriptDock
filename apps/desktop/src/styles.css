@@ -39,7 +39,8 @@ h1, h2, h3, p { margin-top: 0; }
 /* PWC-style global bar */
 .product-bar { height: 56px; display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr) minmax(220px, 1fr); align-items: center; gap: 20px; padding: 0 24px; background: var(--bg); }
 .brand { min-width: 0; display: flex; align-items: center; gap: 9px; }
-.brand-mark { width: 28px; height: 28px; display: grid; place-items: center; flex: none; color: var(--text); background: transparent; border: 1px solid var(--text); border-radius: 4px; font: 600 13px/1 Georgia, serif; }
+.brand-mark { width: 32px; height: 32px; display: grid; place-items: center; flex: none; overflow: hidden; background: #fff; border-radius: 5px; }
+.brand-mark img { width: 32px; height: 32px; display: block; object-fit: contain; }
 .brand-copy { min-width: 0; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
 .brand-cn { color: var(--text); font-size: 15px; }
 .brand-name { color: var(--text-secondary); font-size: 14px; letter-spacing: -.01em; }

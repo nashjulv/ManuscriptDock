@@ -18,9 +18,10 @@ describe("App", () => {
   });
 
   it("explains the local-first import step", () => {
-    render(<App />);
+    const { container } = render(<App />);
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
+    expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
     const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock" }));
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");

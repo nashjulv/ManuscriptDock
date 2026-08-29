@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  role="img"
+  aria-labelledby="title description"
+  shape-rendering="geometricPrecision"
+>
+  <title id="title">ManuscriptDock folded manuscript brand mark</title>
+  <desc id="description">
+    An editable manuscript page folding into a green paper airplane, with a hidden M in the fold.
+  </desc>
+
+  <defs>
+    <!--
+      The filter adds a crayon-like edge, grain, and slight overdraw while keeping
+      every underlying path editable. Remove filter="url(#crayon)" from gray-lines
+      to return to geometrically smooth strokes.
+    -->
+    <filter
+      id="crayon"
+      x="-8%"
+      y="-8%"
+      width="116%"
+      height="116%"
+      color-interpolation-filters="sRGB"
+    >
+      <feTurbulence
+        type="fractalNoise"
+        baseFrequency="0.010 0.028"
+        numOctaves="3"
+        seed="23"
+        result="edge-noise"
+      />
+      <feDisplacementMap
+        in="SourceGraphic"
+        in2="edge-noise"
+        scale="9"
+        xChannelSelector="R"
+        yChannelSelector="G"
+        result="rough-stroke"
+      />
+      <feTurbulence
+        type="fractalNoise"
+        baseFrequency="0.055"
+        numOctaves="3"
+        seed="41"
+        result="wax-grain"
+      />
+      <feColorMatrix
+        in="wax-grain"
+        type="matrix"
+        values="
+          1 0 0 0 0
+          0 1 0 0 0
+          0 0 1 0 0
+          0.24 0.24 0.24 0 0.28
+        "
+        result="grain-mask"
+      />
+      <feComposite
+        in="rough-stroke"
+        in2="grain-mask"
+        operator="in"
+        result="grainy-stroke"
+      />
+      <feOffset in="grainy-stroke" dx="1.1" dy="0.7" result="overdraw-one" />
+      <feMerge>
+        <feMergeNode in="overdraw-one" />
+        <feMergeNode in="grainy-stroke" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Toggle or remove this group when a transparent canvas is preferred. -->
+  <g id="background">
+    <rect width="1024" height="1024" fill="#FFFFFF" />
+  </g>
+
+  <!-- Keep the artwork centered with clear space for desktop launchers and app stores. -->
+  <g id="brand-art" transform="translate(95.44 108.56) scale(0.82)">
+  <!-- The brand-color wing is independent from every gray stroke. -->
+  <g id="green-wing" fill="#A6CE39">
+    <!-- A-C-D: sized to remain slightly smaller than the white D-C-B wing. -->
+    <path d="M 138 202 L 878 48 L 300 384 Z" />
+  </g>
+
+  <!--
+    All gray artwork inherits one color and one stroke width from this group.
+    Change stroke-width="60" here to resize every dark-gray line together.
+  -->
+  <g
+    id="gray-lines"
+    fill="none"
+    stroke="#5B5956"
+    stroke-width="60"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#crayon)"
+  >
+    <g id="manuscript-frame">
+      <path d="M 138 202 L 878 48 L 878 936 L 138 936 Z" />
+    </g>
+
+    <g id="hidden-m-fold">
+      <!-- The B-C segment starts exactly at the lower fold point B. -->
+      <path d="M 138 202 L 466 570 L 878 48" />
+    </g>
+
+    <g id="airplane-crease">
+      <!-- D-C separates the smaller green wing from the larger white wing. -->
+      <path d="M 300 384 L 878 48" />
+    </g>
+
+    <g id="origami-connector">
+      <path d="M 310 390 L 310 510 L 392 450 Z" />
+    </g>
+
+    <g id="manuscript-lines">
+      <path d="M 246 700 L 768 700" />
+      <path d="M 246 830 L 768 830" />
+    </g>
+  </g>
+  </g>
+</svg>

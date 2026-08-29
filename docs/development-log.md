@@ -3,6 +3,29 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Unified folded-manuscript brand icon
+
+- Replaced the temporary boxed `M` with the approved folded-manuscript paper-plane mark in the
+  persistent product bar and browser entry point.
+- Established one editable SVG source with the `#A6CE39` wing, `#5B5956` crayon strokes, hidden
+  `M`, white canvas, and two manuscript lines.
+- Scaled the artwork to approximately 82% of the desktop icon canvas and centered its actual visual
+  bounds so Dock, Finder, and installer surfaces retain consistent clear space.
+- Regenerated the complete Tauri icon family from that source for macOS, Windows, Linux, Android,
+  and iOS packaging.
+- Kept the visual mark decorative beside the existing `投稿舱 ManuscriptDock` accessible name so
+  assistive technology does not announce the brand twice.
+
+### Verification
+
+- `xmllint --noout` passed for the design-system, WebView, and Tauri SVG sources.
+- `npm run test --workspace @manuscriptdock/desktop`: passed.
+- `npm run typecheck --workspace @manuscriptdock/desktop`: passed.
+- `npm run build --workspace @manuscriptdock/desktop`: passed.
+- `npm run tauri --workspace @manuscriptdock/desktop -- build --bundles app`: produced a fresh
+  `ManuscriptDock.app`; its bundled `Resources/icon.icns` checksum matches the generated source
+  `icon.icns` exactly.
+
 ## 2026-08-29 — Bilingual homepage brand statement
 
 - Added a prominent, always-visible Chinese/English brand statement above the homepage import area.
