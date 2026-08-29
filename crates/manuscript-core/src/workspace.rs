@@ -5,6 +5,7 @@ use crate::{
         KnowledgeInquiryTarget, KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
     },
     inspect_manuscript,
+    journal_match::{recommend_journals, JournalMatchPreferences, JournalRecommendationRun},
     knowledge::{
         discipline_catalog_item, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
         DisciplineClassification, KnowledgeBodyError, DISCIPLINE_INDEX_SCHEME,
@@ -897,6 +898,38 @@ impl WorkspaceStore {
             unix_time_ms()?,
         )?;
         Ok(report)
+    }
+
+    pub fn recommend_journals(
+        &self,
+        workspace_id: &str,
+        preferences: JournalMatchPreferences,
+    ) -> Result<JournalRecommendationRun, WorkspaceError> {
+        let report = self.analyze_structure(workspace_id)?;
+        let run = recommend_journals(&report, preferences);
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let analysis_root = workspace_root.join("analysis");
+        fs::create_dir_all(&analysis_root)?;
+        let run_path = analysis_root.join(format!("journal-match-{}.json", run.run_id));
+        if !run_path.exists() {
+            let temporary_path = analysis_root.join(format!(".{}.tmp", Uuid::new_v4()));
+            write_json(&temporary_path, &run)?;
+            match fs::rename(&temporary_path, &run_path) {
+                Ok(()) => {}
+                Err(_) if run_path.exists() => {
+                    let _ = fs::remove_file(temporary_path);
+                }
+                Err(error) => return Err(WorkspaceError::Io(error)),
+            }
+        }
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "journal_recommendations_computed",
+            &manifest.workspace,
+            unix_time_ms()?,
+        )?;
+        Ok(run)
     }
 
     pub fn evaluate_readiness(

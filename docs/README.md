@@ -6,6 +6,7 @@
 - [投稿规则系统](submission-rule-system.md)：统一论文模型、分层规则包、覆盖等级和维护机制。
 - [内置出版标准目录](publication-standards-catalog.md)：首批中国、国际、出版商和研究报告规则及其真实覆盖边界。
 - [本地论文版本库](local-version-library.md)：面向作者的连续版本、确定性比较、安全恢复和知识体版本锚点。
+- [期刊匹配与投稿目标推荐](journal-matching-and-submission-targeting.md)：计算机/AI 期刊快照、本地可解释评分、国内外各三家推荐及调整后重算边界。
 - [最近工作区管理](local-workspace-management.md)：逐篇归档、恢复、永久删除及其数据与知识体边界。
 - [投稿优化修订台](submission-revision-desk.md)：面向投稿问题的结构化修订、差异确认、格式回写边界及版本闭环。
 - [端到端论文生命周期](end-to-end-manuscript-lifecycle.md)：导入、检查、修订、版本、存证、投稿和知识体的状态合同、恢复规则与验收路径。

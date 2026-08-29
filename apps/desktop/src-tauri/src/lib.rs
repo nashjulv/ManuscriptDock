@@ -2,12 +2,13 @@ mod model_service;
 
 use manuscript_core::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, discipline_catalog,
-    AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, KnowledgeBodyRecord,
-    KnowledgeDialogueLedger, KnowledgeInquiryStance, KnowledgeInquiryTarget, LocalAttestation,
-    ManuscriptSelection, ReadinessEvaluation, RevisionApplication, RevisionChangeInput,
-    RevisionDraft, RulePackCatalog, StructureAnalysis, SubmissionElementCatalog, SubmissionExport,
-    SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, WorkspaceCatalog,
-    WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
+    AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, JournalMatchPreferences,
+    JournalRecommendationRun, KnowledgeBodyRecord, KnowledgeDialogueLedger, KnowledgeInquiryStance,
+    KnowledgeInquiryTarget, LocalAttestation, ManuscriptSelection, ReadinessEvaluation,
+    RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
+    SubmissionElementCatalog, SubmissionExport, SubmissionRecord, VersionComparison,
+    VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCreation, WorkspaceLifecycle,
+    WorkspaceStore,
 };
 use model_service::{ModelSettingsSummary, ModelSlotInput};
 use serde_json::json;
@@ -420,6 +421,18 @@ async fn evaluate_readiness(
 }
 
 #[tauri::command]
+async fn recommend_journals(
+    workspace_id: String,
+    preferences: JournalMatchPreferences,
+    app: AppHandle,
+) -> Result<JournalRecommendationRun, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .recommend_journals(&workspace_id, preferences)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn list_rule_packs() -> Result<RulePackCatalog, String> {
     bundled_rule_pack_catalog().map_err(|error| error.to_string())
 }
@@ -498,7 +511,8 @@ pub fn run() {
             get_revision_draft,
             apply_manuscript_revision,
             analyze_workspace,
-            evaluate_readiness
+            evaluate_readiness,
+            recommend_journals
         ])
         .run(tauri::generate_context!())
         .expect("failed to run ManuscriptDock");

@@ -3,6 +3,32 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Local computer/AI journal matching
+
+- Adapted the PWC dynamic-fit proposal into a bounded local MVP between version management and
+  attestation: a recommendation run binds manuscript hash/version, preferences, algorithm version,
+  catalog version, score details, provenance, limitations, and transfer state.
+- Added a verified computer/AI candidate snapshot based on the independent CCF 2025 domestic
+  T1/T2/T3 directory and CCF international AI A/B/C directory, with official journal homepages.
+- Implemented deterministic bilingual topic detection, article-type detection, manuscript-readiness
+  scoring, preference adjustment, stable run IDs, and separate top-three domestic/international lists.
+- Persisted each distinct run under the workspace analysis directory and appended an auditable
+  `journal_recommendations_computed` event without network access, model calls, or manuscript transfer.
+- Added an eighth workflow stage with author-adjustable topic, article type, language, target strategy,
+  and open-access controls; recalculation produces a new run instead of overwriting prior evidence.
+- Kept school/institution rules explicitly unconfigured and excluded from scoring. The UI and product
+  specification state that fit scores are not acceptance probabilities and that journal websites must
+  be verified before submission.
+
+### Verification
+
+- `rustup run stable cargo test --workspace`: passed 52 tests, including deterministic recommendation,
+  bounded scores, six-result output, and topic-adjustment behavior.
+- `npm run test --workspace @manuscriptdock/desktop`: passed 15 interaction tests, including domestic/
+  international result rendering and recalculation after an author adjustment.
+- `npm run typecheck --workspace @manuscriptdock/desktop`: passed.
+- `npm run build --workspace @manuscriptdock/desktop`: passed the production build.
+
 ## 2026-08-30 — Unified folded-manuscript brand icon
 
 - Replaced the temporary boxed `M` with the approved folded-manuscript paper-plane mark in the

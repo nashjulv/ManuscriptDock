@@ -791,4 +791,30 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "为外部读者保留的论文提问窗口" })).toBeVisible();
     expect(screen.getByText("当前版本不接收外部网络请求，也不会虚构外部反馈。")).toBeVisible();
   });
+
+  it("recommends three domestic and three international journals and recalculates after adjustment", async () => {
+    isTauriMock.mockReturnValue(true);
+    const workspace = { id: "journal-workspace", manuscript: { name: "vision-study.tex", extension: "tex", kind: "latex", sizeBytes: 4096, modifiedUnixMs: null }, contentHash: "e".repeat(64), importedUnixMs: Date.UTC(2026, 7, 30), snapshotVersion: 2 };
+    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, scores: { topicScope: 100, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100 }, reasons: ["主题范围适配 100 分"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
+    let runCount = 0;
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], archivedWorkspaces: [], warnings: [] });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; return Promise.resolve({ schemaVersion: 1, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.0", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "not_configured_excluded_from_score", limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 vision-study.tex" }));
+    await user.click(screen.getByRole("button", { name: "期刊匹配" }));
+    expect(screen.getByText(/综合适配分不是录用概率/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "计算推荐" }));
+    expect(await screen.findByRole("heading", { name: "国内 3 家" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "国际 3 家" })).toBeVisible();
+    expect(screen.getByText(/jmr-1/)).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("研究方向"), "natural_language_processing");
+    await user.click(screen.getByRole("button", { name: "按调整重新计算" }));
+    expect(await screen.findByText(/jmr-2/)).toBeVisible();
+    expect(invokeMock).toHaveBeenLastCalledWith("recommend_journals", { workspaceId: workspace.id, preferences: expect.objectContaining({ topic: "natural_language_processing" }) });
+  });
 });

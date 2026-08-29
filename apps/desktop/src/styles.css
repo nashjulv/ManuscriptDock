@@ -684,6 +684,31 @@ h1, h2, h3, p { margin-top: 0; }
   .knowledge-identity-card dl > div { grid-template-columns: 1fr; gap: 3px; }
 }
 
+.journal-preferences { margin: 18px 0; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+.journal-preferences h3 { margin: 0 0 12px; font-size: 14px; }
+.journal-preferences > div { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.journal-preferences label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; }
+.journal-preferences select { width: 100%; min-height: 38px; padding: 7px 28px 7px 9px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 7px; font: inherit; font-size: 12px; }
+.journal-preferences > .primary-button { margin-top: 14px; }
+.journal-run-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0; color: var(--text-muted); font-size: 11px; }
+.journal-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.journal-result-group { min-width: 0; }
+.journal-result-group > h3 { margin: 0 0 8px; font-size: 14px; }
+.journal-result-group ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.journal-result-group li { padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.journal-result-group li > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: start; }
+.journal-result-group li > header > span { color: var(--text-muted); font-size: 11px; }
+.journal-result-group li strong { display: block; color: var(--text); font-size: 13px; line-height: 18px; }
+.journal-result-group li header p, .journal-result-group li > p { margin: 2px 0 0; color: var(--text-muted); font-size: 10px; line-height: 15px; }
+.journal-result-group li em { color: var(--button-text); font-size: 20px; font-style: normal; line-height: 22px; }
+.journal-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.journal-tags span { padding: 2px 6px; color: var(--text-secondary); background: var(--panel); border-radius: 5px; font-size: 10px; }
+
+@media (max-width: 900px) {
+  .journal-preferences > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .journal-columns { grid-template-columns: 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

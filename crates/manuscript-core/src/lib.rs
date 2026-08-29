@@ -1,4 +1,5 @@
 mod dialogue;
+mod journal_match;
 mod knowledge;
 mod readiness;
 mod revision;
@@ -9,6 +10,12 @@ pub use dialogue::{
     KnowledgeAnswerRecord, KnowledgeDialogueItem, KnowledgeDialogueLedger, KnowledgeInquiryOrigin,
     KnowledgeInquiryRecord, KnowledgeInquiryStance, KnowledgeInquiryTarget,
     KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
+};
+pub use journal_match::{
+    recommend_journals, ArticleTypePreference, JournalFitScores, JournalMatchPreferences,
+    JournalRecommendation, JournalRecommendationRun, JournalRegion, OpenAccessPreference,
+    PublicationLanguagePreference, ResearchTopic, TargetStrategy, JOURNAL_CATALOG_VERSION,
+    JOURNAL_MATCH_ALGORITHM_VERSION, JOURNAL_MATCH_SCHEMA_VERSION,
 };
 pub use knowledge::{
     discipline_catalog, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
