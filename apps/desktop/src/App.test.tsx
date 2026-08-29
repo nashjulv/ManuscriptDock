@@ -689,11 +689,18 @@ describe("App", () => {
     }));
     const assertion = (id: string, relationKind: string, protocolObject: string, from: number, to: number) => ({ assertionId: id, version: 1, relationKind, protocolObject, source: bodies[from].claim, target: bodies[to].claim, basis: [{ label: "synthetic DOI anchor", source: bodies[from].sourceAnchor }], status: "author_confirmed" });
     const knowledgeSnapshot = {
-      schemaVersion: 1, knowledgeBodyId: "body:K-A", snapshotVersion: 7, manuscript: reference("artifact:K-A", "artifact_version", 3),
+      schemaVersion: 2, knowledgeBodyId: "body:K-A", snapshotVersion: 7, manuscript: reference("artifact:K-A", "artifact_version", 3),
       claim: { claim: bodies[0].claim, proposition: { ...reference("proposition:K-A", "proposition", 3), state: "established" }, conditions: { ...reference("scope:K-A", "scope", 3), state: "established" }, evidence: { ...reference("evidence:K-A", "evidence", 2), state: "established" }, sources: { ...bodies[0].sourceAnchor, state: "established" }, status: { ...reference("status:K-A", "status", 2), state: "established" } },
       objects: { artifactVersion: reference("artifact:K-A", "artifact_version", 3), claim: bodies[0].claim, scope: reference("scope:K-A", "scope", 3), method: bodies[0].method, result: reference("result:K-A", "result", 2), evidenceRelation: reference("evidence-relation:K-A", "evidence_relation", 2), sourceAnchor: bodies[0].sourceAnchor, aiReviewReport: reference("review:K-A", "ai_review_report", 2), provenance: reference("provenance:K-A", "provenance", 2), knowledgeBodySnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7) },
       aiReviewReport: reference("review:K-A", "ai_review_report", 2),
       aiReviewHistory: { reportId: "review:K-A", currentVersion: 2, versions: [{ reportId: "review:K-A", version: 1, previousVersion: null }, { reportId: "review:K-A", version: 2, previousVersion: 1 }] },
+      serviceArchitecture: {
+        identityAndVersion: { knowledgeBody: bodies[0].body, currentSnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7), sourceArtifact: reference("artifact:K-A", "artifact_version", 3), creatorProvenance: reference("provenance:K-A", "provenance", 2), lifecycleStatus: "active", supersedes: null, immutableHistory: true },
+        knowledgeBoundaryAndEvidence: { claims: [bodies[0].claim], scope: reference("scope:K-A", "scope", 3), method: bodies[0].method, result: reference("result:K-A", "result", 2), evidence: reference("evidence:K-A", "evidence", 2), evidenceRelation: reference("evidence-relation:K-A", "evidence_relation", 2), sourceAnchor: bodies[0].sourceAnchor, knownLimitations: [], unverifiedObjects: [] },
+        capabilityContracts: [{ contractId: "capability:qa", version: 1, capability: "evidence_bounded_question_answering", inputContract: ["question"], outputContract: ["answer", "source_anchors"], preconditions: ["author_configured_runtime"], refusalConditions: ["insufficient_evidence"], evidenceSources: [bodies[0].sourceAnchor], availability: "requires_runtime" }],
+        interactionRuntime: { runtimeProfile: reference("runtime:K-A", "runtime_profile", 1), bindingPolicy: "replaceable", coordinatorRole: "author_configured_model", allowedTools: ["source_anchor_lookup"], perCallAuthorization: true, externalTransmission: "author_confirmed_per_request" },
+        validationRightsAndReputation: { validationRecords: [reference("review:K-A", "ai_review_report", 2)], rightsPolicy: reference("rights:K-A", "rights_policy", 1), reputationRecord: reference("reputation:K-A", "reputation_record", 4), contentSnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7), attributionRequired: true, reputationUpdatesIndependently: true, reuseControl: "author_controlled" },
+      },
       network: { bodies, assertions: [assertion("reproduction:1", "reproduction", "ReproductionAssertion", 0, 1), assertion("conflict:1", "claim_relation", "ClaimRelationAssertion", 1, 2), assertion("transfer:1", "method_transfer", "MethodRelationAssertion", 0, 3), assertion("citation:1", "citation", "CitationAssertion", 1, 4), assertion("classification:1", "classification", "ClassificationAssignment", 3, 4), assertion("evidence:1", "evidence_relation", "EvidenceRelation", 2, 4)], supportedRelations: ["citation", "claim_relation", "evidence_relation", "method_transfer", "reproduction", "alignment", "version_relation", "classification"] },
       externalTransmission: "not_performed",
     };
@@ -737,21 +744,24 @@ describe("App", () => {
     expect(screen.getByText("computer_information_sciences")).toBeVisible();
     expect(screen.getByText("c".repeat(64))).toBeVisible();
     expect(screen.getByText("ClassificationAssignment · v1")).toBeVisible();
-    expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("ArtifactVersion · v3");
-    expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("Scope · v3");
-    expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("KnowledgeBodySnapshot · S7");
-    expect(screen.getByRole("list", { name: "知识体核心要素" })).toHaveTextContent("AIReviewReport · v2");
+    const fiveLayers = screen.getByRole("list", { name: "知识体五部分架构" });
+    expect(fiveLayers.children).toHaveLength(5);
+    expect(fiveLayers).toHaveTextContent("身份与版本 · Artifact v3 · Snapshot S7");
+    expect(fiveLayers).toHaveTextContent("知识、边界与证据 · Claim v3");
+    expect(fiveLayers).toHaveTextContent("能力契约 · 1 项");
+    expect(fiveLayers).toHaveTextContent("交互与执行运行时 · RuntimeProfile v1");
+    expect(fiveLayers).toHaveTextContent("验证、权利与信誉 · Reputation v4");
 
     await user.click(screen.getByRole("tab", { name: "证据" }));
     expect(screen.getByRole("tab", { name: "证据" })).toHaveAttribute("aria-selected", "true");
     const spatialMap = screen.getByRole("img", { name: /中心是 Claim v3 十二面体/ });
     expect(spatialMap.querySelector(".claim-dodecahedron")).toBeInTheDocument();
     expect(spatialMap.querySelectorAll(".dodeca-edge")).toHaveLength(30);
-    expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3十二面体核心");
-    expect(spatialMap.querySelectorAll(".claim-element")).toHaveLength(8);
-    expect(spatialMap).toHaveTextContent("ArtifactVersionv3");
-    expect(spatialMap).toHaveTextContent("EvidenceRelationv2");
-    expect(spatialMap).toHaveTextContent("AIReviewReportv2历史 v1");
+    expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3知识核心 · 边界受限");
+    expect(spatialMap.querySelectorAll(".service-layer-node")).toHaveLength(5);
+    expect(spatialMap).toHaveTextContent("身份与版本S7Artifact v3 · 稳定 ID");
+    expect(spatialMap).toHaveTextContent("能力契约v1 · 1输入 · 输出 · 前置 · 拒绝");
+    expect(spatialMap).toHaveTextContent("验证、权利与信誉Reputation · v4AIReview v2 · 历史 v1");
 
     await user.click(screen.getByRole("tab", { name: "2. 两体关联" }));
     expect(screen.getByRole("img", { name: /2 个保持边界的知识体/ })).toBeVisible();

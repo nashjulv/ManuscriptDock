@@ -204,18 +204,27 @@ interface RevisionChange { field: RevisionFieldKind; before: string; after: stri
 interface RevisionSet { revisionId: string; workspaceId: string; baseVersion: number; outputVersion: number; createdUnixMs: number; changes: RevisionChange[]; externalTransmission: "not_performed"; }
 type RevisionApplication = { status: "created"; workspace: WorkspaceSummary; version: ManuscriptVersionSummary; revisionSet: RevisionSet } | { status: "unchanged"; version: number; message: string };
 
-type KnowledgeObjectType = "knowledge_body" | "knowledge_body_snapshot" | "claim" | "proposition" | "scope" | "evidence" | "evidence_relation" | "source_anchor" | "status" | "method" | "result" | "artifact_version" | "ai_review_report" | "provenance";
+type KnowledgeObjectType = "knowledge_body" | "knowledge_body_snapshot" | "claim" | "proposition" | "scope" | "evidence" | "evidence_relation" | "source_anchor" | "status" | "method" | "result" | "artifact_version" | "ai_review_report" | "provenance" | "capability_contract" | "runtime_profile" | "rights_policy" | "reputation_record";
 interface VersionedObjectReference { objectId: string; objectType: KnowledgeObjectType; version: number; }
 interface ClaimElementReference extends VersionedObjectReference { state: "pending" | "established"; }
 interface ClaimFiveTuple { claim: VersionedObjectReference; proposition: ClaimElementReference; conditions: ClaimElementReference; evidence: ClaimElementReference; sources: ClaimElementReference; status: ClaimElementReference; }
 interface KnowledgeBodyObjectSet { artifactVersion: VersionedObjectReference; claim: VersionedObjectReference; scope: VersionedObjectReference; method: VersionedObjectReference; result: VersionedObjectReference; evidenceRelation: VersionedObjectReference; sourceAnchor: VersionedObjectReference; aiReviewReport: VersionedObjectReference | null; provenance: VersionedObjectReference; knowledgeBodySnapshot: VersionedObjectReference; }
 interface AiReviewReportVersion { reportId: string; version: number; previousVersion: number | null; reviewedClaim: VersionedObjectReference; reviewerId: string; reviewerVersion: string; createdUnixMs: number; status: string; summary: string; externalTransmission: string; }
 interface AiReviewReportHistory { reportId: string; currentVersion: number | null; versions: AiReviewReportVersion[]; }
+type CapabilityAvailability = "available" | "requires_runtime" | "planned";
+interface CapabilityContract { contractId: string; version: number; capability: string; inputContract: string[]; outputContract: string[]; preconditions: string[]; refusalConditions: string[]; evidenceSources: VersionedObjectReference[]; availability: CapabilityAvailability; }
+interface KnowledgeBodyServiceArchitecture {
+  identityAndVersion: { knowledgeBody: VersionedObjectReference; currentSnapshot: VersionedObjectReference; sourceArtifact: VersionedObjectReference; creatorProvenance: VersionedObjectReference; lifecycleStatus: string; supersedes: VersionedObjectReference | null; immutableHistory: boolean; };
+  knowledgeBoundaryAndEvidence: { claims: VersionedObjectReference[]; scope: VersionedObjectReference; method: VersionedObjectReference; result: VersionedObjectReference; evidence: VersionedObjectReference; evidenceRelation: VersionedObjectReference; sourceAnchor: VersionedObjectReference; knownLimitations: string[]; unverifiedObjects: VersionedObjectReference[]; };
+  capabilityContracts: CapabilityContract[];
+  interactionRuntime: { runtimeProfile: VersionedObjectReference; bindingPolicy: "replaceable"; coordinatorRole: string; allowedTools: string[]; perCallAuthorization: boolean; externalTransmission: string; };
+  validationRightsAndReputation: { validationRecords: VersionedObjectReference[]; rightsPolicy: VersionedObjectReference; reputationRecord: VersionedObjectReference; contentSnapshot: VersionedObjectReference; attributionRequired: boolean; reputationUpdatesIndependently: boolean; reuseControl: string; };
+}
 type KnowledgeBodyRole = "current_study" | "original_research" | "reproduction_research" | "competing_research" | "cross_domain_application" | "later_synthesis";
 interface KnowledgeBodyNode { body: VersionedObjectReference; displayId: string; title: string; role: KnowledgeBodyRole; claim: VersionedObjectReference; sourceAnchor: VersionedObjectReference; method: VersionedObjectReference; }
 type RelationKind = "citation" | "claim_relation" | "evidence_relation" | "method_transfer" | "reproduction" | "alignment" | "version_relation" | "classification";
 interface NetworkAssertion { assertionId: string; version: number; relationKind: RelationKind; protocolObject: string; source: VersionedObjectReference; target: VersionedObjectReference; basis: Array<{ label: string; source: VersionedObjectReference }>; status: string; }
-interface AcademicKnowledgeBodySnapshot { schemaVersion: number; knowledgeBodyId: string; snapshotVersion: number; manuscript: VersionedObjectReference; claim: ClaimFiveTuple; objects: KnowledgeBodyObjectSet; aiReviewReport: VersionedObjectReference | null; aiReviewHistory: AiReviewReportHistory; network: { bodies: KnowledgeBodyNode[]; assertions: NetworkAssertion[]; supportedRelations: RelationKind[] }; externalTransmission: string; }
+interface AcademicKnowledgeBodySnapshot { schemaVersion: number; knowledgeBodyId: string; snapshotVersion: number; manuscript: VersionedObjectReference; claim: ClaimFiveTuple; objects: KnowledgeBodyObjectSet; aiReviewReport: VersionedObjectReference | null; aiReviewHistory: AiReviewReportHistory; serviceArchitecture?: KnowledgeBodyServiceArchitecture; network: { bodies: KnowledgeBodyNode[]; assertions: NetworkAssertion[]; supportedRelations: RelationKind[] }; externalTransmission: string; }
 
 interface ReadinessReport {
   reportVersion: number;
@@ -305,7 +314,7 @@ interface KnowledgeBodyRecord {
 
 type KnowledgeInquiryOrigin = "owner" | "external";
 type KnowledgeInquiryStance = "recognition" | "question" | "challenge";
-type KnowledgeInquiryTarget = "knowledge_body" | "claim" | "scope" | "method" | "result" | "evidence_relation" | "source_anchor" | "ai_review_report" | "provenance";
+type KnowledgeInquiryTarget = "knowledge_body" | "claim" | "scope" | "method" | "result" | "evidence_relation" | "source_anchor" | "ai_review_report" | "provenance" | "capability_contract" | "rights_reputation";
 
 interface KnowledgeInquiryRecord {
   schemaVersion: number;
@@ -1305,9 +1314,13 @@ function KnowledgeBodyOperation({ workspace, snapshot, record }: { workspace: Wo
   const { locale, text } = useI18n();
   const objects = snapshot.objects;
   const aiReview = snapshot.aiReviewReport;
+  const architecture = snapshot.serviceArchitecture;
+  const capabilityCount = architecture?.capabilityContracts.length ?? 0;
+  const availableCapabilities = architecture?.capabilityContracts.filter((contract) => contract.availability !== "planned").length ?? 0;
+  const reputationVersion = architecture?.validationRightsAndReputation.reputationRecord.version ?? 0;
   const classification = record.disciplineClassification;
   if (!classification) return null;
-  return <><p className="workspace-created-status"><Icon name="check" />{text("知识体快照已固化", "Knowledge-body snapshot finalized")}</p><PanelHeading kicker={`${text("步骤 8 / 8 · 知识体快照", "Step 8 / 8 · Knowledge-body snapshot")} · S${snapshot.snapshotVersion}`} title={text("知识体与关联网络", "Knowledge body and relationship network")} copy={text("快照已绑定本次存证、投稿记录和作者确认的学科分类；当前仍只保存在本机。", "The snapshot binds this attestation, submission, and author-confirmed discipline and remains local.")} /><section className="knowledge-identity-card" aria-labelledby="knowledge-identity-heading"><header><div><span>{text("不可变身份", "Immutable identity")}</span><h3 id="knowledge-identity-heading">{text("知识体哈希与学科索引", "Knowledge-body hash and discipline index")}</h3></div><strong>SHA-256</strong></header><dl><div><dt>{text("知识体哈希编码", "Knowledge-body hash")}</dt><dd><code>{record.recordHash}</code></dd></div><div><dt>{text("学科索引分类", "Discipline classification")}</dt><dd><strong>{locale === "en" ? classification.labelEn : classification.label}</strong><span>{classification.code}</span></dd></div><div><dt>{text("分类协议", "Classification protocol")}</dt><dd>ClassificationAssignment · v{classification.version}</dd></div><div><dt>{text("索引体系", "Index scheme")}</dt><dd>{classification.scheme} · v{classification.schemeVersion}</dd></div><div><dt>{text("确认状态", "Confirmation status")}</dt><dd>{text("作者确认", "Author confirmed")}</dd></div><div><dt>KnowledgeBody ID</dt><dd>{record.recordId}</dd></div><div><dt>{text("固化时间", "Finalized")}</dt><dd>{formatModifiedDate(record.finalizedUnixMs, locale)}</dd></div></dl><p>{text("该哈希覆盖知识体快照、学科分类、存证与投稿引用；它用于本地完整性复验，不等同于区块链、公证或科学真实性证明。", "This hash covers the knowledge snapshot, discipline classification, attestation, and submission references. It supports local integrity verification, not blockchain notarization or proof of scientific truth.")}</p></section><ul className="knowledge-layers" aria-label={text("知识体核心要素", "Knowledge-body core objects")}><KnowledgeLayer title={`ArtifactVersion · v${objects.artifactVersion.version ?? workspace.snapshotVersion}`} copy={text("不可变论文来源边界", "Immutable manuscript source boundary")} complete /><KnowledgeLayer title={`Claim · v${objects.claim.version}`} copy={text("研究者在特定条件下提出的核心可引用主张", "The citable claim asserted under specified conditions")} complete /><KnowledgeLayer title={`Scope · v${objects.scope.version}`} copy={text("主张成立的适用范围和条件", "Scope and conditions for the claim")} complete={objects.scope.version > 0} /><KnowledgeLayer title={`Method · v${objects.method.version}`} copy={text("研究设计、流程和参数", "Study design, workflow, and parameters")} complete={objects.method.version > 0} /><KnowledgeLayer title={`Result · v${objects.result.version}`} copy={text("论文实际报告的观察与输出", "Reported observations and outputs")} complete={objects.result.version > 0} /><KnowledgeLayer title={`EvidenceRelation · v${objects.evidenceRelation.version}`} copy={text("结果与主张之间经确认的关系", "Confirmed relations between results and claims")} complete={objects.evidenceRelation.version > 0} /><KnowledgeLayer title={`SourceAnchor · v${objects.sourceAnchor.version}`} copy={text("对象在原文中的精确来源定位", "Precise source locations in the manuscript")} complete /><KnowledgeLayer title={`AIReviewReport · ${aiReview ? `v${aiReview.version}` : "v0"}`} copy={text("独立版本的忠实性和越界审核；确定性检查不等于 AI 审核", "An independently versioned fidelity review; deterministic checks are not AI review")} complete={aiReview !== null} /><KnowledgeLayer title={`Provenance · v${objects.provenance.version}`} copy={text("产生、审核和修订过程", "Creation, review, and revision provenance")} complete /><KnowledgeLayer title={`KnowledgeBodySnapshot · S${objects.knowledgeBodySnapshot.version}`} copy={text("固定上述对象具体版本的不可变研究记忆", "Immutable research memory pinning exact object versions")} complete /></ul></>;
+  return <><p className="workspace-created-status"><Icon name="check" />{text("知识体快照已固化", "Knowledge-body snapshot finalized")}</p><PanelHeading kicker={`${text("步骤 8 / 8 · 知识体快照", "Step 8 / 8 · Knowledge-body snapshot")} · S${snapshot.snapshotVersion}`} title={text("知识体与关联网络", "Knowledge body and relationship network")} copy={text("快照已绑定本次存证、投稿记录和作者确认的学科分类；当前仍只保存在本机。", "The snapshot binds this attestation, submission, and author-confirmed discipline and remains local.")} /><section className="knowledge-identity-card" aria-labelledby="knowledge-identity-heading"><header><div><span>{text("稳定身份 · 不可变快照", "Stable identity · Immutable snapshot")}</span><h3 id="knowledge-identity-heading">{text("知识体哈希与学科索引", "Knowledge-body hash and discipline index")}</h3></div><strong>SHA-256</strong></header><dl><div><dt>{text("知识体哈希编码", "Knowledge-body hash")}</dt><dd><code>{record.recordHash}</code></dd></div><div><dt>{text("学科索引分类", "Discipline classification")}</dt><dd><strong>{locale === "en" ? classification.labelEn : classification.label}</strong><span>{classification.code}</span></dd></div><div><dt>{text("分类协议", "Classification protocol")}</dt><dd>ClassificationAssignment · v{classification.version}</dd></div><div><dt>{text("索引体系", "Index scheme")}</dt><dd>{classification.scheme} · v{classification.schemeVersion}</dd></div><div><dt>{text("确认状态", "Confirmation status")}</dt><dd>{text("作者确认", "Author confirmed")}</dd></div><div><dt>KnowledgeBody ID</dt><dd>{snapshot.knowledgeBodyId}</dd></div><div><dt>{text("固化时间", "Finalized")}</dt><dd>{formatModifiedDate(record.finalizedUnixMs, locale)}</dd></div></dl><p>{text("该哈希覆盖知识体快照、学科分类、存证与投稿引用；身份长期稳定，内容更新形成新快照。信誉状态可独立变化，不会改写历史内容。", "This hash covers the knowledge snapshot, discipline classification, attestation, and submission references. Identity remains stable while content updates create new snapshots. Reputation may evolve independently without rewriting historical content.")}</p></section><ul className="knowledge-layers" aria-label={text("知识体五部分架构", "Five-part knowledge-body architecture")}><KnowledgeLayer title={text(`身份与版本 · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`, `Identity & version · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`)} copy={text("稳定 KnowledgeBody 身份、作者来源、不可变版本和替代/撤回状态", "Stable KnowledgeBody identity, creator provenance, immutable versions, and supersession or withdrawal state")} complete /><KnowledgeLayer title={text(`知识、边界与证据 · Claim v${objects.claim.version}`, `Knowledge, boundary & evidence · Claim v${objects.claim.version}`)} copy={text(`Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`, `Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`)} complete={objects.scope.version > 0 && objects.method.version > 0 && objects.result.version > 0} /><KnowledgeLayer title={text(`能力契约 · ${capabilityCount} 项`, `Capability contracts · ${capabilityCount}`)} copy={text(`${availableCapabilities} 项可用或需要运行时；明确输入、输出、前置条件、拒绝条件与证据追溯`, `${availableCapabilities} available or runtime-dependent; inputs, outputs, preconditions, refusal conditions, and evidence traceability are explicit`)} complete={capabilityCount > 0} /><KnowledgeLayer title={text("交互与执行运行时 · RuntimeProfile v1", "Interaction & execution runtime · RuntimeProfile v1")} copy={text("作者配置的模型只作为可替换协调层；每次外发单独授权", "Author-configured models are replaceable coordinators; every transmission requires per-call authorization")} complete={architecture !== undefined} /><KnowledgeLayer title={text(`验证、权利与信誉 · Reputation v${reputationVersion}`, `Validation, rights & reputation · Reputation v${reputationVersion}`)} copy={text(`AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1；信誉独立于固定内容持续更新`, `AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1; reputation evolves independently of fixed content`)} complete={architecture !== undefined} /></ul></>;
 }
 
 function VersionManager({ workspace, history, selectedVersion, candidate, note, notice, selecting, saving, restoring, onSelectCandidate, onNoteChange, onSave, onSelectVersion, onRestore, onContinue, continueReady }: { workspace: WorkspaceSummary; history: VersionHistory | null; selectedVersion: number | null; candidate: ManuscriptSummary | null; note: string; notice: string | null; selecting: boolean; saving: boolean; restoring: boolean; onSelectCandidate: () => void; onNoteChange: (note: string) => void; onSave: () => void; onSelectVersion: (version: number) => void; onRestore: (version: number) => void; onContinue: () => void; continueReady: boolean }) {
@@ -1490,7 +1503,7 @@ function relationProtocolLabel(kind: RelationKind) {
 
 type KnowledgeView = "single" | "pair" | "network";
 
-function KnowledgeSpatialMap({ workspace, structureReport, readinessReport, knowledgeBodySnapshot = null }: Omit<PaneProps, "stage">) {
+function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<PaneProps, "stage">) {
   const { locale, text } = useI18n();
   const [view, setView] = useState<KnowledgeView>("single");
   const network = knowledgeBodySnapshot?.network;
@@ -1499,16 +1512,15 @@ function KnowledgeSpatialMap({ workspace, structureReport, readinessReport, know
   const claim = knowledgeBodySnapshot?.claim;
   const objects = knowledgeBodySnapshot?.objects;
   const aiReview = knowledgeBodySnapshot?.aiReviewReport;
+  const architecture = knowledgeBodySnapshot?.serviceArchitecture;
   const previousReviewVersions = (knowledgeBodySnapshot?.aiReviewHistory.versions ?? []).filter((report) => report.version !== aiReview?.version).map((report) => `v${report.version}`).join(" · ");
-  const elements = [
-    { key: "artifact-version", label: "ArtifactVersion", version: `v${objects?.artifactVersion.version ?? workspace.snapshotVersion}`, state: text("不可变来源", "Immutable source"), complete: true },
-    { key: "ai-review-report", label: "AIReviewReport", version: aiReview ? `v${aiReview.version}` : "v0", state: aiReview ? (previousReviewVersions ? text(`历史 ${previousReviewVersions}`, `History ${previousReviewVersions}`) : text("当前审核", "Current review")) : text("尚未审核", "Not reviewed"), complete: aiReview !== null },
-    { key: "scope", label: "Scope", version: `v${objects?.scope.version ?? 0}`, state: structureReport ? text("待作者确认", "Author confirmation") : text("待定义", "Pending definition"), complete: (objects?.scope.version ?? 0) > 0 },
-    { key: "source-anchor", label: "SourceAnchor", version: `v${objects?.sourceAnchor.version ?? workspace.snapshotVersion}`, state: `Hash ${workspace.contentHash.slice(0, 8)}`, complete: true },
-    { key: "provenance", label: "Provenance", version: `v${objects?.provenance.version ?? 1}`, state: text("本地生成", "Created locally"), complete: true },
-    { key: "result", label: "Result", version: `v${objects?.result.version ?? 0}`, state: structureReport ? text("待结构化", "Pending structure") : text("待提取", "Pending extraction"), complete: (objects?.result.version ?? 0) > 0 },
-    { key: "evidence-relation", label: "EvidenceRelation", version: `v${objects?.evidenceRelation.version ?? 0}`, state: readinessReport ? text("待建立关系", "Pending relation") : text("待建立", "Pending"), complete: (objects?.evidenceRelation.version ?? 0) > 0 },
-    { key: "method", label: "Method", version: `v${objects?.method.version ?? 0}`, state: structureReport ? text("待结构化", "Pending structure") : text("待提取", "Pending extraction"), complete: (objects?.method.version ?? 0) > 0 },
+  const capabilityContracts = architecture?.capabilityContracts ?? [];
+  const layers = [
+    { key: "identity", label: text("身份与版本", "Identity & version"), version: `S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}`, state: text(`Artifact v${objects?.artifactVersion.version ?? workspace.snapshotVersion} · 稳定 ID`, `Artifact v${objects?.artifactVersion.version ?? workspace.snapshotVersion} · Stable ID`), complete: true },
+    { key: "knowledge", label: text("知识、边界与证据", "Knowledge, boundary & evidence"), version: `Claim v${claim?.claim.version ?? 1}`, state: `Scope v${objects?.scope.version ?? 0} · Method v${objects?.method.version ?? 0} · Result v${objects?.result.version ?? 0} · EvidenceRelation v${objects?.evidenceRelation.version ?? 0} · Anchor v${objects?.sourceAnchor.version ?? workspace.snapshotVersion}`, complete: (objects?.scope.version ?? 0) > 0 && (objects?.method.version ?? 0) > 0 },
+    { key: "capability", label: text("能力契约", "Capability contracts"), version: `v1 · ${capabilityContracts.length}`, state: text("输入 · 输出 · 前置 · 拒绝", "Input · Output · Preconditions · Refusal"), complete: capabilityContracts.length > 0 },
+    { key: "runtime", label: text("交互与执行运行时", "Interaction & runtime"), version: "RuntimeProfile · v1", state: text("可替换模型 · 单次授权", "Replaceable model · Per-call consent"), complete: architecture !== undefined },
+    { key: "trust", label: text("验证、权利与信誉", "Validation, rights & reputation"), version: `Reputation · v${architecture?.validationRightsAndReputation.reputationRecord.version ?? 0}`, state: aiReview ? text(`AIReview v${aiReview.version}${previousReviewVersions ? ` · 历史 ${previousReviewVersions}` : ""}`, `AIReview v${aiReview.version}${previousReviewVersions ? ` · History ${previousReviewVersions}` : ""}`) : text("Rights v1 · 审核待建立", "Rights v1 · Review pending"), complete: architecture !== undefined },
   ];
   return (
     <div className="knowledge-space">
@@ -1520,33 +1532,31 @@ function KnowledgeSpatialMap({ workspace, structureReport, readinessReport, know
         })}
       </div>
       {view === "single" ? (
-        <div className="knowledge-space-visual" role="img" aria-label={text(`单一学术知识体空间视图。KnowledgeBodySnapshot S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1} 是不可变外层边界；中心是 Claim v${claim?.claim.version ?? 1} 十二面体，八条直线连接 ArtifactVersion、Scope、Method、Result、EvidenceRelation、SourceAnchor、AIReviewReport 和 Provenance 的具体版本。`, `Single academic knowledge-body view. KnowledgeBodySnapshot S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1} is the immutable outer boundary. A Claim v${claim?.claim.version ?? 1} dodecahedron sits at the center, with eight lines linking exact versions of ArtifactVersion, Scope, Method, Result, EvidenceRelation, SourceAnchor, AIReviewReport, and Provenance.`)}>
-          <span className="knowledge-snapshot-label" aria-hidden="true">KnowledgeBodySnapshot · S{objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}</span>
-          <svg className="claim-connections" viewBox="0 0 600 420" preserveAspectRatio="none" aria-hidden="true">
-            <line x1="300" y1="210" x2="300" y2="58" />
-            <line x1="300" y1="210" x2="420" y2="92" />
-            <line x1="300" y1="210" x2="504" y2="168" />
-            <line x1="300" y1="210" x2="486" y2="302" />
-            <line x1="300" y1="210" x2="372" y2="365" />
-            <line x1="300" y1="210" x2="228" y2="365" />
-            <line x1="300" y1="210" x2="114" y2="302" />
-            <line x1="300" y1="210" x2="96" y2="168" />
+        <div className="knowledge-space-visual knowledge-service-space" role="img" aria-label={text(`单篇论文知识体空间视图。稳定 KnowledgeBody 身份包含不可变内容快照 S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}，中心是 Claim v${claim?.claim.version ?? 1} 十二面体。五条空间连接分别指向身份与版本、知识边界与证据、能力契约、可替换交互运行时，以及独立变化的验证权利与信誉记录。`, `Single-paper KnowledgeBody spatial view. A stable KnowledgeBody identity contains immutable content snapshot S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}, centered on a Claim v${claim?.claim.version ?? 1} dodecahedron. Five spatial links lead to identity and version, knowledge boundary and evidence, capability contracts, a replaceable interaction runtime, and independently evolving validation, rights, and reputation records.`)}>
+          <span className="knowledge-snapshot-label" aria-hidden="true">KnowledgeBody · {text("稳定身份", "stable identity")} · Snapshot S{objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}</span>
+          <span className="knowledge-content-boundary" aria-hidden="true">{text("固定内容快照", "Immutable content snapshot")}</span>
+          <svg className="claim-connections" viewBox="0 0 600 460" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="300" y1="230" x2="300" y2="68" />
+            <line x1="300" y1="230" x2="112" y2="160" />
+            <line x1="300" y1="230" x2="488" y2="160" />
+            <line x1="300" y1="230" x2="438" y2="372" className="runtime-connection" />
+            <line x1="300" y1="230" x2="162" y2="372" className="reputation-connection" />
           </svg>
           <div className="claim-center" aria-hidden="true">
             <ClaimDodecahedron />
-            <span className="claim-core"><strong>Claim · v{claim?.claim.version ?? 1}</strong><small>{text("十二面体核心", "Dodecahedron core")}</small></span>
+            <span className="claim-core"><strong>Claim · v{claim?.claim.version ?? 1}</strong><small>{text("知识核心 · 边界受限", "Knowledge core · Bounded")}</small></span>
           </div>
-          {elements.map((element) => <div className={`claim-element element-${element.key}`} data-complete={element.complete} key={element.key} aria-hidden="true"><span className="element-sphere"><strong>{element.label}</strong><small>{element.version}</small></span><em>{element.state}</em></div>)}
+          {layers.map((layer) => <div className={`service-layer-node service-layer-${layer.key}`} data-complete={layer.complete} key={layer.key} aria-hidden="true"><span className="service-layer-sphere"><strong>{layer.label}</strong><small>{layer.version}</small><em title={layer.state}>{layer.state}</em></span></div>)}
         </div>
       ) : availableView && network ? <KnowledgeNetworkCanvas bodies={view === "pair" ? network.bodies.slice(0, 2) : network.bodies} assertions={network.assertions} view={view} /> : null}
-      <p className="knowledge-space-note">{view === "single" ? text("单一学术知识体是围绕一个或一组 Claim 构成的研究记忆单元，不是论文摘要。外圈固定各对象的具体版本；v0 表示对象尚未正式建立。", "A single academic knowledge body is a research-memory unit organized around one or more Claims, not a paper abstract. The outer snapshot pins exact object versions; v0 means an object is not yet established.") : text("圆形边界表示知识体自身边界；绿色菱形表示带依据、状态和版本的声明对象。相似度不会自动成为关系。", "Circular boundaries preserve each knowledge body; green diamonds are versioned assertions with basis and status. Similarity never becomes a relationship automatically.")}</p>
+      <p className="knowledge-space-note">{view === "single" ? text("单一知识体是具有稳定身份、明确知识边界、可验证证据、能力契约和可替换运行时的知识服务单元。内容快照不可变；信誉记录可独立更新；v0 表示尚未正式建立。", "A single KnowledgeBody is a knowledge-service unit with stable identity, explicit boundaries, verifiable evidence, capability contracts, and a replaceable runtime. Content snapshots are immutable; reputation records evolve independently; v0 means not yet established.") : text("圆形边界表示知识体自身边界；绿色菱形表示带依据、状态和版本的声明对象。相似度不会自动成为关系。", "Circular boundaries preserve each knowledge body; green diamonds are versioned assertions with basis and status. Similarity never becomes a relationship automatically.")}</p>
     </div>
   );
 }
 
 const MODEL_SLOT_ROLES: ModelSlotRole[] = ["primary", "fallback_1", "fallback_2"];
 const DEEPSEEK_PRESET = { providerLabel: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" } as const;
-const INQUIRY_TARGETS: KnowledgeInquiryTarget[] = ["knowledge_body", "claim", "scope", "method", "result", "evidence_relation", "source_anchor", "ai_review_report", "provenance"];
+const INQUIRY_TARGETS: KnowledgeInquiryTarget[] = ["knowledge_body", "claim", "scope", "method", "result", "evidence_relation", "source_anchor", "capability_contract", "rights_reputation", "ai_review_report", "provenance"];
 
 function emptyModelSlot(role: ModelSlotRole): ModelSlotDraft {
   return { role, enabled: false, providerLabel: "", baseUrl: "", model: "", hasApiKey: false, apiKey: "", clearApiKey: false };
@@ -1566,7 +1576,7 @@ function inquiryStanceLabel(stance: KnowledgeInquiryStance, locale: Locale) {
 
 function inquiryTargetLabel(target: KnowledgeInquiryTarget, locale: Locale) {
   const labels: Record<KnowledgeInquiryTarget, [string, string]> = {
-    knowledge_body: ["知识体整体", "Knowledge body"], claim: ["Claim 主张", "Claim"], scope: ["Scope 适用范围", "Scope"], method: ["Method 方法", "Method"], result: ["Result 结果", "Result"], evidence_relation: ["EvidenceRelation 证据关系", "EvidenceRelation"], source_anchor: ["SourceAnchor 来源锚点", "SourceAnchor"], ai_review_report: ["AIReviewReport 审核报告", "AIReviewReport"], provenance: ["Provenance 来源记录", "Provenance"],
+    knowledge_body: ["知识体整体", "Knowledge body"], claim: ["Claim 主张", "Claim"], scope: ["Scope 适用范围", "Scope"], method: ["Method 方法", "Method"], result: ["Result 结果", "Result"], evidence_relation: ["EvidenceRelation 证据关系", "EvidenceRelation"], source_anchor: ["SourceAnchor 来源锚点", "SourceAnchor"], capability_contract: ["CapabilityContract 能力契约", "Capability contract"], rights_reputation: ["权利与信誉记录", "Rights and reputation"], ai_review_report: ["AIReviewReport 审核报告", "AIReviewReport"], provenance: ["Provenance 来源记录", "Provenance"],
   };
   return localize(locale, labels[target][0], labels[target][1]);
 }

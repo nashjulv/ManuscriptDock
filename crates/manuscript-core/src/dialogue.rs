@@ -30,6 +30,8 @@ pub enum KnowledgeInquiryTarget {
     SourceAnchor,
     AiReviewReport,
     Provenance,
+    CapabilityContract,
+    RightsReputation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

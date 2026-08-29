@@ -3,6 +3,39 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Five-part single-paper KnowledgeBody architecture
+
+- Upgraded newly created `AcademicKnowledgeBodySnapshot` records to schema v2 while retaining read
+  and hash compatibility for existing schema-v1 records.
+- Reorganized the single body into identity/version, knowledge/boundary/evidence, capability
+  contracts, interaction/runtime, and validation/rights/reputation without deleting the existing
+  Claim five-tuple or ten versioned manuscript objects.
+- Added three explicit capability contracts for local source traceability, runtime-dependent
+  evidence-bounded questions, and planned method-applicability checks. Every contract declares input,
+  output, preconditions, refusal conditions, evidence sources, availability, and its own version.
+- Defined author-configured models as replaceable runtime coordinators with per-call authorization;
+  the model projection now includes the five-part architecture and cannot invent unavailable
+  capabilities.
+- Separated immutable content snapshots from independently evolving ReputationRecord references and
+  added explicit RightsPolicy and validation-record references. AIReviewReport remains empty until a
+  real PWC professional review exists.
+- Replaced the eight-object single-body plot with a double-boundary spatial view: stable body identity,
+  immutable content snapshot, central rotating Claim dodecahedron, and five labeled/versioned service
+  regions. Dashed runtime and dotted reputation links communicate replaceability and independent state
+  without relying on color alone.
+- Extended the author question target list to capability contracts and rights/reputation while keeping
+  the two-body and network assertion protocols unchanged.
+
+### Verification
+
+- `npm run check`: passed TypeScript checks, 15 frontend interaction tests, Vite production build,
+  rustfmt, 52 manuscript-core tests, 4 desktop Rust tests, and Clippy with warnings denied.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the complete Windows x64
+  desktop dependency graph with the schema-v2 knowledge body.
+- `npm run tauri -- build --debug --no-bundle`: produced the macOS debug desktop executable.
+- Browser verification at 900 × 700 and 375 × 760 confirmed that all five spatial regions remain
+  legible and the narrow layout has no horizontal overflow or clipped left-side node.
+
 ## 2026-08-30 — Classification-first PDF extraction and recognition routing
 
 - Evaluated Pandoc and kept it out of PDF ingestion because it has no PDF input reader; retained it

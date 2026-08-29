@@ -13,6 +13,7 @@
 - [端到端论文生命周期](end-to-end-manuscript-lifecycle.md)：导入、检查、修订、版本、存证、投稿和知识体的状态合同、恢复规则与验收路径。
 - [学术知识体演进路线](academic-knowledge-body-roadmap.md)：从本地稿件工作区到作者控制的 AI 与发布网络对象。
 - [学术知识体服务模型](knowledge-body-service-model.md)：平台服务对象、生命周期、写回原则、授权投影和商业含义。
+- [单篇论文知识体五部分服务架构](single-knowledge-body-service-architecture.md)：稳定身份、知识边界、能力契约、可替换运行时及独立信誉状态的 schema 与空间表达。
 - [学术知识体关联网络模型](knowledge-body-network-model.md)：单体边界、独立 AIReviewReport 版本、八类跨体声明协议和三级空间视图。
 - [知识体问答与作者自带模型](knowledge-body-dialogue-and-model-routing.md)：主模型与双备选、系统密钥库、最小投影、问答账本和外部反馈边界。
 - [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。

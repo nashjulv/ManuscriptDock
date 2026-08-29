@@ -20,11 +20,14 @@ pub use journal_match::{
 pub use knowledge::{
     discipline_catalog, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
     AiReviewReportHistory, AiReviewReportVersion, AiReviewStatus, AssertionBasis, AssertionStatus,
-    ClaimElementReference, ClaimFiveTuple, DisciplineCatalogItem, DisciplineClassification,
-    ElementState, KnowledgeBodyError, KnowledgeBodyNetwork, KnowledgeBodyNode,
-    KnowledgeBodyObjectSet, KnowledgeBodyRole, KnowledgeObjectType, NetworkAssertion, RelationKind,
-    RelationProtocol, VersionedObjectReference, DISCIPLINE_INDEX_SCHEME, DISCIPLINE_INDEX_VERSION,
-    KNOWLEDGE_BODY_SCHEMA_VERSION,
+    CapabilityAvailability, CapabilityContract, ClaimElementReference, ClaimFiveTuple,
+    DisciplineCatalogItem, DisciplineClassification, ElementState, IdentityVersionLayer,
+    InteractionRuntimeLayer, KnowledgeBodyError, KnowledgeBodyLifecycleStatus,
+    KnowledgeBodyNetwork, KnowledgeBodyNode, KnowledgeBodyObjectSet, KnowledgeBodyRole,
+    KnowledgeBodyServiceArchitecture, KnowledgeBoundaryEvidenceLayer, KnowledgeObjectType,
+    NetworkAssertion, RelationKind, RelationProtocol, RuntimeBindingPolicy,
+    ValidationRightsReputationLayer, VersionedObjectReference, DISCIPLINE_INDEX_SCHEME,
+    DISCIPLINE_INDEX_VERSION, KNOWLEDGE_BODY_SCHEMA_VERSION,
 };
 pub use readiness::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, ExternalTransmission,

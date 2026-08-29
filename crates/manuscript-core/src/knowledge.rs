@@ -2,7 +2,7 @@ use crate::workspace::WorkspaceSummary;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt};
 
-pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 1;
+pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 2;
 pub const DISCIPLINE_INDEX_SCHEME: &str = "ManuscriptDock Discipline Index";
 pub const DISCIPLINE_INDEX_VERSION: &str = "1.0";
 
@@ -109,6 +109,10 @@ pub enum KnowledgeObjectType {
     ArtifactVersion,
     AiReviewReport,
     Provenance,
+    CapabilityContract,
+    RuntimeProfile,
+    RightsPolicy,
+    ReputationRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -158,6 +162,102 @@ pub struct KnowledgeBodyObjectSet {
     pub ai_review_report: Option<VersionedObjectReference>,
     pub provenance: VersionedObjectReference,
     pub knowledge_body_snapshot: VersionedObjectReference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeBodyLifecycleStatus {
+    Active,
+    Deprecated,
+    Withdrawn,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityAvailability {
+    Available,
+    RequiresRuntime,
+    Planned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBindingPolicy {
+    Replaceable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityVersionLayer {
+    pub knowledge_body: VersionedObjectReference,
+    pub current_snapshot: VersionedObjectReference,
+    pub source_artifact: VersionedObjectReference,
+    pub creator_provenance: VersionedObjectReference,
+    pub lifecycle_status: KnowledgeBodyLifecycleStatus,
+    pub supersedes: Option<VersionedObjectReference>,
+    pub immutable_history: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBoundaryEvidenceLayer {
+    pub claims: Vec<VersionedObjectReference>,
+    pub scope: VersionedObjectReference,
+    pub method: VersionedObjectReference,
+    pub result: VersionedObjectReference,
+    pub evidence: VersionedObjectReference,
+    pub evidence_relation: VersionedObjectReference,
+    pub source_anchor: VersionedObjectReference,
+    pub known_limitations: Vec<String>,
+    pub unverified_objects: Vec<VersionedObjectReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityContract {
+    pub contract_id: String,
+    pub version: u32,
+    pub capability: String,
+    pub input_contract: Vec<String>,
+    pub output_contract: Vec<String>,
+    pub preconditions: Vec<String>,
+    pub refusal_conditions: Vec<String>,
+    pub evidence_sources: Vec<VersionedObjectReference>,
+    pub availability: CapabilityAvailability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionRuntimeLayer {
+    pub runtime_profile: VersionedObjectReference,
+    pub binding_policy: RuntimeBindingPolicy,
+    pub coordinator_role: String,
+    pub allowed_tools: Vec<String>,
+    pub per_call_authorization: bool,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationRightsReputationLayer {
+    pub validation_records: Vec<VersionedObjectReference>,
+    pub rights_policy: VersionedObjectReference,
+    pub reputation_record: VersionedObjectReference,
+    pub content_snapshot: VersionedObjectReference,
+    pub attribution_required: bool,
+    pub reputation_updates_independently: bool,
+    pub reuse_control: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeBodyServiceArchitecture {
+    pub identity_and_version: IdentityVersionLayer,
+    pub knowledge_boundary_and_evidence: KnowledgeBoundaryEvidenceLayer,
+    pub capability_contracts: Vec<CapabilityContract>,
+    pub interaction_runtime: InteractionRuntimeLayer,
+    pub validation_rights_and_reputation: ValidationRightsReputationLayer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -352,13 +452,17 @@ pub struct AcademicKnowledgeBodySnapshot {
     pub objects: KnowledgeBodyObjectSet,
     pub ai_review_report: Option<VersionedObjectReference>,
     pub ai_review_history: AiReviewReportHistory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_architecture: Option<KnowledgeBodyServiceArchitecture>,
     pub network: KnowledgeBodyNetwork,
     pub external_transmission: String,
 }
 
 impl AcademicKnowledgeBodySnapshot {
     pub fn validate(&self) -> Result<(), KnowledgeBodyError> {
-        if self.schema_version != KNOWLEDGE_BODY_SCHEMA_VERSION || self.snapshot_version == 0 {
+        if !(1..=KNOWLEDGE_BODY_SCHEMA_VERSION).contains(&self.schema_version)
+            || self.snapshot_version == 0
+        {
             return Err(KnowledgeBodyError::InvalidSnapshot);
         }
         if self.objects.artifact_version != self.manuscript
@@ -389,8 +493,76 @@ impl AcademicKnowledgeBodySnapshot {
             None if self.ai_review_history.current_version.is_none() => {}
             _ => return Err(KnowledgeBodyError::UnresolvedAiReviewReference),
         }
+        match (&self.service_architecture, self.schema_version) {
+            (Some(architecture), _) => self.validate_service_architecture(architecture)?,
+            (None, 1) => {}
+            (None, _) => return Err(KnowledgeBodyError::InvalidServiceArchitecture),
+        }
         for assertion in &self.network.assertions {
             assertion.validate()?;
+        }
+        Ok(())
+    }
+
+    fn validate_service_architecture(
+        &self,
+        architecture: &KnowledgeBodyServiceArchitecture,
+    ) -> Result<(), KnowledgeBodyError> {
+        let identity = &architecture.identity_and_version;
+        let knowledge = &architecture.knowledge_boundary_and_evidence;
+        let runtime = &architecture.interaction_runtime;
+        let trust = &architecture.validation_rights_and_reputation;
+        let contract_ids = architecture
+            .capability_contracts
+            .iter()
+            .map(|contract| contract.contract_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let contracts_are_valid = contract_ids.len() == architecture.capability_contracts.len()
+            && architecture.capability_contracts.iter().all(|contract| {
+                !contract.contract_id.trim().is_empty()
+                    && contract.version > 0
+                    && !contract.capability.trim().is_empty()
+                    && !contract.input_contract.is_empty()
+                    && !contract.output_contract.is_empty()
+                    && !contract.preconditions.is_empty()
+                    && !contract.refusal_conditions.is_empty()
+                    && !contract.evidence_sources.is_empty()
+            });
+        let review_is_registered = self.ai_review_report.as_ref().is_none_or(|review| {
+            trust
+                .validation_records
+                .iter()
+                .any(|record| record == review)
+        });
+        if identity.knowledge_body.object_id != self.knowledge_body_id
+            || identity.knowledge_body.object_type != KnowledgeObjectType::KnowledgeBody
+            || identity.current_snapshot != self.objects.knowledge_body_snapshot
+            || identity.source_artifact != self.manuscript
+            || identity.creator_provenance != self.objects.provenance
+            || !identity.immutable_history
+            || knowledge.claims.is_empty()
+            || !knowledge
+                .claims
+                .iter()
+                .any(|claim| claim == &self.claim.claim)
+            || knowledge.scope != self.objects.scope
+            || knowledge.method != self.objects.method
+            || knowledge.result != self.objects.result
+            || knowledge.evidence != self.claim.evidence.reference
+            || knowledge.evidence_relation != self.objects.evidence_relation
+            || knowledge.source_anchor != self.objects.source_anchor
+            || runtime.runtime_profile.object_type != KnowledgeObjectType::RuntimeProfile
+            || runtime.binding_policy != RuntimeBindingPolicy::Replaceable
+            || !runtime.per_call_authorization
+            || trust.rights_policy.object_type != KnowledgeObjectType::RightsPolicy
+            || trust.reputation_record.object_type != KnowledgeObjectType::ReputationRecord
+            || trust.content_snapshot != self.objects.knowledge_body_snapshot
+            || !trust.attribution_required
+            || !trust.reputation_updates_independently
+            || !review_is_registered
+            || !contracts_are_valid
+        {
+            return Err(KnowledgeBodyError::InvalidServiceArchitecture);
         }
         Ok(())
     }
@@ -401,6 +573,7 @@ pub enum KnowledgeBodyError {
     InvalidSnapshot,
     InvalidAiReviewHistory,
     UnresolvedAiReviewReference,
+    InvalidServiceArchitecture,
     InvalidNetworkAssertion,
 }
 
@@ -411,6 +584,9 @@ impl fmt::Display for KnowledgeBodyError {
             Self::InvalidAiReviewHistory => write!(formatter, "AI 审核报告版本链无效"),
             Self::UnresolvedAiReviewReference => {
                 write!(formatter, "知识体快照引用的 AI 审核报告版本不存在")
+            }
+            Self::InvalidServiceArchitecture => {
+                write!(formatter, "知识体五部分服务架构或能力契约无效")
             }
             Self::InvalidNetworkAssertion => {
                 write!(formatter, "关联知识体声明缺少成立依据或协议类型无效")
@@ -446,16 +622,31 @@ pub fn local_knowledge_body_snapshot(
         object_type: KnowledgeObjectType::KnowledgeBody,
         version: workspace.snapshot_version,
     };
+    let artifact = object(
+        "artifact:manuscript",
+        KnowledgeObjectType::ArtifactVersion,
+        workspace.snapshot_version,
+    );
+    let scope = object("scope:primary", KnowledgeObjectType::Scope, 0);
     let method = object("method:primary", KnowledgeObjectType::Method, 0);
+    let result = object("result:primary", KnowledgeObjectType::Result, 0);
+    let evidence = object("evidence:primary", KnowledgeObjectType::Evidence, 0);
+    let evidence_relation = object(
+        "evidence-relation:primary",
+        KnowledgeObjectType::EvidenceRelation,
+        0,
+    );
+    let provenance = object("provenance:primary", KnowledgeObjectType::Provenance, 1);
+    let snapshot_reference = object(
+        "snapshot:current",
+        KnowledgeObjectType::KnowledgeBodySnapshot,
+        workspace.snapshot_version,
+    );
     let snapshot = AcademicKnowledgeBodySnapshot {
         schema_version: KNOWLEDGE_BODY_SCHEMA_VERSION,
         knowledge_body_id: knowledge_body_id.clone(),
         snapshot_version: workspace.snapshot_version,
-        manuscript: object(
-            "artifact:manuscript",
-            KnowledgeObjectType::ArtifactVersion,
-            workspace.snapshot_version,
-        ),
+        manuscript: artifact.clone(),
         claim: ClaimFiveTuple {
             claim: claim.clone(),
             proposition: ClaimElementReference {
@@ -463,11 +654,11 @@ pub fn local_knowledge_body_snapshot(
                 state: ElementState::Pending,
             },
             conditions: ClaimElementReference {
-                reference: object("scope:primary", KnowledgeObjectType::Scope, 0),
+                reference: scope.clone(),
                 state: ElementState::Pending,
             },
             evidence: ClaimElementReference {
-                reference: object("evidence:primary", KnowledgeObjectType::Evidence, 0),
+                reference: evidence.clone(),
                 state: ElementState::Pending,
             },
             sources: ClaimElementReference {
@@ -480,28 +671,16 @@ pub fn local_knowledge_body_snapshot(
             },
         },
         objects: KnowledgeBodyObjectSet {
-            artifact_version: object(
-                "artifact:manuscript",
-                KnowledgeObjectType::ArtifactVersion,
-                workspace.snapshot_version,
-            ),
+            artifact_version: artifact.clone(),
             claim: claim.clone(),
-            scope: object("scope:primary", KnowledgeObjectType::Scope, 0),
+            scope: scope.clone(),
             method: method.clone(),
-            result: object("result:primary", KnowledgeObjectType::Result, 0),
-            evidence_relation: object(
-                "evidence-relation:primary",
-                KnowledgeObjectType::EvidenceRelation,
-                0,
-            ),
+            result: result.clone(),
+            evidence_relation: evidence_relation.clone(),
             source_anchor: sources.clone(),
             ai_review_report: None,
-            provenance: object("provenance:primary", KnowledgeObjectType::Provenance, 1),
-            knowledge_body_snapshot: object(
-                "snapshot:current",
-                KnowledgeObjectType::KnowledgeBodySnapshot,
-                workspace.snapshot_version,
-            ),
+            provenance: provenance.clone(),
+            knowledge_body_snapshot: snapshot_reference.clone(),
         },
         ai_review_report: None,
         ai_review_history: AiReviewReportHistory {
@@ -509,6 +688,120 @@ pub fn local_knowledge_body_snapshot(
             current_version: None,
             versions: Vec::new(),
         },
+        service_architecture: Some(KnowledgeBodyServiceArchitecture {
+            identity_and_version: IdentityVersionLayer {
+                knowledge_body: body.clone(),
+                current_snapshot: snapshot_reference.clone(),
+                source_artifact: artifact.clone(),
+                creator_provenance: provenance,
+                lifecycle_status: KnowledgeBodyLifecycleStatus::Active,
+                supersedes: None,
+                immutable_history: true,
+            },
+            knowledge_boundary_and_evidence: KnowledgeBoundaryEvidenceLayer {
+                claims: vec![claim.clone()],
+                scope: scope.clone(),
+                method: method.clone(),
+                result: result.clone(),
+                evidence: evidence.clone(),
+                evidence_relation: evidence_relation.clone(),
+                source_anchor: sources.clone(),
+                known_limitations: vec![
+                    "formal_claim_elements_pending_author_confirmation".to_owned(),
+                    "professional_ai_review_not_performed".to_owned(),
+                ],
+                unverified_objects: vec![scope.clone(), method.clone(), result.clone(), evidence],
+            },
+            capability_contracts: vec![
+                CapabilityContract {
+                    contract_id: format!("{knowledge_body_id}:capability:source-traceability"),
+                    version: 1,
+                    capability: "source_traceability".to_owned(),
+                    input_contract: vec!["knowledge_object_id".to_owned()],
+                    output_contract: vec!["source_anchor_or_information_insufficient".to_owned()],
+                    preconditions: vec!["finalized_snapshot".to_owned()],
+                    refusal_conditions: vec!["object_has_no_confirmed_source_anchor".to_owned()],
+                    evidence_sources: vec![sources.clone(), artifact.clone()],
+                    availability: CapabilityAvailability::Available,
+                },
+                CapabilityContract {
+                    contract_id: format!("{knowledge_body_id}:capability:evidence-bounded-qa"),
+                    version: 1,
+                    capability: "evidence_bounded_question_answering".to_owned(),
+                    input_contract: vec!["question".to_owned(), "target_object".to_owned()],
+                    output_contract: vec![
+                        "answer".to_owned(),
+                        "source_anchors".to_owned(),
+                        "uncertainty".to_owned(),
+                    ],
+                    preconditions: vec![
+                        "finalized_snapshot".to_owned(),
+                        "author_configured_runtime".to_owned(),
+                        "per_call_authorization".to_owned(),
+                    ],
+                    refusal_conditions: vec![
+                        "outside_knowledge_boundary".to_owned(),
+                        "insufficient_confirmed_evidence".to_owned(),
+                        "runtime_unavailable".to_owned(),
+                    ],
+                    evidence_sources: vec![claim.clone(), scope.clone(), sources.clone()],
+                    availability: CapabilityAvailability::RequiresRuntime,
+                },
+                CapabilityContract {
+                    contract_id: format!("{knowledge_body_id}:capability:applicability-check"),
+                    version: 1,
+                    capability: "method_applicability_check".to_owned(),
+                    input_contract: vec![
+                        "data_scale".to_owned(),
+                        "variable_types".to_owned(),
+                        "distribution_conditions".to_owned(),
+                    ],
+                    output_contract: vec![
+                        "applicable_or_not_or_insufficient".to_owned(),
+                        "basis".to_owned(),
+                    ],
+                    preconditions: vec!["confirmed_scope_and_method".to_owned()],
+                    refusal_conditions: vec![
+                        "scope_or_method_pending".to_owned(),
+                        "input_outside_declared_contract".to_owned(),
+                    ],
+                    evidence_sources: vec![scope, method.clone(), sources.clone()],
+                    availability: CapabilityAvailability::Planned,
+                },
+            ],
+            interaction_runtime: InteractionRuntimeLayer {
+                runtime_profile: object(
+                    "runtime:author-configured",
+                    KnowledgeObjectType::RuntimeProfile,
+                    1,
+                ),
+                binding_policy: RuntimeBindingPolicy::Replaceable,
+                coordinator_role: "author_configured_model".to_owned(),
+                allowed_tools: vec![
+                    "local_knowledge_projection".to_owned(),
+                    "source_anchor_lookup".to_owned(),
+                ],
+                per_call_authorization: true,
+                external_transmission: "author_confirmed_per_request".to_owned(),
+            },
+            validation_rights_and_reputation: ValidationRightsReputationLayer {
+                validation_records: Vec::new(),
+                rights_policy: object(
+                    "rights:author-controlled",
+                    KnowledgeObjectType::RightsPolicy,
+                    1,
+                ),
+                reputation_record: object(
+                    "reputation:external-state",
+                    KnowledgeObjectType::ReputationRecord,
+                    0,
+                ),
+                content_snapshot: snapshot_reference,
+                attribution_required: true,
+                reputation_updates_independently: true,
+                reuse_control: "author_controlled".to_owned(),
+            },
+        }),
         network: KnowledgeBodyNetwork {
             bodies: vec![KnowledgeBodyNode {
                 body,
@@ -594,6 +887,12 @@ mod tests {
             version: 2,
         });
         snapshot.objects.ai_review_report = snapshot.ai_review_report.clone();
+        snapshot
+            .service_architecture
+            .as_mut()
+            .unwrap()
+            .validation_rights_and_reputation
+            .validation_records = vec![snapshot.ai_review_report.clone().unwrap()];
 
         snapshot.validate().unwrap();
         assert_eq!(snapshot.ai_review_history.versions.len(), 2);
@@ -653,5 +952,32 @@ mod tests {
         assert_eq!(snapshot.objects.scope.version, 0);
         assert_eq!(snapshot.objects.provenance.version, 1);
         assert_eq!(snapshot.objects.knowledge_body_snapshot.version, 3);
+        let architecture = snapshot.service_architecture.unwrap();
+        assert_eq!(architecture.capability_contracts.len(), 3);
+        assert_eq!(
+            architecture.interaction_runtime.binding_policy,
+            RuntimeBindingPolicy::Replaceable
+        );
+        assert!(
+            architecture
+                .validation_rights_and_reputation
+                .reputation_updates_independently
+        );
+        assert_eq!(
+            architecture
+                .validation_rights_and_reputation
+                .reputation_record
+                .version,
+            0
+        );
+    }
+
+    #[test]
+    fn keeps_legacy_v1_snapshots_readable_without_the_five_layer_architecture() {
+        let mut snapshot = local_knowledge_body_snapshot(&workspace());
+        snapshot.schema_version = 1;
+        snapshot.service_architecture = None;
+
+        snapshot.validate().unwrap();
     }
 }

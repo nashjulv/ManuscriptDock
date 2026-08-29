@@ -55,10 +55,12 @@ ManuscriptDock 的根本目标不是只把论文排好版或检查一次投稿�
 - `状态` 记录草拟、待确认、被支持、存在争议、被修订或撤回等生命周期状态；
 - 五类要素各自拥有稳定标识和独立版本，不因其中一项更新而覆盖其他要素的历史。
 
-正式单体必须通过 `ArtifactVersion`、`Claim`、`Scope`、`Method`、`Result`、
+正式单体以五部分服务架构组织：身份与版本、知识边界与证据、能力契约、交互与执行运行时、
+验证权利与信誉。`ArtifactVersion`、`Claim`、`Scope`、`Method`、`Result`、
 `EvidenceRelation`、`SourceAnchor`、`AIReviewReport`、`Provenance` 和
-`KnowledgeBodySnapshot` 十类核心对象表达。Claim 五元组是 Claim 的内部语义约束，
-不能代替整个知识体。
+`KnowledgeBodySnapshot` 十类既有对象保留，并归入相应部分。Claim 五元组是 Claim 的
+内部语义约束，不能代替整个知识体。完整定义见
+[单篇论文知识体五部分服务架构](single-knowledge-body-service-architecture.md)。
 
 首个 `AcademicKnowledgeBody` 模型至少需要：
 
@@ -89,18 +91,21 @@ ManuscriptDock 的根本目标不是只把论文排好版或检查一次投稿�
 ### 空间交互模型
 
 知识体空间视图分为“单一知识体 / 两体关联 / 关联网络”三级。单体内部采用
-“KnowledgeBodySnapshot 外层边界 + Claim 十二面体 + 八类对象节点”模型：
+“稳定 KnowledgeBody 外层边界 + 不可变内容快照内层边界 + Claim 十二面体 + 五个服务
+星区”模型：
 
 - Claim 位于缓慢转动的线框十二面体中心，表达同一主张核心可被多视角检查；
-- `ArtifactVersion`、`Scope`、`Method`、`Result`、`EvidenceRelation`、`SourceAnchor`、`AIReviewReport` 和 `Provenance` 围绕中心独立分布；
-- 八条空间直线从 Claim 直接连接各对象；`EvidenceRelation` 使用菱形强调它是关系对象，其余对象使用球体；
-- `KnowledgeBodySnapshot · Sx` 作为外层不可变边界，固定上述对象的具体版本；
-- 每个对象直接显示自己的版本号并可独立演进；`AIReviewReport` 可同时提示当前版本与保留的历史版本；
+- 五条空间直线从 Claim 连接身份与版本、知识边界与证据、能力契约、交互运行时、验证权利与信誉；
+- 十类论文对象继续在五个星区内显示自己的版本，不再作为同级球体平铺；
+- RuntimeProfile 使用虚线表达可替换性，不与某个具体模型绑定；
+- ReputationRecord 使用点线和双边界表达独立演进，内容信誉变化不改写固定快照；
+- `KnowledgeBodySnapshot · Sx` 作为内层不可变边界，固定知识内容和能力契约的具体版本；
 - `v0` 明确表示对象尚未正式建立，不能为了图形完整而虚构结果、方法或审核结论；
 - 旋转只作用于中心十二面体，外围对象与版本号保持静止可读；系统启用减少动态效果时使用固定投影视角；
 - 空间视图是核心对象清单的只读投影，不取代文本列表、版本记录和无障碍摘要。
 
-未来一个 Claim 的某类要素出现多个版本时，应从对应要素球进入版本历史，而不是继续向首屏无限发散节点。
+未来一个 Claim 的某类要素出现多个版本时，应从“知识、边界与证据”星区进入版本历史，
+而不是继续向首屏无限发散节点。
 
 两体与网络层使用圆形边界保持每个知识体的身份与版本历史；跨体边的中点使用绿色菱形
 表示 CitationAssertion、ClaimRelationAssertion、EvidenceRelation、

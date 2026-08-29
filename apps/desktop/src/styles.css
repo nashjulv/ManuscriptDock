@@ -419,11 +419,14 @@ h1, h2, h3, p { margin-top: 0; }
 .knowledge-view-switch button:hover:not(:disabled) { color: var(--text); background: var(--panel); }
 .knowledge-view-switch button[aria-selected="true"] { color: var(--button-text); background: var(--accent); border-color: var(--accent); }
 .knowledge-view-switch button:disabled { cursor: not-allowed; opacity: .42; }
-.knowledge-space-visual { position: relative; min-height: 420px; overflow: hidden; }
-.knowledge-space-visual::before { content: ""; position: absolute; z-index: 0; top: 10px; left: 50%; width: min(88%, 410px); aspect-ratio: 1; border: 1px solid var(--border); border-radius: 50%; transform: translateX(-50%); pointer-events: none; }
+.knowledge-space-visual { position: relative; min-height: 460px; overflow: hidden; }
+.knowledge-space-visual::before { content: ""; position: absolute; z-index: 0; top: 15px; left: 50%; width: min(86%, 430px); aspect-ratio: 1; border: 1px solid var(--border-strong); border-radius: 50%; transform: translateX(-50%); pointer-events: none; }
 .knowledge-snapshot-label { position: absolute; z-index: 4; top: 9px; left: 50%; padding: 2px 8px; color: var(--text-secondary); background: var(--panel); font-size: 9px; letter-spacing: .02em; transform: translateX(-50%); white-space: nowrap; }
+.knowledge-content-boundary { position: absolute; z-index: 1; top: 79px; left: 50%; width: 300px; height: 300px; display: flex; align-items: end; justify-content: center; padding-bottom: 8px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 50%; font-size: 8px; letter-spacing: .04em; transform: translateX(-50%); pointer-events: none; }
 .claim-connections { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .claim-connections line { stroke: var(--text-muted); stroke-width: 1; stroke-linecap: round; opacity: .58; vector-effect: non-scaling-stroke; }
+.claim-connections .runtime-connection { stroke-dasharray: 4 4; }
+.claim-connections .reputation-connection { stroke-dasharray: 1 4; stroke-width: 1.4; }
 .claim-center { position: absolute; z-index: 2; top: 50%; left: 50%; width: 158px; height: 158px; transform: translate(-50%, -50%); }
 .claim-dodecahedron { width: 100%; height: 100%; overflow: visible; }
 .dodeca-edge { stroke: var(--accent); stroke-width: 1.15; stroke-linecap: round; vector-effect: non-scaling-stroke; }
@@ -431,27 +434,23 @@ h1, h2, h3, p { margin-top: 0; }
 .claim-core strong, .claim-core small { display: block; }
 .claim-core strong { font-size: 14px; font-weight: 500; letter-spacing: .03em; }
 .claim-core small { margin-top: 1px; color: var(--text-muted); font-size: 9px; line-height: 13px; }
-.claim-element { position: absolute; z-index: 3; width: 118px; display: grid; justify-items: center; gap: 5px; text-align: center; transform: translate(-50%, -50%); }
-.element-artifact-version { top: 14%; left: 50%; }
-.element-ai-review-report { top: 22%; left: 70%; }
-.element-scope { top: 40%; left: 84%; }
-.element-source-anchor { top: 72%; left: 81%; }
-.element-provenance { top: 87%; left: 62%; }
-.element-result { top: 87%; left: 38%; }
-.element-evidence-relation { top: 72%; left: 19%; }
-.element-method { top: 40%; left: 16%; }
-.element-sphere { position: relative; width: 62px; height: 62px; display: grid; place-items: center; align-content: center; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 50%; box-shadow: inset -8px -9px 0 color-mix(in srgb, var(--panel-strong) 68%, transparent); }
-.element-sphere::before { content: ""; position: absolute; z-index: 1; top: 13px; left: 16px; width: 7px; height: 7px; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; }
-.element-sphere strong, .element-sphere small { position: relative; z-index: 3; display: block; }
-.element-sphere strong { max-width: 72px; font-size: 9px; font-weight: 500; line-height: 12px; overflow-wrap: anywhere; }
-.element-sphere small { color: var(--text-muted); font-size: 9px; line-height: 12px; }
-.claim-element > em { position: relative; z-index: 4; max-width: 116px; overflow: hidden; color: var(--text-muted); font-size: 9px; font-style: normal; line-height: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.claim-element[data-complete="true"] .element-sphere { border-color: var(--accent); }
-.claim-element[data-complete="false"] .element-sphere { border-style: dashed; }
-.element-evidence-relation .element-sphere { width: 50px; height: 50px; background: var(--accent); border-color: var(--accent); border-radius: 3px; box-shadow: none; transform: rotate(45deg); }
-.element-evidence-relation .element-sphere::before { display: none; }
-.element-evidence-relation .element-sphere > * { color: var(--button-text); transform: rotate(-45deg); }
-.element-evidence-relation .element-sphere strong { max-width: 66px; font-size: 8px; }
+.service-layer-node { position: absolute; z-index: 3; width: 132px; text-align: center; transform: translate(-50%, -50%); }
+.service-layer-identity { top: 14%; left: 50%; }
+.service-layer-knowledge { top: 35%; left: 18%; }
+.service-layer-capability { top: 35%; left: 82%; }
+.service-layer-runtime { top: 81%; left: 73%; }
+.service-layer-trust { top: 81%; left: 27%; }
+.service-layer-sphere { min-height: 76px; display: grid; place-items: center; align-content: center; gap: 2px; padding: 9px 10px; color: var(--text); background: color-mix(in srgb, var(--bg) 94%, transparent); border: 1px solid var(--border-strong); border-radius: 40px; box-shadow: inset -10px -12px 0 color-mix(in srgb, var(--panel-strong) 48%, transparent); }
+.service-layer-sphere strong, .service-layer-sphere small, .service-layer-sphere em { position: relative; z-index: 2; display: block; max-width: 116px; }
+.service-layer-sphere strong { font-size: 10px; font-weight: 500; line-height: 14px; }
+.service-layer-sphere small { color: var(--text-secondary); font-size: 9px; line-height: 13px; }
+.service-layer-sphere em { overflow: hidden; color: var(--text-muted); font-size: 8px; font-style: normal; line-height: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.service-layer-knowledge { width: 170px; }
+.service-layer-knowledge .service-layer-sphere em { display: -webkit-box; line-clamp: 2; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.service-layer-node[data-complete="true"] .service-layer-sphere { border-color: color-mix(in srgb, var(--accent) 74%, var(--border-strong)); }
+.service-layer-node[data-complete="false"] .service-layer-sphere { border-style: dashed; }
+.service-layer-runtime .service-layer-sphere { border-style: dashed; }
+.service-layer-trust .service-layer-sphere { border-style: double; border-width: 3px; box-shadow: none; }
 .knowledge-network-canvas { min-height: 420px; position: relative; overflow: hidden; }
 .knowledge-network-canvas svg { width: 100%; min-height: 420px; display: block; }
 .knowledge-network-canvas > p { position: absolute; right: 16px; bottom: 12px; left: 16px; margin: 0; color: var(--text-muted); font-size: 10px; text-align: center; }
@@ -675,9 +674,13 @@ h1, h2, h3, p { margin-top: 0; }
   .composer-controls { grid-template-columns: 1fr; }
   .inquiry-card, .answer-card { max-width: 96%; }
   .claim-center { width: 132px; height: 132px; }
-  .claim-element { width: 94px; }
-  .element-sphere { width: 58px; height: 58px; }
-  .claim-element > em { max-width: 92px; font-size: 8px; }
+  .knowledge-content-boundary { top: 94px; width: 270px; height: 270px; }
+  .service-layer-node { width: 116px; }
+  .service-layer-knowledge { left: 21%; width: 138px; }
+  .service-layer-sphere { min-height: 72px; padding: 8px; }
+  .service-layer-sphere strong { font-size: 9px; }
+  .service-layer-sphere em { max-width: 100px; }
+  .service-layer-knowledge .service-layer-sphere em { max-width: 122px; font-size: 7px; line-height: 10px; }
   .submission-action-card { align-items: stretch; flex-direction: column; }
   .submission-action-card .secondary-button, .submission-record-form .primary-button { width: 100%; min-height: 44px; }
   .lifecycle-record > div { grid-template-columns: 1fr; gap: 3px; }

@@ -305,9 +305,10 @@ async fn ask_knowledge_body(
         "claim": knowledge.snapshot.claim,
         "objects": knowledge.snapshot.objects,
         "aiReviewReport": knowledge.snapshot.ai_review_report,
+        "serviceArchitecture": knowledge.snapshot.service_architecture,
         "externalTransmissionNotice": "This projection is sent only for this author-confirmed question."
     });
-    let system_prompt = "You are the author's configured academic assistant. Answer only from the supplied KnowledgeBody projection. Distinguish established objects from pending v0 objects. Do not invent evidence, methods, results, reviews, citations, or scientific truth. If the projection is insufficient, state exactly what is missing. Reply in the language of the question and keep object names such as Claim, Scope, Method, Result, EvidenceRelation, SourceAnchor, and AIReviewReport explicit.";
+    let system_prompt = "You are the replaceable interaction runtime for the author's KnowledgeBody, not the knowledge itself. Answer only from the supplied projection and obey its capability contracts, preconditions, refusal conditions, knowledge boundaries, rights, and per-call authorization. Distinguish established objects from pending v0 objects and immutable content from independently changing reputation state. Do not invent evidence, methods, results, reviews, citations, capabilities, or scientific truth. If the projection is insufficient or the requested capability is unavailable, refuse precisely and state what is missing. Reply in the language of the question and keep formal object names explicit.";
     let user_prompt = format!(
         "Target: {}\nStance: {}\nQuestion: {}\n\nKnowledgeBody projection:\n{}",
         serde_json::to_string(&target).unwrap_or_else(|_| "knowledge_body".to_owned()),
