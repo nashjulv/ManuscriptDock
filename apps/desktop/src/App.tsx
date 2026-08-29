@@ -958,6 +958,20 @@ function ManuscriptDockApp() {
           <main id="main-content" className="landing-main">
             <header className="landing-workspace-head"><h1 id="page-title">{text("我的工作台", "My Workspace")}</h1></header>
             <div className="landing-content">
+              <section className="brand-statement" aria-labelledby="brand-statement-title">
+                <h2 id="brand-statement-title" className="brand-statement-title">
+                  <span lang="zh-CN">投稿舱</span>
+                  <span lang="en">ManuscriptDock</span>
+                </h2>
+                <div className="brand-positioning">
+                  <p lang="zh-CN">本地论文投稿准备工作台</p>
+                  <p lang="en">Local-first manuscript submission workspace.</p>
+                </div>
+                <div className="brand-slogan">
+                  <p lang="zh-CN">投论文，上更好的期刊</p>
+                  <p lang="en">Go for Better Journals.</p>
+                </div>
+              </section>
               <section className="intake-panel" aria-label={text("选择论文稿件", "Select a manuscript")}>
                 {!manuscript ? (
                   <div className="intake-empty">
@@ -990,7 +1004,7 @@ function ManuscriptDockApp() {
 
               <section className="track-grid" aria-label={text("本地工作原则", "Local workspace principles")}>
                 <article className="track-card"><span>01</span><h2>{text("源稿不变", "Source stays unchanged")}</h2><p>{text("所有处理基于版本化工作副本，原稿始终保持只读。", "All processing uses versioned working copies; the source remains read-only.")}</p></article>
-                <article className="track-card"><span>02</span><h2>{text("传输可见", "Transfers stay visible")}</h2><p>{text("联网、模型调用和外发均在执行前说明对象与范围。", "Network, model, and outbound actions disclose their destination and scope before execution.")}</p></article>
+                <article className="track-card"><span>02</span><h2>{text("传输可见", "Transfers stay visible")}</h2><p>{text("你自主决定是否联网、使用模型和外部投送。", "You decide whether to go online, use models, or send work externally.")}</p></article>
               </section>
               {recentWorkspaces.length > 0 || archivedWorkspaces.length > 0 || catalogWarnings.length > 0 || workspaceManagementNotice || workspaceManagementError ? <RecentWorkspaces workspaces={recentWorkspaces} archivedWorkspaces={archivedWorkspaces} warnings={catalogWarnings.map((warning) => localizeBackendText(locale, warning))} busyId={workspaceManagementBusyId} notice={workspaceManagementNotice} error={workspaceManagementError} onOpen={openRecentWorkspace} onManage={manageWorkspace} /> : null}
             </div>
@@ -1052,7 +1066,7 @@ function ManuscriptDockApp() {
 
 function ProductBar({ manuscriptName, onNewManuscript, isSelecting = false }: { manuscriptName?: string; onNewManuscript?: () => void; isSelecting?: boolean }) {
   const { locale, setLocale, text } = useI18n();
-  return <header className="product-bar"><div className="brand" aria-label="ManuscriptDock"><span className="brand-mark" aria-hidden="true">M</span><span className="brand-name">ManuscriptDock</span><span className="brand-cn">{text("投稿舱", "Submission Dock")}</span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
+  return <header className="product-bar"><div className="brand" aria-label="投稿舱 ManuscriptDock"><span className="brand-mark" aria-hidden="true">M</span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
 }
 
 function SubmissionGuide() {

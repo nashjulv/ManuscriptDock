@@ -21,6 +21,12 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock" }));
+    expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
+    expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
+    expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
+    expect(brandStatement.getByText("Go for Better Journals.")).toHaveAttribute("lang", "en");
+    expect(screen.getByText("你自主决定是否联网、使用模型和外部投送。")).toBeVisible();
     expect(screen.getByRole("button", { name: "选择论文" })).toBeEnabled();
     expect(screen.getByText("没有文件会在此阶段上传")).toBeVisible();
     const navigationIcons = within(screen.getByRole("navigation", { name: "工作台导航" }))
@@ -39,6 +45,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Select manuscript" })).toBeEnabled();
     expect(screen.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
     expect(screen.getByText("No files are uploaded at this stage")).toBeVisible();
+    expect(screen.getByText("You decide whether to go online, use models, or send work externally.")).toBeVisible();
     expect(document.documentElement).toHaveAttribute("lang", "en");
     expect(window.localStorage.getItem("manuscriptdock.locale")).toBe("en");
 

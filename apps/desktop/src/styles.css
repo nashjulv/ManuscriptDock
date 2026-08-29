@@ -40,8 +40,9 @@ h1, h2, h3, p { margin-top: 0; }
 .product-bar { height: 56px; display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr) minmax(220px, 1fr); align-items: center; gap: 20px; padding: 0 24px; background: var(--bg); }
 .brand { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .brand-mark { width: 28px; height: 28px; display: grid; place-items: center; flex: none; color: var(--text); background: transparent; border: 1px solid var(--text); border-radius: 4px; font: 600 13px/1 Georgia, serif; }
-.brand-name { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-.brand-cn { color: var(--text-muted); font-size: 13px; }
+.brand-copy { min-width: 0; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+.brand-cn { color: var(--text); font-size: 15px; }
+.brand-name { color: var(--text-secondary); font-size: 14px; letter-spacing: -.01em; }
 .current-manuscript { min-width: 0; margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 13px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .bar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .language-switch { height: 30px; display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--border-strong); border-radius: 6px; }
@@ -72,6 +73,17 @@ h1, h2, h3, p { margin-top: 0; }
 .landing-workspace-head { height: 46px; display: flex; align-items: center; padding: 16px 24px 6px; }
 .landing-workspace-head h1, .workflow-header h1 { margin: 0; padding: 1px 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; font-family: "PingFang SC", "PingFang HK", sans-serif; font-size: 13px; font-weight: 700; line-height: 19px; letter-spacing: 2px; }
 .landing-content { padding: 16px 32px 36px; }
+.brand-statement { margin: 4px 16px 8px; padding: 16px 0 22px; border-bottom: 1px solid var(--border); }
+.brand-statement-title { display: flex; align-items: baseline; gap: 10px; margin: 0; color: var(--text); }
+.brand-statement-title [lang="zh-CN"] { font-size: 27px; line-height: 38px; letter-spacing: .02em; }
+.brand-statement-title [lang="en"] { color: var(--text-secondary); font-size: 20px; line-height: 30px; letter-spacing: -.01em; }
+.brand-positioning { margin-top: 8px; }
+.brand-positioning p, .brand-slogan p { margin: 0; }
+.brand-positioning [lang="zh-CN"] { color: var(--text-secondary); font-size: 15px; line-height: 23px; }
+.brand-positioning [lang="en"] { color: var(--text-muted); font-size: 13px; line-height: 20px; }
+.brand-slogan { margin-top: 16px; padding-left: 12px; border-left: 2px solid var(--accent); }
+.brand-slogan [lang="zh-CN"] { color: var(--text); font-size: 19px; line-height: 28px; }
+.brand-slogan [lang="en"] { color: var(--text-secondary); font-size: 13px; font-style: italic; line-height: 20px; }
 .intake-panel { margin-bottom: 16px; padding: 16px; background: transparent; }
 .intake-empty { min-height: 146px; display: block; padding: 0; text-align: left; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -602,12 +614,19 @@ h1, h2, h3, p { margin-top: 0; }
 
 @media (max-width: 720px) {
   .product-bar { padding: 0 12px; }
-  .brand-cn, .local-badge { display: none; }
+  .local-badge { display: none; }
+  .brand-copy { display: grid; gap: 0; }
+  .brand-cn { font-size: 13px; line-height: 15px; }
+  .brand-name { font-size: 11px; line-height: 13px; }
   .landing-review-layout { grid-template-columns: 42px minmax(0, 1fr); }
   .task-rail { padding-top: 10px; }
   .rail-button { width: 34px; height: 34px; flex-basis: 34px; }
   .landing-workspace-head { padding-left: 16px; }
   .landing-content { padding: 12px 16px 28px; }
+  .brand-statement { margin: 4px 12px 8px; padding-top: 12px; }
+  .brand-statement-title { align-items: flex-start; flex-direction: column; gap: 0; }
+  .brand-statement-title [lang="zh-CN"] { font-size: 24px; line-height: 34px; }
+  .brand-statement-title [lang="en"] { font-size: 18px; line-height: 26px; }
   .intake-panel, .recent-section { padding: 12px; }
   .track-grid { grid-template-columns: 1fr; gap: 8px; }
   .track-card { min-height: auto; padding: 16px; }

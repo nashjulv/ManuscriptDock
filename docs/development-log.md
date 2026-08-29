@@ -3,6 +3,23 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-29 — Bilingual homepage brand statement
+
+- Added a prominent, always-visible Chinese/English brand statement above the homepage import area.
+- Separated the Chinese product name, positioning, and slogan from their English counterparts with
+  independent lines, typographic hierarchy, and language metadata.
+- Standardized the top bar identity as `投稿舱 ManuscriptDock` in both interface locales.
+- Reframed the “传输可见” principle around author choice: the author decides whether to connect,
+  use a model, or send work externally; action-specific disclosure remains part of each workflow.
+- Preserved the PWC-derived neutral palette, PingFang-light typography, and `#A6CE39` trust accent.
+
+### Verification
+
+- `npm run test --workspace @manuscriptdock/desktop`: passed frontend interaction tests, including
+  bilingual brand visibility, language metadata, and the revised transfer-control copy.
+- `npm run typecheck --workspace @manuscriptdock/desktop`: passed.
+- `npm run build --workspace @manuscriptdock/desktop`: passed.
+
 ## 2026-08-24 — Native desktop installer pipeline
 
 - Enabled Tauri bundling with stable product metadata and platform-specific configuration.
