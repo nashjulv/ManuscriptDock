@@ -1,8 +1,11 @@
-use crate::workspace::WorkspaceSummary;
+use crate::{
+    structure::{DecompositionManifest, SemanticCandidate, SemanticElementKind, SourceModality},
+    workspace::WorkspaceSummary,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt};
 
-pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 2;
+pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 3;
 pub const DISCIPLINE_INDEX_SCHEME: &str = "ManuscriptDock Discipline Index";
 pub const DISCIPLINE_INDEX_VERSION: &str = "1.0";
 
@@ -127,6 +130,7 @@ pub struct VersionedObjectReference {
 #[serde(rename_all = "snake_case")]
 pub enum ElementState {
     Pending,
+    Candidate,
     Established,
 }
 
@@ -147,6 +151,42 @@ pub struct ClaimFiveTuple {
     pub evidence: ClaimElementReference,
     pub sources: ClaimElementReference,
     pub status: ClaimElementReference,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeCandidateContent {
+    pub candidate_id: String,
+    pub text: String,
+    pub source_label: String,
+    pub source_fragment_id: Option<String>,
+    pub modality: SourceModality,
+    pub confidence_percent: u8,
+    pub author_confirmed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedKnowledgeElement {
+    pub object: VersionedObjectReference,
+    pub state: ElementState,
+    pub candidates: Vec<KnowledgeCandidateContent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeExtractionLayer {
+    pub decomposition_id: String,
+    pub decomposition_hash: String,
+    pub analysis_version: u32,
+    pub source_snapshot_version: u32,
+    pub generated_by: String,
+    pub confirmation_policy: String,
+    pub claim: ExtractedKnowledgeElement,
+    pub scope: ExtractedKnowledgeElement,
+    pub method: ExtractedKnowledgeElement,
+    pub result: ExtractedKnowledgeElement,
+    pub evidence: ExtractedKnowledgeElement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -453,6 +493,8 @@ pub struct AcademicKnowledgeBodySnapshot {
     pub ai_review_report: Option<VersionedObjectReference>,
     pub ai_review_history: AiReviewReportHistory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction: Option<KnowledgeExtractionLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_architecture: Option<KnowledgeBodyServiceArchitecture>,
     pub network: KnowledgeBodyNetwork,
     pub external_transmission: String,
@@ -479,6 +521,35 @@ impl AcademicKnowledgeBodySnapshot {
             || self.objects.provenance.object_type != KnowledgeObjectType::Provenance
         {
             return Err(KnowledgeBodyError::InvalidSnapshot);
+        }
+        if let Some(extraction) = &self.extraction {
+            let candidate_elements = [
+                (&extraction.claim, &self.claim.proposition.reference),
+                (&extraction.scope, &self.objects.scope),
+                (&extraction.method, &self.objects.method),
+                (&extraction.result, &self.objects.result),
+                (&extraction.evidence, &self.claim.evidence.reference),
+            ];
+            if extraction.decomposition_id.trim().is_empty()
+                || extraction.decomposition_hash.len() != 64
+                || extraction.source_snapshot_version != self.snapshot_version
+                || extraction.generated_by.trim().is_empty()
+                || extraction.confirmation_policy.trim().is_empty()
+                || candidate_elements.iter().any(|(element, expected)| {
+                    element.object != **expected
+                        || (element.candidates.is_empty() && element.state != ElementState::Pending)
+                        || (!element.candidates.is_empty()
+                            && element.state == ElementState::Pending)
+                        || element.candidates.iter().any(|candidate| {
+                            candidate.candidate_id.trim().is_empty()
+                                || candidate.text.trim().is_empty()
+                                || candidate.source_label.trim().is_empty()
+                                || candidate.confidence_percent > 100
+                        })
+                })
+            {
+                return Err(KnowledgeBodyError::InvalidSnapshot);
+            }
         }
         self.ai_review_history.validate()?;
         match &self.ai_review_report {
@@ -597,9 +668,56 @@ impl fmt::Display for KnowledgeBodyError {
 
 impl Error for KnowledgeBodyError {}
 
+fn extracted_element(
+    knowledge_body_id: &str,
+    object: VersionedObjectReference,
+    element: SemanticElementKind,
+    candidates: &[SemanticCandidate],
+) -> ExtractedKnowledgeElement {
+    let candidates = candidates
+        .iter()
+        .filter(|candidate| candidate.element == element)
+        .enumerate()
+        .map(|(index, candidate)| KnowledgeCandidateContent {
+            candidate_id: format!(
+                "{knowledge_body_id}:candidate:{}:{}",
+                semantic_element_label(element),
+                index + 1
+            ),
+            text: candidate.text.clone(),
+            source_label: candidate.source_label.clone(),
+            source_fragment_id: candidate.source_fragment_id.clone(),
+            modality: candidate.modality,
+            confidence_percent: candidate.confidence_percent,
+            author_confirmed: false,
+        })
+        .collect::<Vec<_>>();
+    ExtractedKnowledgeElement {
+        object,
+        state: if candidates.is_empty() {
+            ElementState::Pending
+        } else {
+            ElementState::Candidate
+        },
+        candidates,
+    }
+}
+
+fn semantic_element_label(element: SemanticElementKind) -> &'static str {
+    match element {
+        SemanticElementKind::Claim => "claim",
+        SemanticElementKind::Scope => "scope",
+        SemanticElementKind::Method => "method",
+        SemanticElementKind::Result => "result",
+        SemanticElementKind::Evidence => "evidence",
+    }
+}
+
 pub fn local_knowledge_body_snapshot(
     workspace: &WorkspaceSummary,
+    decomposition: Option<&DecompositionManifest>,
 ) -> AcademicKnowledgeBodySnapshot {
+    let structure_report = decomposition.map(|manifest| &manifest.structure);
     let knowledge_body_id = format!("kb:{}", workspace.id);
     let claim_id = format!("{knowledge_body_id}:claim:primary");
     let object = |suffix: &str, object_type, version| VersionedObjectReference {
@@ -607,10 +725,39 @@ pub fn local_knowledge_body_snapshot(
         object_type,
         version,
     };
+    let extracted_version = |kind: SemanticElementKind| {
+        structure_report
+            .filter(|report| {
+                report.source_snapshot_version == workspace.snapshot_version
+                    && report
+                        .semantic_candidates
+                        .iter()
+                        .any(|candidate| candidate.element == kind)
+            })
+            .map(|_| workspace.snapshot_version)
+            .unwrap_or(0)
+    };
+    let proposition_version = extracted_version(SemanticElementKind::Claim);
+    let scope_version = extracted_version(SemanticElementKind::Scope);
+    let method_version = extracted_version(SemanticElementKind::Method);
+    let result_version = extracted_version(SemanticElementKind::Result);
+    let evidence_version = extracted_version(SemanticElementKind::Evidence);
+    let evidence_relation_version = if proposition_version > 0 && evidence_version > 0 {
+        workspace.snapshot_version
+    } else {
+        0
+    };
+    let candidate_state = |version| {
+        if version > 0 {
+            ElementState::Candidate
+        } else {
+            ElementState::Pending
+        }
+    };
     let claim = VersionedObjectReference {
         object_id: claim_id,
         object_type: KnowledgeObjectType::Claim,
-        version: 1,
+        version: proposition_version.max(1),
     };
     let sources = object(
         "source:manuscript",
@@ -627,14 +774,31 @@ pub fn local_knowledge_body_snapshot(
         KnowledgeObjectType::ArtifactVersion,
         workspace.snapshot_version,
     );
-    let scope = object("scope:primary", KnowledgeObjectType::Scope, 0);
-    let method = object("method:primary", KnowledgeObjectType::Method, 0);
-    let result = object("result:primary", KnowledgeObjectType::Result, 0);
-    let evidence = object("evidence:primary", KnowledgeObjectType::Evidence, 0);
+    let proposition = object(
+        "proposition:primary",
+        KnowledgeObjectType::Proposition,
+        proposition_version,
+    );
+    let scope = object("scope:primary", KnowledgeObjectType::Scope, scope_version);
+    let method = object(
+        "method:primary",
+        KnowledgeObjectType::Method,
+        method_version,
+    );
+    let result = object(
+        "result:primary",
+        KnowledgeObjectType::Result,
+        result_version,
+    );
+    let evidence = object(
+        "evidence:primary",
+        KnowledgeObjectType::Evidence,
+        evidence_version,
+    );
     let evidence_relation = object(
         "evidence-relation:primary",
         KnowledgeObjectType::EvidenceRelation,
-        0,
+        evidence_relation_version,
     );
     let provenance = object("provenance:primary", KnowledgeObjectType::Provenance, 1);
     let snapshot_reference = object(
@@ -642,6 +806,50 @@ pub fn local_knowledge_body_snapshot(
         KnowledgeObjectType::KnowledgeBodySnapshot,
         workspace.snapshot_version,
     );
+    let extraction = structure_report
+        .filter(|report| report.source_snapshot_version == workspace.snapshot_version)
+        .map(|report| KnowledgeExtractionLayer {
+            decomposition_id: decomposition
+                .map(|manifest| manifest.decomposition_id.clone())
+                .unwrap_or_default(),
+            decomposition_hash: decomposition
+                .map(|manifest| manifest.manifest_hash.clone())
+                .unwrap_or_default(),
+            analysis_version: report.analysis_version,
+            source_snapshot_version: report.source_snapshot_version,
+            generated_by: "local_deterministic_semantic_extraction".to_owned(),
+            confirmation_policy: "machine_candidates_require_author_confirmation".to_owned(),
+            claim: extracted_element(
+                &knowledge_body_id,
+                proposition.clone(),
+                SemanticElementKind::Claim,
+                &report.semantic_candidates,
+            ),
+            scope: extracted_element(
+                &knowledge_body_id,
+                scope.clone(),
+                SemanticElementKind::Scope,
+                &report.semantic_candidates,
+            ),
+            method: extracted_element(
+                &knowledge_body_id,
+                method.clone(),
+                SemanticElementKind::Method,
+                &report.semantic_candidates,
+            ),
+            result: extracted_element(
+                &knowledge_body_id,
+                result.clone(),
+                SemanticElementKind::Result,
+                &report.semantic_candidates,
+            ),
+            evidence: extracted_element(
+                &knowledge_body_id,
+                evidence.clone(),
+                SemanticElementKind::Evidence,
+                &report.semantic_candidates,
+            ),
+        });
     let snapshot = AcademicKnowledgeBodySnapshot {
         schema_version: KNOWLEDGE_BODY_SCHEMA_VERSION,
         knowledge_body_id: knowledge_body_id.clone(),
@@ -650,24 +858,36 @@ pub fn local_knowledge_body_snapshot(
         claim: ClaimFiveTuple {
             claim: claim.clone(),
             proposition: ClaimElementReference {
-                reference: object("proposition:primary", KnowledgeObjectType::Proposition, 0),
-                state: ElementState::Pending,
+                reference: proposition,
+                state: candidate_state(proposition_version),
             },
             conditions: ClaimElementReference {
                 reference: scope.clone(),
-                state: ElementState::Pending,
+                state: candidate_state(scope_version),
             },
             evidence: ClaimElementReference {
                 reference: evidence.clone(),
-                state: ElementState::Pending,
+                state: candidate_state(evidence_version),
             },
             sources: ClaimElementReference {
                 reference: sources.clone(),
                 state: ElementState::Established,
             },
             status: ClaimElementReference {
-                reference: object("status:building", KnowledgeObjectType::Status, 1),
-                state: ElementState::Established,
+                reference: object(
+                    if proposition_version > 0 {
+                        "status:extracted-candidate"
+                    } else {
+                        "status:building"
+                    },
+                    KnowledgeObjectType::Status,
+                    1,
+                ),
+                state: if proposition_version > 0 {
+                    ElementState::Candidate
+                } else {
+                    ElementState::Established
+                },
             },
         },
         objects: KnowledgeBodyObjectSet {
@@ -688,6 +908,7 @@ pub fn local_knowledge_body_snapshot(
             current_version: None,
             versions: Vec::new(),
         },
+        extraction,
         service_architecture: Some(KnowledgeBodyServiceArchitecture {
             identity_and_version: IdentityVersionLayer {
                 knowledge_body: body.clone(),
@@ -707,7 +928,13 @@ pub fn local_knowledge_body_snapshot(
                 evidence_relation: evidence_relation.clone(),
                 source_anchor: sources.clone(),
                 known_limitations: vec![
-                    "formal_claim_elements_pending_author_confirmation".to_owned(),
+                    if structure_report.is_some_and(|report| !report.semantic_candidates.is_empty())
+                    {
+                        "locally_extracted_semantic_candidates_require_author_confirmation"
+                            .to_owned()
+                    } else {
+                        "no_semantic_candidates_extracted_from_current_artifact".to_owned()
+                    },
                     "professional_ai_review_not_performed".to_owned(),
                 ],
                 unverified_objects: vec![scope.clone(), method.clone(), result.clone(), evidence],
@@ -871,7 +1098,7 @@ mod tests {
 
     #[test]
     fn keeps_ai_review_history_while_the_snapshot_pins_v2() {
-        let mut snapshot = local_knowledge_body_snapshot(&workspace());
+        let mut snapshot = local_knowledge_body_snapshot(&workspace(), None);
         let reviewed_claim = snapshot.claim.claim.clone();
         snapshot.ai_review_history = AiReviewReportHistory {
             report_id: "review:primary".to_owned(),
@@ -940,7 +1167,7 @@ mod tests {
 
     #[test]
     fn local_snapshot_does_not_invent_reviews_or_cross_body_relations() {
-        let snapshot = local_knowledge_body_snapshot(&workspace());
+        let snapshot = local_knowledge_body_snapshot(&workspace(), None);
         snapshot.validate().unwrap();
         assert!(snapshot.ai_review_report.is_none());
         assert!(snapshot.ai_review_history.versions.is_empty());
@@ -974,7 +1201,7 @@ mod tests {
 
     #[test]
     fn keeps_legacy_v1_snapshots_readable_without_the_five_layer_architecture() {
-        let mut snapshot = local_knowledge_body_snapshot(&workspace());
+        let mut snapshot = local_knowledge_body_snapshot(&workspace(), None);
         snapshot.schema_version = 1;
         snapshot.service_architecture = None;
 

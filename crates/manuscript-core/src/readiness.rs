@@ -1066,6 +1066,9 @@ mod tests {
             ],
             page_count: None,
             word_count: 1200,
+            semantic_candidates: Vec::new(),
+            source_fragments: Vec::new(),
+            extraction_coverage: Default::default(),
             pdf_processing: None,
             warnings: Vec::new(),
         }

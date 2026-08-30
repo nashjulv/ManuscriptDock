@@ -43,7 +43,9 @@ pub use revision::{
     RevisionField, RevisionFieldKind, RevisionSet,
 };
 pub use structure::{
-    AnalysisQuality, SectionSummary, StructureAnalysis, StructureError, StructureReport,
+    AnalysisQuality, DecompositionManifest, ExtractedSourceFragment, ExtractionCoverage,
+    SectionSummary, SemanticCandidate, SemanticElementKind, SourceModality, StructureAnalysis,
+    StructureError, StructureReport,
 };
 pub use workspace::{
     KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, SubmissionExport,

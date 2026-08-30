@@ -375,11 +375,12 @@ async fn ask_knowledge_body(
         "sections": redacted_sections,
         "claim": knowledge.snapshot.claim,
         "objects": knowledge.snapshot.objects,
+        "semanticExtraction": knowledge.snapshot.extraction,
         "aiReviewReport": knowledge.snapshot.ai_review_report,
         "serviceArchitecture": knowledge.snapshot.service_architecture,
         "externalTransmissionNotice": "This projection is sent only for this author-confirmed question. Extracted author names, contact details, identifiers, and local paths are excluded at the Rust network boundary."
     });
-    let system_prompt = "You are the replaceable interaction runtime for the author's KnowledgeBody, not the knowledge itself. Answer only from the supplied projection and obey its capability contracts, preconditions, refusal conditions, knowledge boundaries, rights, and per-call authorization. Distinguish established objects from pending v0 objects and immutable content from independently changing reputation state. Do not invent evidence, methods, results, reviews, citations, capabilities, or scientific truth. If the projection is insufficient or the requested capability is unavailable, refuse precisely and state what is missing. Reply in the language of the question and keep formal object names explicit.";
+    let system_prompt = "You are the replaceable interaction runtime for the author's KnowledgeBody, not the knowledge itself. Answer only from the supplied projection and obey its capability contracts, preconditions, refusal conditions, knowledge boundaries, rights, and per-call authorization. Treat semanticExtraction entries with state=candidate as locally extracted, source-backed but not yet author-confirmed content: you may summarize and answer from them when you explicitly preserve that uncertainty. Treat pending v0 as absent content and established as author-confirmed content. Do not invent evidence, methods, results, reviews, citations, capabilities, or scientific truth. If the projection is insufficient or the requested capability is unavailable, refuse precisely and state what is missing. Reply in the language of the question and keep formal object names explicit.";
     let user_prompt = format!(
         "Target: {}\nStance: {}\nQuestion: {}\n\nKnowledgeBody projection:\n{}",
         serde_json::to_string(&target).unwrap_or_else(|_| "knowledge_body".to_owned()),

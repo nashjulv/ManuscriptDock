@@ -20,7 +20,10 @@ use crate::{
         evaluate_readiness, render_readiness_html, ReadinessError, READINESS_REPORT_VERSION,
     },
     revision::{apply_revision, extract_revision_fields},
-    structure::{extract_structure, StructureError, STRUCTURE_ANALYSIS_VERSION},
+    structure::{
+        extract_structure, DecompositionManifest, StructureError, DECOMPOSITION_SCHEMA_VERSION,
+        STRUCTURE_ANALYSIS_VERSION,
+    },
     ManuscriptSummary, ReadinessOutcome, ReadinessReport, RevisionApplication, RevisionChangeInput,
     RevisionDraft, RevisionError, RevisionSet, StructureReport,
 };
@@ -492,11 +495,27 @@ struct SubmissionPackageManifest<'a> {
     workspace_id: &'a str,
     manuscript_version: u32,
     manuscript_hash: &'a str,
+    decomposition_id: &'a str,
+    decomposition_hash: &'a str,
     readiness_report_id: &'a str,
     attestation_id: &'a str,
     attestation_hash: &'a str,
     created_unix_ms: u64,
     files: &'a [String],
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DecompositionPayload<'a> {
+    schema_version: u32,
+    decomposition_id: &'a str,
+    workspace_id: &'a str,
+    source_content_hash: &'a str,
+    source_snapshot_version: u32,
+    created_unix_ms: u64,
+    structure: &'a StructureReport,
+    declared_outputs: &'a [String],
     external_transmission: &'a str,
 }
 
@@ -738,7 +757,18 @@ impl WorkspaceStore {
         }
         let snapshot_path = self.source_snapshot_path(workspace_id)?;
         verify_snapshot(&snapshot_path, &manifest.workspace)?;
-        Ok(local_knowledge_body_snapshot(&manifest.workspace))
+        let decomposition = match read_current_decomposition(&workspace_root, &manifest.workspace)?
+        {
+            Some(decomposition) => Some(decomposition),
+            None => {
+                self.analyze_structure(workspace_id)?;
+                read_current_decomposition(&workspace_root, &manifest.workspace)?
+            }
+        };
+        Ok(local_knowledge_body_snapshot(
+            &manifest.workspace,
+            decomposition.as_ref(),
+        ))
     }
 
     pub fn create_version_from_source(
@@ -891,6 +921,42 @@ impl WorkspaceStore {
             manifest.workspace.snapshot_version,
         )?;
 
+        let created_unix_ms = unix_time_ms()?;
+        let decomposition_id = format!(
+            "decomposition:{}:v{}",
+            workspace_id, manifest.workspace.snapshot_version
+        );
+        let declared_outputs = vec![
+            "knowledge_body_candidates".to_owned(),
+            "submission_readiness_inputs".to_owned(),
+            "submission_package_manifest".to_owned(),
+        ];
+        let external_transmission = "not_performed".to_owned();
+        let payload = DecompositionPayload {
+            schema_version: DECOMPOSITION_SCHEMA_VERSION,
+            decomposition_id: &decomposition_id,
+            workspace_id,
+            source_content_hash: &manifest.workspace.content_hash,
+            source_snapshot_version: manifest.workspace.snapshot_version,
+            created_unix_ms,
+            structure: &report,
+            declared_outputs: &declared_outputs,
+            external_transmission: &external_transmission,
+        };
+        let manifest_hash = hash_serializable(&payload)?;
+        let decomposition = DecompositionManifest {
+            schema_version: DECOMPOSITION_SCHEMA_VERSION,
+            decomposition_id,
+            workspace_id: workspace_id.to_owned(),
+            source_content_hash: manifest.workspace.content_hash.clone(),
+            source_snapshot_version: manifest.workspace.snapshot_version,
+            created_unix_ms,
+            structure: report.clone(),
+            declared_outputs,
+            manifest_hash,
+            external_transmission,
+        };
+
         let analysis_root = workspace_root.join("analysis");
         fs::create_dir_all(&analysis_root)?;
         let hash_prefix = manifest
@@ -899,11 +965,11 @@ impl WorkspaceStore {
             .get(..12)
             .ok_or_else(|| WorkspaceError::InvalidManifest("内容指纹长度无效".to_owned()))?;
         let report_path = analysis_root.join(format!(
-            "structure-v{STRUCTURE_ANALYSIS_VERSION}-{hash_prefix}.json"
+            "decomposition-v{DECOMPOSITION_SCHEMA_VERSION}-a{STRUCTURE_ANALYSIS_VERSION}-{hash_prefix}.json"
         ));
         if !report_path.exists() {
             let temporary_path = analysis_root.join(format!(".{}.tmp", Uuid::new_v4()));
-            write_json(&temporary_path, &report)?;
+            write_json(&temporary_path, &decomposition)?;
             match fs::rename(&temporary_path, &report_path) {
                 Ok(()) => {}
                 Err(_) if report_path.exists() => {
@@ -915,9 +981,9 @@ impl WorkspaceStore {
 
         append_audit_event(
             &workspace_root.join("audit.jsonl"),
-            "structure_analyzed",
+            "manuscript_decomposed",
             &manifest.workspace,
-            unix_time_ms()?,
+            created_unix_ms,
         )?;
         Ok(report)
     }
@@ -1233,13 +1299,10 @@ impl WorkspaceStore {
         }
         let snapshot_path = self.source_snapshot_path(workspace_id)?;
         verify_snapshot(&snapshot_path, &manifest.workspace)?;
-        let structure = extract_structure(
-            &snapshot_path,
-            &manifest.workspace.manuscript,
-            workspace_id,
-            &manifest.workspace.content_hash,
-            manifest.workspace.snapshot_version,
-        )?;
+        let structure = match read_current_decomposition(&workspace_root, &manifest.workspace)? {
+            Some(decomposition) => decomposition.structure,
+            None => self.analyze_structure(workspace_id)?,
+        };
         let generated_unix_ms = unix_time_ms()?;
         let report_id = Uuid::new_v4().to_string();
         let report = evaluate_readiness(
@@ -1391,6 +1454,16 @@ impl WorkspaceStore {
             .ok_or(WorkspaceError::MissingCurrentAttestation)?;
         let workspace_root = self.projects_root().join(workspace_id);
         let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let decomposition = match read_current_decomposition(&workspace_root, &manifest.workspace)?
+        {
+            Some(decomposition) => decomposition,
+            None => {
+                self.analyze_structure(workspace_id)?;
+                read_current_decomposition(&workspace_root, &manifest.workspace)?.ok_or_else(
+                    || WorkspaceError::InvalidManifest("未生成当前论文分解资产".to_owned()),
+                )?
+            }
+        };
         let package_name = format!(
             "ManuscriptDock-{}-v{}",
             &workspace_id[..8],
@@ -1405,6 +1478,7 @@ impl WorkspaceStore {
         let exported_unix_ms = unix_time_ms()?;
         let files = vec![
             format!("manuscript.{}", manifest.workspace.manuscript.extension),
+            "decomposition-manifest.json".to_owned(),
             "readiness-report.json".to_owned(),
             "readiness-preview.html".to_owned(),
             "local-attestation.json".to_owned(),
@@ -1414,35 +1488,38 @@ impl WorkspaceStore {
             let snapshot = self.source_snapshot_path(workspace_id)?;
             verify_snapshot(&snapshot, &manifest.workspace)?;
             fs::copy(&snapshot, temporary_root.join(&files[0]))?;
+            write_json(&temporary_root.join(&files[1]), &decomposition)?;
             let report_root = readiness_output_root(&workspace_root, &report.report_id);
             fs::copy(
                 report_root.join(format!("readiness-v{}.json", report.report_version)),
-                temporary_root.join(&files[1]),
+                temporary_root.join(&files[2]),
             )?;
             fs::copy(
                 report_root.join("preview.html"),
-                temporary_root.join(&files[2]),
+                temporary_root.join(&files[3]),
             )?;
             fs::copy(
                 workspace_root
                     .join("attestations")
                     .join(&attestation.attestation_id)
                     .join("attestation.json"),
-                temporary_root.join(&files[3]),
+                temporary_root.join(&files[4]),
             )?;
             let package_manifest = SubmissionPackageManifest {
                 schema_version: 1,
                 workspace_id,
                 manuscript_version: manifest.workspace.snapshot_version,
                 manuscript_hash: &manifest.workspace.content_hash,
+                decomposition_id: &decomposition.decomposition_id,
+                decomposition_hash: &decomposition.manifest_hash,
                 readiness_report_id: &report.report_id,
                 attestation_id: &attestation.attestation_id,
                 attestation_hash: &attestation.record_hash,
                 created_unix_ms: exported_unix_ms,
-                files: &files[..4],
+                files: &files[..5],
                 external_transmission: "not_performed",
             };
-            write_json(&temporary_root.join(&files[4]), &package_manifest)?;
+            write_json(&temporary_root.join(&files[5]), &package_manifest)?;
             fs::rename(&temporary_root, &final_root)?;
             append_audit_event(
                 &workspace_root.join("audit.jsonl"),
@@ -1558,22 +1635,28 @@ impl WorkspaceStore {
             .submission
             .ok_or(WorkspaceError::MissingCurrentSubmission)?;
         let existing = lifecycle.knowledge_body;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let decomposition = match read_current_decomposition(&workspace_root, &manifest.workspace)?
+        {
+            Some(decomposition) => Some(decomposition),
+            None => {
+                self.analyze_structure(workspace_id)?;
+                read_current_decomposition(&workspace_root, &manifest.workspace)?
+            }
+        };
+        let snapshot = local_knowledge_body_snapshot(&manifest.workspace, decomposition.as_ref());
+        snapshot.validate()?;
         if let Some(existing_record) = &existing {
             if existing_record
                 .discipline_classification
                 .as_ref()
                 .is_some_and(|classification| classification.code == discipline.code)
+                && existing_record.snapshot == snapshot
             {
                 return Ok(existing_record.clone());
             }
         }
-        let workspace_root = self.projects_root().join(workspace_id);
-        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
-        let snapshot = existing
-            .as_ref()
-            .map(|record| record.snapshot.clone())
-            .unwrap_or_else(|| local_knowledge_body_snapshot(&manifest.workspace));
-        snapshot.validate()?;
         let previous_classification = existing
             .as_ref()
             .and_then(|record| record.discipline_classification.as_ref());
@@ -2084,6 +2167,9 @@ fn read_current_structure_report(
     workspace_root: &Path,
     workspace: &WorkspaceSummary,
 ) -> Result<Option<StructureReport>, WorkspaceError> {
+    if let Some(decomposition) = read_current_decomposition(workspace_root, workspace)? {
+        return Ok(Some(decomposition.structure));
+    }
     let hash_prefix = workspace
         .content_hash
         .get(..12)
@@ -2102,6 +2188,60 @@ fn read_current_structure_report(
         return Ok(None);
     }
     Ok(Some(report))
+}
+
+fn read_current_decomposition(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+) -> Result<Option<DecompositionManifest>, WorkspaceError> {
+    let hash_prefix = workspace
+        .content_hash
+        .get(..12)
+        .ok_or_else(|| WorkspaceError::InvalidManifest("内容指纹长度无效".to_owned()))?;
+    let path = workspace_root.join("analysis").join(format!(
+        "decomposition-v{DECOMPOSITION_SCHEMA_VERSION}-a{STRUCTURE_ANALYSIS_VERSION}-{hash_prefix}.json"
+    ));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let decomposition: DecompositionManifest = read_json(&path)?;
+    if decomposition.schema_version != DECOMPOSITION_SCHEMA_VERSION
+        || decomposition.workspace_id != workspace.id
+        || decomposition.source_content_hash != workspace.content_hash
+        || decomposition.source_snapshot_version != workspace.snapshot_version
+        || decomposition.structure.workspace_id != workspace.id
+        || decomposition.structure.source_content_hash != workspace.content_hash
+        || decomposition.structure.source_snapshot_version != workspace.snapshot_version
+        || !decomposition
+            .declared_outputs
+            .iter()
+            .any(|output| output == "knowledge_body_candidates")
+        || !decomposition
+            .declared_outputs
+            .iter()
+            .any(|output| output == "submission_readiness_inputs")
+    {
+        return Err(WorkspaceError::InvalidManifest(
+            "当前论文分解资产与源版本不一致".to_owned(),
+        ));
+    }
+    let payload = DecompositionPayload {
+        schema_version: decomposition.schema_version,
+        decomposition_id: &decomposition.decomposition_id,
+        workspace_id: &decomposition.workspace_id,
+        source_content_hash: &decomposition.source_content_hash,
+        source_snapshot_version: decomposition.source_snapshot_version,
+        created_unix_ms: decomposition.created_unix_ms,
+        structure: &decomposition.structure,
+        declared_outputs: &decomposition.declared_outputs,
+        external_transmission: &decomposition.external_transmission,
+    };
+    if hash_serializable(&payload)? != decomposition.manifest_hash {
+        return Err(WorkspaceError::InvalidManifest(
+            "当前论文分解资产哈希校验失败".to_owned(),
+        ));
+    }
+    Ok(Some(decomposition))
 }
 
 fn read_current_readiness_report(
@@ -2715,7 +2855,8 @@ fn make_file_owner_writable(permissions: &mut fs::Permissions) {
 #[cfg(test)]
 mod tests {
     use super::{
-        make_tree_writable, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
+        make_tree_writable, read_json, DecompositionManifest, VersionCreation, VersionOrigin,
+        WorkspaceError, WorkspaceStore,
     };
     use crate::{
         InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
@@ -3007,7 +3148,7 @@ mod tests {
         fs::write(
             &source_path,
             r"\title{Synthetic Study}
-\begin{abstract}Synthetic abstract.\end{abstract}
+\begin{abstract}We propose a deterministic method. Results show improved extraction accuracy by 18 percent.\end{abstract}
 \keywords{local, deterministic}
 \section{Introduction}
 \section{Methods}
@@ -3038,7 +3179,12 @@ mod tests {
         assert!(persisted_report.contains("Synthetic Study"));
         assert!(!persisted_report.contains(&temporary.path().display().to_string()));
         assert_eq!(audit.lines().count(), 2);
-        assert!(audit.contains("structure_analyzed"));
+        assert!(persisted_report.contains("knowledge_body_candidates"));
+        assert!(persisted_report.contains("submission_readiness_inputs"));
+        assert!(persisted_report.contains("manifestHash"));
+        assert!(persisted_report.contains("sourceFragments"));
+        assert!(persisted_report.contains("sourceFragmentId"));
+        assert!(audit.contains("manuscript_decomposed"));
     }
 
     #[test]
@@ -3391,6 +3537,19 @@ Synthetic method.",
 
         store.analyze_structure(&workspace.id).unwrap();
         let report = store.evaluate_readiness(&workspace.id, &[]).unwrap();
+        let audit_after_readiness = fs::read_to_string(
+            store_root
+                .join("projects")
+                .join(&workspace.id)
+                .join("audit.jsonl"),
+        )
+        .unwrap();
+        assert_eq!(
+            audit_after_readiness
+                .matches("manuscript_decomposed")
+                .count(),
+            1
+        );
         let checked = store.lifecycle(&workspace.id).unwrap();
         assert_eq!(
             checked
@@ -3412,6 +3571,7 @@ Synthetic method.",
             .unwrap();
         let package_root = export_root.join(&export.package_name);
         assert!(package_root.join("manuscript.tex").is_file());
+        assert!(package_root.join("decomposition-manifest.json").is_file());
         assert!(package_root.join("readiness-report.json").is_file());
         assert!(package_root.join("readiness-preview.html").is_file());
         assert!(package_root.join("local-attestation.json").is_file());
@@ -3435,6 +3595,23 @@ Synthetic method.",
         assert_eq!(knowledge.attestation_id, attestation.attestation_id);
         assert_eq!(knowledge.submission_id, submission.submission_id);
         assert_eq!(knowledge.snapshot.manuscript.version, 1);
+        let extraction = knowledge.snapshot.extraction.as_ref().unwrap();
+        let exported_decomposition: DecompositionManifest =
+            read_json(&package_root.join("decomposition-manifest.json")).unwrap();
+        let exported_package_manifest: serde_json::Value =
+            read_json(&package_root.join("submission-manifest.json")).unwrap();
+        assert_eq!(
+            extraction.decomposition_id,
+            exported_decomposition.decomposition_id
+        );
+        assert_eq!(
+            extraction.decomposition_hash,
+            exported_decomposition.manifest_hash
+        );
+        assert_eq!(
+            exported_package_manifest["decompositionHash"],
+            exported_decomposition.manifest_hash
+        );
         let classification = knowledge.discipline_classification.as_ref().unwrap();
         assert_eq!(classification.code, "computer_information_sciences");
         assert_eq!(classification.version, 1);

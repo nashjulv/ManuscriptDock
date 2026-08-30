@@ -1107,3 +1107,35 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
 - Added bilingual display for the most common billing, authorization, and rate-limit summaries.
 - Rust regression coverage now verifies billing, authentication, rate-limit, and unknown-status
   messages. All 49 Rust tests pass.
+## 2026-08-31 — One decomposition for knowledge-body candidates and submission outputs
+
+### Delivered
+
+- Replaced the current-version structure file with a versioned, SHA-256-verified
+  `decomposition manifest` that retains deterministic semantic candidates and text/table/figure
+  extraction coverage without storing local source paths.
+- Added the explicit `candidate` state between `pending` and `established`. Extracted Claim,
+  Scope, Method, Result, and Evidence passages now carry source labels, modality, confidence, and
+  stable candidate IDs; absent content alone remains `pending v0`.
+- Made readiness evaluation reuse the persisted decomposition instead of parsing the manuscript a
+  second time. Submission exports now include that exact decomposition manifest and bind its ID and
+  hash in `submission-manifest.json`.
+- Made the knowledge-body preview available immediately after decomposition. Immutable lifecycle
+  finalization remains separate and still requires attestation, submission registration, and an
+  author-selected discipline.
+- Added the same semantic extraction projection to author-authorized model questions, with an
+  explicit rule that candidates may be summarized only with their unconfirmed status preserved.
+
+### Verification
+
+- `npm run check` passed 15 frontend workflow tests, 60 core tests, 11 desktop Rust tests,
+  TypeScript, the production Vite build, rustfmt, and warning-free Clippy.
+- Core tests verify deterministic text/table/figure candidate extraction, immutable decomposition
+  storage, source-fragment IDs, shared decomposition hashes in knowledge snapshots and submission
+  exports, and legacy workspace migration.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc` passed for the Windows x64 target.
+- `npm run tauri --workspace @manuscriptdock/desktop -- build --debug --no-bundle` rebuilt the native
+  macOS desktop executable, which was launched for local verification.
+- The candidate review surface follows the existing PWC-derived ManuscriptDock design system:
+  progressive disclosure, explicit text states rather than color-only meaning, readable metadata,
+  and a one-column compact layout below 720 px.

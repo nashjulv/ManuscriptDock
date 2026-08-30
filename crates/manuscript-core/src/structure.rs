@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
-pub const STRUCTURE_ANALYSIS_VERSION: u32 = 5;
+pub const STRUCTURE_ANALYSIS_VERSION: u32 = 6;
+pub const DECOMPOSITION_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisQuality {
     Complete,
@@ -19,6 +20,53 @@ pub enum AnalysisQuality {
 pub struct SectionSummary {
     pub level: u8,
     pub heading: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticElementKind {
+    Claim,
+    Scope,
+    Method,
+    Result,
+    Evidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceModality {
+    Text,
+    Table,
+    Figure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticCandidate {
+    pub element: SemanticElementKind,
+    pub text: String,
+    pub source_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fragment_id: Option<String>,
+    pub modality: SourceModality,
+    pub confidence_percent: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedSourceFragment {
+    pub fragment_id: String,
+    pub text: String,
+    pub source_label: String,
+    pub modality: SourceModality,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionCoverage {
+    pub text_fragments: u32,
+    pub table_fragments: u32,
+    pub figure_fragments: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -53,9 +101,30 @@ pub struct StructureReport {
     pub declarations: Vec<String>,
     pub page_count: Option<u32>,
     pub word_count: u64,
+    #[serde(default)]
+    pub semantic_candidates: Vec<SemanticCandidate>,
+    #[serde(default)]
+    pub source_fragments: Vec<ExtractedSourceFragment>,
+    #[serde(default)]
+    pub extraction_coverage: ExtractionCoverage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pdf_processing: Option<PdfProcessingSummary>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecompositionManifest {
+    pub schema_version: u32,
+    pub decomposition_id: String,
+    pub workspace_id: String,
+    pub source_content_hash: String,
+    pub source_snapshot_version: u32,
+    pub created_unix_ms: u64,
+    pub structure: StructureReport,
+    pub declared_outputs: Vec<String>,
+    pub manifest_hash: String,
+    pub external_transmission: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -115,8 +184,16 @@ struct ExtractedStructure {
     declarations: Vec<String>,
     page_count: Option<u32>,
     word_count: u64,
+    content_fragments: Vec<ContentFragment>,
     pdf_processing: Option<PdfProcessingSummary>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ContentFragment {
+    text: String,
+    source_label: String,
+    modality: SourceModality,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +228,42 @@ pub(crate) fn extract_structure(
         ManuscriptKind::Pdf => extract_pdf(snapshot_path)?,
     };
 
+    let (mut semantic_candidates, extraction_coverage) = derive_semantic_candidates(&extracted);
+    let mut source_fragments = Vec::new();
+    if let Some(abstract_text) = extracted.abstract_text.as_deref() {
+        source_fragments.push(ExtractedSourceFragment {
+            fragment_id: format!("fragment:{snapshot_version}:abstract"),
+            text: bounded_text(abstract_text, 2_400),
+            source_label: "摘要 / Abstract".to_owned(),
+            modality: SourceModality::Text,
+        });
+    }
+    source_fragments.extend(
+        extracted
+            .content_fragments
+            .iter()
+            .take(399)
+            .enumerate()
+            .map(|(index, fragment)| ExtractedSourceFragment {
+                fragment_id: format!("fragment:{}:{}", snapshot_version, index + 1),
+                text: fragment.text.clone(),
+                source_label: fragment.source_label.clone(),
+                modality: fragment.modality,
+            })
+            .collect::<Vec<_>>(),
+    );
+    for candidate in &mut semantic_candidates {
+        candidate.source_fragment_id = source_fragments
+            .iter()
+            .find(|fragment| {
+                fragment.source_label == candidate.source_label
+                    && fragment
+                        .text
+                        .contains(candidate.text.trim_end_matches(['.', '。']))
+            })
+            .map(|fragment| fragment.fragment_id.clone());
+    }
+
     Ok(StructureReport {
         analysis_version: STRUCTURE_ANALYSIS_VERSION,
         workspace_id: workspace_id.to_owned(),
@@ -169,6 +282,9 @@ pub(crate) fn extract_structure(
         declarations: extracted.declarations,
         page_count: extracted.page_count,
         word_count: extracted.word_count,
+        semantic_candidates,
+        source_fragments,
+        extraction_coverage,
         pdf_processing: extracted.pdf_processing,
         warnings: extracted.warnings,
     })
@@ -193,8 +309,26 @@ fn extract_tex(path: &Path) -> Result<ExtractedStructure, StructureError> {
         references_present: text.contains("\\bibliography{")
             || text.contains("\\begin{thebibliography}"),
         word_count: count_words(&strip_tex_commands(&text)),
+        content_fragments: text_fragments(&strip_tex_commands(&text), "LaTeX 正文"),
         ..ExtractedStructure::default()
     };
+    if let Some(table_text) = tex_environment_text(&text, "table") {
+        extracted.content_fragments.push(ContentFragment {
+            text: bounded_text(&strip_tex_commands(&table_text), 1_200),
+            source_label: "LaTeX 表格环境".to_owned(),
+            modality: SourceModality::Table,
+        });
+    }
+    if let Some(figure_text) = tex_environment_text(&text, "figure") {
+        let figure_text = bounded_text(&strip_tex_commands(&figure_text), 1_200);
+        if !figure_text.is_empty() {
+            extracted.content_fragments.push(ContentFragment {
+                text: figure_text,
+                source_label: "LaTeX 图片环境".to_owned(),
+                modality: SourceModality::Figure,
+            });
+        }
+    }
 
     for (command, level) in [("section", 1), ("subsection", 2), ("subsubsection", 3)] {
         extracted.sections.extend(
@@ -250,6 +384,7 @@ fn parse_docx_xml(xml: &str) -> Result<ExtractedStructure, StructureError> {
     let mut in_text = false;
     let mut paragraph_text = String::new();
     let mut paragraph_style: Option<String> = None;
+    let mut table_depth = 0_u32;
 
     loop {
         match reader.read_event() {
@@ -260,7 +395,10 @@ fn parse_docx_xml(xml: &str) -> Result<ExtractedStructure, StructureError> {
                     paragraph_style = None;
                 }
                 b"t" if in_paragraph => in_text = true,
-                b"tbl" => extracted.table_count = extracted.table_count.saturating_add(1),
+                b"tbl" => {
+                    table_depth = table_depth.saturating_add(1);
+                    extracted.table_count = extracted.table_count.saturating_add(1);
+                }
                 b"drawing" | b"pict" => {
                     extracted.figure_count = extracted.figure_count.saturating_add(1);
                 }
@@ -291,10 +429,12 @@ fn parse_docx_xml(xml: &str) -> Result<ExtractedStructure, StructureError> {
                         &mut extracted,
                         paragraph_style.as_deref(),
                         paragraph_text.trim(),
+                        table_depth > 0,
                     );
                     in_paragraph = false;
                     in_text = false;
                 }
+                b"tbl" => table_depth = table_depth.saturating_sub(1),
                 _ => {}
             },
             Ok(Event::Eof) => break,
@@ -314,11 +454,35 @@ fn parse_docx_xml(xml: &str) -> Result<ExtractedStructure, StructureError> {
     Ok(extracted)
 }
 
-fn consume_docx_paragraph(extracted: &mut ExtractedStructure, style: Option<&str>, text: &str) {
+fn consume_docx_paragraph(
+    extracted: &mut ExtractedStructure,
+    style: Option<&str>,
+    text: &str,
+    in_table: bool,
+) {
     if text.is_empty() {
         return;
     }
     extracted.word_count = extracted.word_count.saturating_add(count_words(text));
+    if extracted.content_fragments.len() < 400 {
+        extracted.content_fragments.push(ContentFragment {
+            text: bounded_text(text, 1_200),
+            source_label: if style.unwrap_or_default().is_empty() {
+                format!("Word 段落 {}", extracted.content_fragments.len() + 1)
+            } else {
+                format!(
+                    "Word {} · 段落 {}",
+                    style.unwrap_or_default(),
+                    extracted.content_fragments.len() + 1
+                )
+            },
+            modality: if in_table {
+                SourceModality::Table
+            } else {
+                infer_source_modality(text)
+            },
+        });
+    }
     let normalized_style = style.unwrap_or_default().to_ascii_lowercase();
     let normalized_text = text.trim().to_ascii_lowercase();
 
@@ -635,6 +799,35 @@ fn infer_from_inspector_markdown(markdown: &str) -> ExtractedStructure {
         extracted.sections = structural_headings;
     }
     extracted.table_count = extracted.table_count.max(count_markdown_tables(markdown));
+    for (index, line) in markdown.lines().enumerate() {
+        let trimmed = line.trim();
+        let is_figure = trimmed.starts_with("![") || trimmed.starts_with("<figure");
+        let cells = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        let is_separator = cells.len() >= 2
+            && cells.iter().all(|cell| {
+                let marker = cell.trim_matches(':').trim();
+                marker.len() >= 3 && marker.chars().all(|character| character == '-')
+            });
+        let is_table_row = trimmed.contains('|') && cells.len() >= 2 && !is_separator;
+        if is_figure || is_table_row {
+            extracted.content_fragments.push(ContentFragment {
+                text: bounded_text(trimmed, 1_200),
+                source_label: format!("PDF Markdown · 行 {}", index + 1),
+                modality: if is_figure {
+                    SourceModality::Figure
+                } else {
+                    SourceModality::Table
+                },
+            });
+        }
+        if extracted.content_fragments.len() >= 400 {
+            break;
+        }
+    }
     extracted
 }
 
@@ -838,8 +1031,322 @@ fn infer_from_plain_text(text: &str) -> ExtractedStructure {
             || text.contains("\n参考文献"),
         declarations,
         word_count: count_words(text),
+        content_fragments: text_fragments(text, "提取文本"),
         ..ExtractedStructure::default()
     }
+}
+
+fn text_fragments(text: &str, source_prefix: &str) -> Vec<ContentFragment> {
+    text.lines()
+        .flat_map(|line| {
+            let sentences = semantic_sentences(line);
+            if sentences.is_empty() {
+                vec![normalize_line(line)]
+            } else {
+                sentences
+            }
+        })
+        .filter(|line| line.chars().count() >= 16)
+        .take(400)
+        .enumerate()
+        .map(|(index, line)| ContentFragment {
+            modality: infer_source_modality(&line),
+            text: bounded_text(&line, 1_200),
+            source_label: format!("{source_prefix} · 片段 {}", index + 1),
+        })
+        .collect()
+}
+
+fn infer_source_modality(text: &str) -> SourceModality {
+    let normalized = text.trim().to_ascii_lowercase();
+    let numbered_chinese_label = |prefix: char| {
+        normalized
+            .strip_prefix(prefix)
+            .and_then(|remainder| remainder.chars().next())
+            .is_some_and(|character| {
+                character.is_ascii_digit()
+                    || character.is_whitespace()
+                    || matches!(character, ':' | '：')
+            })
+    };
+    if normalized.starts_with("table ")
+        || normalized.starts_with("表 ")
+        || normalized.starts_with("表：")
+        || numbered_chinese_label('表')
+    {
+        SourceModality::Table
+    } else if normalized.starts_with("figure ")
+        || normalized.starts_with("fig. ")
+        || normalized.starts_with("图 ")
+        || normalized.starts_with("图：")
+        || numbered_chinese_label('图')
+    {
+        SourceModality::Figure
+    } else {
+        SourceModality::Text
+    }
+}
+
+fn bounded_text(text: &str, maximum_chars: usize) -> String {
+    let normalized = normalize_line(text);
+    if normalized.chars().count() <= maximum_chars {
+        return normalized;
+    }
+    normalized.chars().take(maximum_chars).collect::<String>() + "…"
+}
+
+fn derive_semantic_candidates(
+    extracted: &ExtractedStructure,
+) -> (Vec<SemanticCandidate>, ExtractionCoverage) {
+    let mut fragments = extracted.content_fragments.clone();
+    if let Some(abstract_text) = extracted.abstract_text.as_deref() {
+        fragments.insert(
+            0,
+            ContentFragment {
+                text: bounded_text(abstract_text, 2_400),
+                source_label: "摘要 / Abstract".to_owned(),
+                modality: SourceModality::Text,
+            },
+        );
+    }
+    let extraction_coverage = ExtractionCoverage {
+        text_fragments: fragments
+            .iter()
+            .filter(|fragment| fragment.modality == SourceModality::Text)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX),
+        table_fragments: fragments
+            .iter()
+            .filter(|fragment| fragment.modality == SourceModality::Table)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX),
+        figure_fragments: fragments
+            .iter()
+            .filter(|fragment| fragment.modality == SourceModality::Figure)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX),
+    };
+
+    let mut scored = Vec::new();
+    for fragment in &fragments {
+        for sentence in semantic_sentences(&fragment.text) {
+            for element in [
+                SemanticElementKind::Claim,
+                SemanticElementKind::Scope,
+                SemanticElementKind::Method,
+                SemanticElementKind::Result,
+                SemanticElementKind::Evidence,
+            ] {
+                if let Some(confidence_percent) = semantic_score(
+                    element,
+                    &sentence,
+                    &fragment.source_label,
+                    fragment.modality,
+                ) {
+                    scored.push(SemanticCandidate {
+                        element,
+                        text: sentence.clone(),
+                        source_label: fragment.source_label.clone(),
+                        source_fragment_id: None,
+                        modality: fragment.modality,
+                        confidence_percent,
+                    });
+                }
+            }
+        }
+    }
+
+    if !scored
+        .iter()
+        .any(|candidate| candidate.element == SemanticElementKind::Claim)
+    {
+        if let Some(abstract_text) = extracted.abstract_text.as_deref() {
+            if let Some(sentence) = semantic_sentences(abstract_text)
+                .into_iter()
+                .filter(|sentence| sentence.chars().count() >= 24)
+                .max_by_key(|sentence| sentence.chars().count())
+            {
+                scored.push(SemanticCandidate {
+                    element: SemanticElementKind::Claim,
+                    text: sentence,
+                    source_label: "摘要 / Abstract".to_owned(),
+                    source_fragment_id: None,
+                    modality: SourceModality::Text,
+                    confidence_percent: 58,
+                });
+            }
+        }
+    }
+
+    scored.sort_by(|left, right| {
+        left.element
+            .cmp(&right.element)
+            .then_with(|| right.confidence_percent.cmp(&left.confidence_percent))
+            .then_with(|| left.source_label.cmp(&right.source_label))
+    });
+    let mut candidates = Vec::new();
+    for candidate in scored {
+        let same_kind_count = candidates
+            .iter()
+            .filter(|existing: &&SemanticCandidate| existing.element == candidate.element)
+            .count();
+        if same_kind_count >= 3
+            || candidates.iter().any(|existing: &SemanticCandidate| {
+                existing.element == candidate.element
+                    && existing.text.eq_ignore_ascii_case(&candidate.text)
+            })
+        {
+            continue;
+        }
+        candidates.push(candidate);
+    }
+    (candidates, extraction_coverage)
+}
+
+fn semantic_sentences(text: &str) -> Vec<String> {
+    text.split_inclusive(['。', '！', '？', '.', '!', '?'])
+        .flat_map(|part| part.split(['\n', '\r']))
+        .map(normalize_line)
+        .filter(|sentence| {
+            let length = sentence.chars().count();
+            (16..=900).contains(&length)
+        })
+        .collect()
+}
+
+fn semantic_score(
+    element: SemanticElementKind,
+    sentence: &str,
+    source_label: &str,
+    modality: SourceModality,
+) -> Option<u8> {
+    let lower = sentence.to_ascii_lowercase();
+    let contains_any = |markers: &[&str]| markers.iter().any(|marker| lower.contains(marker));
+    let in_abstract = source_label.contains("摘要") || source_label.contains("Abstract");
+    let numeric = sentence.chars().any(|character| character.is_ascii_digit());
+    let score = match element {
+        SemanticElementKind::Claim
+            if contains_any(&[
+                "we demonstrate",
+                "we show",
+                "we find",
+                "we conclude",
+                "this study demonstrates",
+                "our contribution",
+                "we propose",
+                "本文提出",
+                "本研究表明",
+                "研究发现",
+                "结果表明",
+                "本文证明",
+                "主要贡献",
+                "我们提出",
+                "我们发现",
+            ]) =>
+        {
+            82 + u8::from(in_abstract) * 8
+        }
+        SemanticElementKind::Scope
+            if contains_any(&[
+                "under ",
+                "within ",
+                "for patients",
+                "participants",
+                "dataset",
+                "population",
+                "sample",
+                "assuming",
+                "condition",
+                "适用于",
+                "在…条件",
+                "在该条件",
+                "研究对象",
+                "样本",
+                "数据集",
+                "人群",
+                "前提",
+                "假设",
+                "范围",
+            ]) =>
+        {
+            70 + u8::from(in_abstract) * 8
+        }
+        SemanticElementKind::Method
+            if contains_any(&[
+                "we use",
+                "we used",
+                "we develop",
+                "we developed",
+                "we propose",
+                "method",
+                "algorithm",
+                "experiment",
+                "randomized",
+                "regression",
+                "simulation",
+                "采用",
+                "使用",
+                "提出一种",
+                "研究方法",
+                "算法",
+                "实验设计",
+                "回归",
+                "仿真",
+            ]) =>
+        {
+            74 + u8::from(in_abstract) * 8
+        }
+        SemanticElementKind::Result
+            if contains_any(&[
+                "results show",
+                "result shows",
+                "we find",
+                "we found",
+                "significant",
+                "increased",
+                "decreased",
+                "outperform",
+                "accuracy",
+                "results indicate",
+                "结果表明",
+                "研究发现",
+                "显著",
+                "提高了",
+                "降低了",
+                "优于",
+                "准确率",
+                "实验结果",
+                "结果显示",
+            ]) =>
+        {
+            78 + u8::from(numeric) * 7 + u8::from(in_abstract) * 5
+        }
+        SemanticElementKind::Evidence
+            if modality != SourceModality::Text
+                || (numeric
+                    && contains_any(&[
+                        "result",
+                        "accuracy",
+                        "significant",
+                        "confidence",
+                        "p=",
+                        "p <",
+                        "结果",
+                        "准确率",
+                        "显著",
+                        "置信区间",
+                        "图",
+                        "表",
+                    ])) =>
+        {
+            76 + u8::from(modality != SourceModality::Text) * 10
+        }
+        _ => return None,
+    };
+    Some(score.min(96))
 }
 
 fn infer_title(line: &str) -> Option<String> {
@@ -1485,9 +1992,10 @@ fn count_words(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        choose_pdf_title, compact_page_ranges, decode_pdf_text_string, extract_pdf, extract_tex,
-        infer_from_inspector_markdown, infer_from_plain_text, markdown_plain_text, parse_docx_xml,
-        pdf_metadata_authors, pdf_metadata_title, AnalysisQuality,
+        choose_pdf_title, compact_page_ranges, decode_pdf_text_string, derive_semantic_candidates,
+        extract_pdf, extract_tex, infer_from_inspector_markdown, infer_from_plain_text,
+        markdown_plain_text, parse_docx_xml, pdf_metadata_authors, pdf_metadata_title,
+        AnalysisQuality, SemanticElementKind, SourceModality,
     };
     use lopdf::{
         content::{Content, Operation},
@@ -1529,6 +2037,37 @@ mod tests {
         assert_eq!(extracted.table_count, 1);
         assert!(extracted.references_present);
         assert_eq!(extracted.declarations, vec!["data_availability"]);
+    }
+
+    #[test]
+    fn derives_source_backed_knowledge_candidates_from_one_decomposition() {
+        let extracted = infer_from_plain_text(
+            "Synthetic Study\nAbstract\nWe propose a local method for multilingual manuscript analysis. Results show that the method improves extraction accuracy by 18 percent on the synthetic dataset.\nTable 1 Results show accuracy for every tested language.\nFigure 1 The workflow connects extracted evidence to the reported claim.",
+        );
+
+        let (candidates, coverage) = derive_semantic_candidates(&extracted);
+
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Claim));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Method));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Result));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Evidence));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.modality == SourceModality::Table));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.modality == SourceModality::Figure));
+        assert!(coverage.text_fragments > 0);
+        assert_eq!(coverage.table_fragments, 1);
+        assert_eq!(coverage.figure_fragments, 1);
     }
 
     #[test]

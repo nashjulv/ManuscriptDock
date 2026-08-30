@@ -1230,6 +1230,9 @@ mod tests {
             declarations: vec![],
             page_count: Some(12),
             word_count: 5000,
+            semantic_candidates: Vec::new(),
+            source_fragments: Vec::new(),
+            extraction_coverage: Default::default(),
             pdf_processing: None,
             warnings: vec![],
         }
