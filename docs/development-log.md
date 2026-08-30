@@ -3,6 +3,24 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — PDF brand asset and Chinese glyph correction
+
+- Replaced the manual cover's temporary vector approximation with the same crayon-textured PNG icon
+  shipped by the Tauri desktop application.
+- Replaced the fenced-code rendering of the eight-stage Chinese workflow with a native numbered flow
+  table. The old Courier run had no Chinese glyphs and displayed the stage names as black squares.
+- Added a reproducible PDF build script that reads the maintained Markdown manual and the current
+  desktop icon, while preserving the A4 layout, linked contents, outline bookmarks, and local-first
+  visual system.
+
+### Verification
+
+- Compiled and executed `scripts/build_user_manual_pdf.py` with the bundled Python 3.12 runtime.
+- Rendered all 12 pages at 1.7x resolution and visually checked the cover, workflow, contents, tables,
+  page boundaries, and final page.
+- `pypdf` confirmed 12 non-empty pages, 26 outline entries, every workflow stage, and no black-square
+  or Unicode replacement characters in extracted text.
+
 ## 2026-08-30 — Standalone user manual and cross-model privacy closure
 
 - Added a standalone author-facing manual covering installation, the complete eight-stage workflow,
