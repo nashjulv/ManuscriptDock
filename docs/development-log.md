@@ -3,6 +3,45 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Institution requirement model extraction and private directory boundary
+
+- Added an optional author-supplied institution-policy field to journal matching. After per-call consent,
+  the model may receive the institution name to scope the rule. Rust removes the author name, source URL,
+  email, phone-like numbers, identifiers, and manuscript content at the network boundary; the remaining
+  request contains the institution, discipline, manuscript purpose, and redacted policy.
+- Added a constrained JSON extraction prompt with prompt-injection resistance, strict CCF tier
+  vocabulary, partition bounds, confidence, conditions, and ambiguity warnings. Model memory and
+  unsupported inference cannot create an official rule.
+- Saved extracted evidence as a new immutable profile containing the source-text SHA-256, source
+  type, extraction model, normalized conditions, verification status, and audit event; the original
+  policy text is not persisted in the recommendation record.
+- Kept internal prompts and scoring implementation out of the customer UI while retaining visible
+  rule application status. Raw institution evaluation directories are not exposed in the interface.
+- Added an internal partition-data readiness boundary. A partition condition remains excluded until
+  a legally sourced, versioned data adapter is available; the model cannot guess the partition.
+- Official pages reviewed on 2026-08-30 still described the partition service as continuing, exposed
+  a licensed API for subscribing institutions, and retained copyright and non-redistribution terms.
+  No official stop-update-and-open-redistribution notice was found, so no protected table was bundled.
+- Clarified that matching computes the best current-fit submission set rather than lowering opportunity
+  by identity. Institution rank and adviser fame receive no direct score. Current local readiness is a
+  structural signal, not an innovation judgment; a versioned PWC review is required before substantive
+  scholarly strength can influence journal-level recommendations.
+- Defined the version-driven quality loop: every immutable manuscript revision must be re-evaluated on
+  the same quality dimensions. A higher version number earns no points by itself; only traceable
+  improvements can raise a dimension and unlock better matched or reach journals, while regressions may
+  lower it. The local MVP currently re-evaluates structural readiness; PWC review will later supply
+  versioned innovation, evidence-strength, and method-reliability signals.
+
+### Verification
+
+- `npm run check`: passed TypeScript, 15 frontend tests, the Vite production build, 59 core tests,
+  8 desktop Rust tests, rustfmt, and Clippy with warnings denied.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the Windows x64 desktop
+  dependency graph.
+- `npm run tauri -- build --debug --no-bundle`: produced the updated macOS debug executable.
+- Local browser review at a 375px viewport confirmed visible labels, 44px consent targets, and no
+  horizontal overflow (`clientWidth = scrollWidth = 360`).
+
 ## 2026-08-30 — Versioned submission context and institution-rule boundary
 
 - Added a required local submission profile before journal matching: author name, institution,

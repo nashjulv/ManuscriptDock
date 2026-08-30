@@ -2,10 +2,10 @@ use crate::StructureReport;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 2;
-pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.1";
+pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 3;
+pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.2";
 pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2025.1";
-pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +36,22 @@ pub struct InstitutionRuleEvidence {
     pub verified_at: Option<String>,
     pub recognized_rank_tiers: Vec<String>,
     pub blocked_rank_tiers: Vec<String>,
+    #[serde(default)]
+    pub source_text_hash: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub extraction_model: Option<String>,
+    #[serde(default)]
+    pub extracted_conditions: Vec<String>,
+    #[serde(default)]
+    pub minimum_cas_partition: Option<u8>,
+    #[serde(default)]
+    pub requires_cas_top: bool,
+    #[serde(default)]
+    pub author_attested_official: bool,
+    #[serde(default)]
+    pub cas_partition_data_status: Option<String>,
 }
 
 impl Default for InstitutionRuleEvidence {
@@ -48,6 +64,14 @@ impl Default for InstitutionRuleEvidence {
             verified_at: None,
             recognized_rank_tiers: Vec::new(),
             blocked_rank_tiers: Vec::new(),
+            source_text_hash: None,
+            source_kind: None,
+            extraction_model: None,
+            extracted_conditions: Vec::new(),
+            minimum_cas_partition: None,
+            requires_cas_top: false,
+            author_attested_official: false,
+            cas_partition_data_status: Some("licensed_official_api_not_configured".into()),
         }
     }
 }
@@ -77,6 +101,17 @@ pub struct JournalRecommendationProfile {
     pub saved_unix_ms: u64,
     pub institution_rule_evidence: InstitutionRuleEvidence,
     pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalRecommendationProfileSummary {
+    pub profile_id: String,
+    pub profile_version: u32,
+    pub institution: String,
+    pub specialty: String,
+    pub manuscript_purpose: ManuscriptPurpose,
+    pub submission_deadline: String,
 }
 
 impl JournalRecommendationProfileInput {
@@ -225,12 +260,13 @@ pub struct JournalRecommendationRun {
     pub topic_basis: String,
     pub maturity_score: u8,
     pub evaluated_unix_ms: u64,
-    pub recommendation_profile: JournalRecommendationProfile,
+    pub recommendation_profile: JournalRecommendationProfileSummary,
     pub deadline_days_remaining: u32,
     pub preferences: JournalMatchPreferences,
     pub domestic: Vec<JournalRecommendation>,
     pub international: Vec<JournalRecommendation>,
     pub school_rule_status: String,
+    pub institution_directory_status: String,
     pub limitations: Vec<String>,
     pub external_transmission: String,
 }
@@ -665,7 +701,31 @@ pub fn recommend_journals(
             .take(20)
             .collect::<String>()
     );
+    let institution_directory_status = profile
+        .institution_rule_evidence
+        .cas_partition_data_status
+        .clone()
+        .unwrap_or_else(|| "licensed_official_api_not_configured".into());
+    let external_transmission = profile.external_transmission.clone();
+    let profile_summary = JournalRecommendationProfileSummary {
+        profile_id: profile.profile_id.clone(),
+        profile_version: profile.profile_version,
+        institution: profile.institution.clone(),
+        specialty: profile.specialty.clone(),
+        manuscript_purpose: profile.manuscript_purpose,
+        submission_deadline: profile.submission_deadline.clone(),
+    };
     let school_rule_status = match profile.institution_rule_evidence.status {
+        InstitutionRuleStatus::Verified
+            if (profile
+                .institution_rule_evidence
+                .minimum_cas_partition
+                .is_some()
+                || profile.institution_rule_evidence.requires_cas_top)
+                && institution_directory_status != "licensed_official_api_verified" =>
+        {
+            "verified_rule_waiting_for_institution_directory_data"
+        }
         InstitutionRuleStatus::Verified => "verified_rule_set_applied",
         InstitutionRuleStatus::CandidateSourcesFound => "candidate_sources_require_verification",
         InstitutionRuleStatus::NoOfficialRuleFound => "no_official_rule_found_excluded_from_score",
@@ -691,20 +751,23 @@ pub fn recommend_journals(
         },
         maturity_score: maturity,
         evaluated_unix_ms,
-        recommendation_profile: profile,
+        recommendation_profile: profile_summary,
         deadline_days_remaining,
         preferences,
         domestic,
         international,
         school_rule_status,
+        institution_directory_status,
         limitations: vec![
-            "适配分不是录用概率，也不替代期刊官网的最新投稿要求。".into(),
+            "适配分计算当前投稿准备的最适合度，不是录用概率，也不替代期刊官网的最新投稿要求。".into(),
             "截止日期只评估完成投稿准备的内部规划余量，不预测同行评审、录用、见刊或数据库收录时间。".into(),
-            "姓名仅用于本地记录归属；学校名称在没有经核验机构规则包时不参与评分。".into(),
+            "姓名仅用于本地记录归属；学校排名和导师名气不参与声誉打分，学校正式规则只参与资格与用途判断。".into(),
+            "当前内容完备度是结构信号，不是论文创新性或学术贡献评分；取得版本化 PWC 审核档案前不得据此宣称顶刊成功率。".into(),
             "国内 T1/T2/T3 与国际 CCF A/B/C 是相互独立的目录，不做等级等同。".into(),
             "当前候选范围仅覆盖内置的计算机与人工智能期刊快照。".into(),
+            "机构评价目录只在后台参与资格判断；数据条件未经来源和版本核验时不显示、不推断，也不计入得分。".into(),
         ],
-        external_transmission: "not_performed".into(),
+        external_transmission,
     }
 }
 
@@ -967,9 +1030,18 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
     } else {
         ((*deadline_days_remaining * 100 / estimated_submission_preparation_days).max(10)) as u8
     };
+    let has_traceable_source = !institution_rules.source_urls.is_empty()
+        || (institution_rules.author_attested_official
+            && institution_rules.source_text_hash.is_some());
+    let cas_data_ready = institution_rules.minimum_cas_partition.is_none()
+        && !institution_rules.requires_cas_top
+        || institution_rules.cas_partition_data_status.as_deref()
+            == Some("licensed_official_api_verified");
     let verified_rules = institution_rules.status == InstitutionRuleStatus::Verified
-        && !institution_rules.source_urls.is_empty()
-        && institution_rules.rule_set_version.is_some();
+        && institution_rules.author_attested_official
+        && has_traceable_source
+        && institution_rules.rule_set_version.is_some()
+        && cas_data_ready;
     let (institution_score, institution_eligibility) = if !verified_rules {
         (None, "requires_verified_official_rules".to_owned())
     } else if institution_rules
@@ -1018,6 +1090,18 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
     } else {
         RANK_INTERNATIONAL
     };
+    let readiness_reason = if *maturity >= threshold {
+        format!(
+            "当前版本结构完备度 {}，达到该层级的投稿准备门槛 {}",
+            maturity, threshold
+        )
+    } else {
+        format!(
+            "当前版本结构完备度 {}，距离该层级的投稿准备门槛还差 {}",
+            maturity,
+            threshold - *maturity
+        )
+    };
     JournalRecommendation {
         id: candidate.id.into(),
         name: candidate.name.into(),
@@ -1047,7 +1131,7 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
                 "投稿准备时间适配 {} 分（内部规划 {} 天）",
                 time_feasibility, estimated_submission_preparation_days
             ),
-            format!("当前稿件完备度适配 {} 分", readiness),
+            format!("当前稿件完备度适配 {} 分；{}", readiness, readiness_reason),
             format!("目标策略适配 {} 分", target),
         ],
         ranking_source_url: source.into(),
@@ -1149,6 +1233,59 @@ mod tests {
             pdf_processing: None,
             warnings: vec![],
         }
+    }
+
+    #[test]
+    fn traceable_structure_improvement_raises_readiness_but_version_number_alone_does_not() {
+        let mut incomplete = report("computer vision");
+        incomplete.title = None;
+        incomplete.abstract_present = false;
+        incomplete.abstract_text = None;
+        incomplete.keywords_present = false;
+        incomplete.sections.clear();
+        incomplete.figure_count = 0;
+        incomplete.table_count = 0;
+        incomplete.references_present = false;
+        incomplete.word_count = 400;
+        let complete = report("computer vision");
+        let preferences = JournalMatchPreferences::default();
+        let rules = InstitutionRuleEvidence::default();
+        let candidate = CANDIDATES
+            .iter()
+            .find(|candidate| candidate.level == 3)
+            .copied()
+            .expect("catalog should include a top-level synthetic candidate");
+        let score = |report: &StructureReport| {
+            score_candidate(
+                candidate,
+                &ScoreContext {
+                    topic: ResearchTopic::ComputerVision,
+                    specialty_topic: ResearchTopic::ComputerVision,
+                    article_type: ArticleTypePreference::Research,
+                    maturity: maturity_score(report),
+                    deadline_days_remaining: 120,
+                    purpose: ManuscriptPurpose::AcademicCommunication,
+                    institution_rules: &rules,
+                    preferences: &preferences,
+                },
+            )
+        };
+
+        let incomplete_score = score(&incomplete);
+        let mut renumbered_only = incomplete.clone();
+        renumbered_only.source_snapshot_version = 99;
+        let renumbered_score = score(&renumbered_only);
+        let complete_score = score(&complete);
+
+        assert_eq!(
+            incomplete_score.scores.content_readiness,
+            renumbered_score.scores.content_readiness
+        );
+        assert_eq!(incomplete_score.overall_fit, renumbered_score.overall_fit);
+        assert!(
+            complete_score.scores.content_readiness > incomplete_score.scores.content_readiness
+        );
+        assert!(complete_score.overall_fit > incomplete_score.overall_fit);
     }
     #[test]
     fn returns_three_per_region() {
@@ -1283,6 +1420,8 @@ mod tests {
             verified_at: Some("2026-08-30".into()),
             recognized_rank_tiers: vec!["T1".into(), "CCF A".into()],
             blocked_rank_tiers: vec!["T2".into()],
+            author_attested_official: true,
+            ..InstitutionRuleEvidence::default()
         };
         verified.institution_rule_evidence = evidence.clone();
         let run = recommend_journals(
@@ -1318,5 +1457,43 @@ mod tests {
         );
         assert_eq!(blocked.scores.institution_rules, Some(0));
         assert_eq!(blocked.institution_eligibility, "blocked_by_verified_rule");
+    }
+
+    #[test]
+    fn a_cas_partition_requirement_waits_for_licensed_official_data() {
+        let mut constrained = profile();
+        constrained.institution_rule_evidence = InstitutionRuleEvidence {
+            status: InstitutionRuleStatus::Verified,
+            rule_set_id: Some("school-rule-cas-synthetic".into()),
+            rule_set_version: Some("2026.1".into()),
+            source_text_hash: Some("a".repeat(64)),
+            source_kind: Some("author_supplied_institution_requirement".into()),
+            extracted_conditions: vec!["毕业成果须为中科院二区及以上".into()],
+            minimum_cas_partition: Some(2),
+            author_attested_official: true,
+            ..InstitutionRuleEvidence::default()
+        };
+        let run = recommend_journals(
+            &report("general artificial intelligence"),
+            constrained,
+            JournalMatchPreferences::default(),
+            EVALUATED_AT,
+        );
+        assert_eq!(
+            run.school_rule_status,
+            "verified_rule_waiting_for_institution_directory_data"
+        );
+        assert_eq!(
+            run.institution_directory_status,
+            "licensed_official_api_not_configured"
+        );
+        assert!(run
+            .international
+            .iter()
+            .all(|item| item.scores.institution_rules.is_none()));
+        let webview_projection = serde_json::to_string(&run).unwrap();
+        assert!(!webview_projection.contains("minimumCasPartition"));
+        assert!(!webview_projection.contains("extractedConditions"));
+        assert!(!webview_projection.contains("sourceTextHash"));
     }
 }

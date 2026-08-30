@@ -2463,11 +2463,13 @@ dependencies = [
 name = "manuscriptdock-desktop"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "keyring",
  "manuscript-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

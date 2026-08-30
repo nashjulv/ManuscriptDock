@@ -7,8 +7,9 @@ use crate::{
     inspect_manuscript,
     journal_match::{
         deadline_days_remaining, recommend_journals, InstitutionRuleEvidence,
-        JournalMatchPreferences, JournalRecommendationProfile, JournalRecommendationProfileInput,
-        JournalRecommendationRun, JOURNAL_PROFILE_SCHEMA_VERSION,
+        InstitutionRuleStatus, JournalMatchPreferences, JournalRecommendationProfile,
+        JournalRecommendationProfileInput, JournalRecommendationRun,
+        JOURNAL_PROFILE_SCHEMA_VERSION,
     },
     knowledge::{
         discipline_catalog_item, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
@@ -214,6 +215,7 @@ pub enum WorkspaceError {
     VersionFormatMismatch,
     VersionNoteTooLong,
     InvalidJournalProfile,
+    InvalidInstitutionRuleEvidence,
     JournalProfileNotFound,
     MissingCurrentReadiness,
     AuthorConfirmationRequired,
@@ -256,6 +258,10 @@ impl fmt::Display for WorkspaceError {
             Self::InvalidJournalProfile => write!(
                 formatter,
                 "请完整填写姓名、学校、专业、论文用途和有效的未来投稿截止日期"
+            ),
+            Self::InvalidInstitutionRuleEvidence => write!(
+                formatter,
+                "学校要求抽取结果缺少可追溯来源、有效规则版本或合法的分区条件"
             ),
             Self::JournalProfileNotFound => {
                 write!(
@@ -1038,6 +1044,147 @@ impl WorkspaceStore {
             unix_time_ms()?,
         )?;
         Ok(run)
+    }
+
+    pub fn save_institution_rule_evidence(
+        &self,
+        workspace_id: &str,
+        base_profile_id: &str,
+        evidence: InstitutionRuleEvidence,
+    ) -> Result<JournalRecommendationProfile, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        if !base_profile_id.starts_with("jmp-")
+            || base_profile_id.len() != 24
+            || !base_profile_id[4..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        }
+        let valid_hash = evidence.source_text_hash.as_ref().is_some_and(|hash| {
+            hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        });
+        let valid_official_url = evidence
+            .source_urls
+            .iter()
+            .all(|url| url.starts_with("https://") && url.chars().count() <= 1_000);
+        let has_source = (!evidence.source_urls.is_empty() && valid_official_url) || valid_hash;
+        let verification_valid =
+            evidence.status != InstitutionRuleStatus::Verified || evidence.author_attested_official;
+        let conditions_valid = evidence
+            .minimum_cas_partition
+            .is_none_or(|zone| (1..=4).contains(&zone))
+            && evidence.extracted_conditions.len() <= 40
+            && evidence
+                .extracted_conditions
+                .iter()
+                .all(|condition| !condition.trim().is_empty() && condition.chars().count() <= 500);
+        if !matches!(
+            evidence.status,
+            InstitutionRuleStatus::Verified | InstitutionRuleStatus::CandidateSourcesFound
+        ) || evidence.rule_set_id.as_deref().is_none_or(str::is_empty)
+            || evidence
+                .rule_set_version
+                .as_deref()
+                .is_none_or(str::is_empty)
+            || !has_source
+            || !verification_valid
+            || !conditions_valid
+        {
+            return Err(WorkspaceError::InvalidInstitutionRuleEvidence);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let analysis_root = workspace_root.join("analysis");
+        let base_path = analysis_root.join(format!("journal-profile-{base_profile_id}.json"));
+        let base: JournalRecommendationProfile = if base_path.exists() {
+            read_json(&base_path)?
+        } else {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        };
+        if base.workspace_id != workspace_id {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        }
+        let encoded = serde_json::to_vec(&(base_profile_id, &evidence))
+            .map_err(|error| WorkspaceError::InvalidManifest(error.to_string()))?;
+        let profile_id = format!(
+            "jmp-{}",
+            hex::encode(Sha256::digest(encoded))
+                .chars()
+                .take(20)
+                .collect::<String>()
+        );
+        let profile_path = analysis_root.join(format!("journal-profile-{profile_id}.json"));
+        if profile_path.exists() {
+            return read_json(&profile_path);
+        }
+        let profile_version = fs::read_dir(&analysis_root)?
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("journal-profile-jmp-")
+            })
+            .count() as u32
+            + 1;
+        let saved_unix_ms = unix_time_ms()?;
+        let profile = JournalRecommendationProfile {
+            schema_version: JOURNAL_PROFILE_SCHEMA_VERSION,
+            profile_id,
+            profile_version,
+            workspace_id: base.workspace_id,
+            author_name: base.author_name,
+            institution: base.institution,
+            specialty: base.specialty,
+            manuscript_purpose: base.manuscript_purpose,
+            submission_deadline: base.submission_deadline,
+            saved_unix_ms,
+            institution_rule_evidence: evidence,
+            external_transmission:
+                "performed_to_configured_model_institution_and_redacted_rule_text".into(),
+        };
+        let temporary_path = analysis_root.join(format!(".{}.tmp", Uuid::new_v4()));
+        write_json(&temporary_path, &profile)?;
+        fs::rename(&temporary_path, &profile_path)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "institution_rule_evidence_saved",
+            &manifest.workspace,
+            saved_unix_ms,
+        )?;
+        Ok(profile)
+    }
+
+    pub fn journal_recommendation_profile(
+        &self,
+        workspace_id: &str,
+        profile_id: &str,
+    ) -> Result<JournalRecommendationProfile, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        if !profile_id.starts_with("jmp-")
+            || profile_id.len() != 24
+            || !profile_id[4..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        }
+        let profile_path = self
+            .projects_root()
+            .join(workspace_id)
+            .join("analysis")
+            .join(format!("journal-profile-{profile_id}.json"));
+        let profile: JournalRecommendationProfile = if profile_path.exists() {
+            read_json(&profile_path)?
+        } else {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        };
+        if profile.workspace_id != workspace_id {
+            return Err(WorkspaceError::JournalProfileNotFound);
+        }
+        Ok(profile)
     }
 
     pub fn evaluate_readiness(
@@ -2538,9 +2685,10 @@ mod tests {
         make_tree_writable, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
     };
     use crate::{
-        JournalMatchPreferences, JournalRecommendationProfileInput, KnowledgeInquiryStance,
-        KnowledgeInquiryTarget, ManuscriptPurpose, ReadinessOutcome, RevisionApplication,
-        RevisionChangeInput, RevisionFieldKind,
+        InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
+        JournalRecommendationProfileInput, KnowledgeInquiryStance, KnowledgeInquiryTarget,
+        ManuscriptPurpose, ReadinessOutcome, RevisionApplication, RevisionChangeInput,
+        RevisionFieldKind,
     };
     use std::{
         fs::{self, File},
@@ -2660,6 +2808,34 @@ mod tests {
         .unwrap();
         assert!(audit.contains("journal_recommendation_profile_saved"));
         assert!(audit.contains("journal_recommendations_computed"));
+
+        let evidence = InstitutionRuleEvidence {
+            status: InstitutionRuleStatus::Verified,
+            rule_set_id: Some("institution-rule-synthetic".into()),
+            rule_set_version: Some("author-source-1".into()),
+            source_text_hash: Some("b".repeat(64)),
+            source_kind: Some("author_supplied_institution_requirement".into()),
+            extracted_conditions: vec!["Only CCF A is recognized".into()],
+            recognized_rank_tiers: vec!["CCF A".into()],
+            author_attested_official: true,
+            ..InstitutionRuleEvidence::default()
+        };
+        let evidence_profile = store
+            .save_institution_rule_evidence(&workspace.id, &profile.profile_id, evidence)
+            .unwrap();
+        let evidence_run = store
+            .recommend_journals(
+                &workspace.id,
+                &evidence_profile.profile_id,
+                JournalMatchPreferences::default(),
+            )
+            .unwrap();
+        assert!(evidence_profile.profile_version > profile.profile_version);
+        assert_eq!(evidence_run.school_rule_status, "verified_rule_set_applied");
+        assert!(evidence_run
+            .international
+            .iter()
+            .any(|item| item.scores.institution_rules == Some(100)));
     }
 
     #[test]

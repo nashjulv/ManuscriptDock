@@ -818,7 +818,7 @@ describe("App", () => {
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 vision-study.tex" }));
     await user.click(screen.getByRole("button", { name: "期刊匹配" }));
-    expect(screen.getByText(/学校标准是重要依据/)).toBeVisible();
+    expect(screen.getByText(/学校标准是资格依据，不是声誉分/)).toBeVisible();
     const calculateButton = screen.getByRole("button", { name: "保存档案并计算推荐" });
     expect(calculateButton).toBeDisabled();
     await user.type(screen.getByLabelText("投稿人姓名"), "测试作者");
@@ -826,6 +826,13 @@ describe("App", () => {
     await user.type(screen.getByLabelText("学院或专业"), "计算机视觉");
     await user.selectOptions(screen.getByLabelText("论文用途"), "graduation");
     await user.type(screen.getByLabelText(/完成投稿截止日期/), "2099-12-31");
+    expect(screen.getByRole("heading", { name: "提供学校正式要求" })).toBeVisible();
+    const requirementText = screen.getByLabelText("学校要求说明文字");
+    await user.type(requirementText, "学校正式文件规定毕业论文成果须符合学院当年公布的期刊目录、分区和署名要求。");
+    expect(screen.getByRole("button", { name: "提取校规并计算推荐" })).toBeDisabled();
+    expect(screen.getByText(/作者姓名、来源网址、联系方式、学号和论文正文均不发送/)).toBeVisible();
+    await user.clear(requirementText);
+    expect(calculateButton).toBeEnabled();
     await user.click(calculateButton);
     expect(await screen.findByRole("heading", { name: "国内 3 家" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "国际 3 家" })).toBeVisible();

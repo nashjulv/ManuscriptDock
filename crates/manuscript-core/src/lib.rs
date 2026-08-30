@@ -14,9 +14,10 @@ pub use dialogue::{
 pub use journal_match::{
     deadline_days_remaining, recommend_journals, ArticleTypePreference, InstitutionRuleEvidence,
     InstitutionRuleStatus, JournalFitScores, JournalMatchPreferences, JournalRecommendation,
-    JournalRecommendationProfile, JournalRecommendationProfileInput, JournalRecommendationRun,
-    JournalRegion, ManuscriptPurpose, OpenAccessPreference, PublicationLanguagePreference,
-    ResearchTopic, TargetStrategy, JOURNAL_CATALOG_VERSION, JOURNAL_MATCH_ALGORITHM_VERSION,
+    JournalRecommendationProfile, JournalRecommendationProfileInput,
+    JournalRecommendationProfileSummary, JournalRecommendationRun, JournalRegion,
+    ManuscriptPurpose, OpenAccessPreference, PublicationLanguagePreference, ResearchTopic,
+    TargetStrategy, JOURNAL_CATALOG_VERSION, JOURNAL_MATCH_ALGORITHM_VERSION,
     JOURNAL_MATCH_SCHEMA_VERSION, JOURNAL_PROFILE_SCHEMA_VERSION,
 };
 pub use knowledge::{

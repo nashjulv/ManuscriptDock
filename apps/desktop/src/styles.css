@@ -687,7 +687,7 @@ h1, h2, h3, p { margin-top: 0; }
   .knowledge-identity-card dl > div { grid-template-columns: 1fr; gap: 3px; }
 }
 
-.journal-profile, .journal-preferences { margin: 18px 0; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+.journal-profile, .institution-requirement, .journal-preferences { margin: 18px 0; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
 .journal-profile > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .journal-profile > header span { color: var(--text-muted); font-size: 10px; }
 .journal-profile > header h3 { margin: 3px 0 0; font-size: 15px; font-weight: 500; }
@@ -698,6 +698,19 @@ h1, h2, h3, p { margin-top: 0; }
 .journal-profile input, .journal-profile select { width: 100%; min-height: 44px; padding: 8px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px; font: inherit; font-size: 13px; }
 .journal-profile input:focus, .journal-profile select:focus, .journal-preferences select:focus { border-color: var(--text-secondary); outline: 2px solid var(--border-strong); outline-offset: 1px; }
 .journal-profile small { color: var(--text-muted); font-size: 10px; line-height: 16px; }
+.institution-requirement > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.institution-requirement > header span { color: var(--text-muted); font-size: 10px; }
+.institution-requirement h3 { margin: 3px 0 0; font-size: 14px; font-weight: 500; }
+.institution-requirement > header strong { color: var(--text-secondary); font-size: 10px; font-weight: 500; }
+.institution-requirement > p, .institution-requirement > small { display: block; margin: 10px 0 0; color: var(--text-muted); font-size: 10px; line-height: 16px; }
+.institution-requirement > label { display: grid; gap: 6px; margin-top: 12px; color: var(--text-secondary); font-size: 11px; }
+.institution-requirement textarea, .institution-requirement > label > input { width: 100%; padding: 9px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px; font: inherit; font-size: 12px; }
+.institution-requirement textarea { min-height: 116px; resize: vertical; line-height: 18px; }
+.institution-requirement > label > input { min-height: 44px; }
+.institution-requirement textarea:focus, .institution-requirement input:focus { border-color: var(--text-secondary); outline: 2px solid var(--border-strong); outline-offset: 1px; }
+.institution-consents { display: grid; gap: 8px; margin-top: 12px; }
+.institution-consents label { min-height: 44px; display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; color: var(--text-secondary); cursor: pointer; font-size: 10px; line-height: 16px; }
+.institution-consents input { width: 16px; height: 16px; flex: none; margin: 0; accent-color: var(--accent); }
 .journal-preferences h3 { margin: 0 0 12px; font-size: 14px; }
 .journal-preferences > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .journal-preferences label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; }
