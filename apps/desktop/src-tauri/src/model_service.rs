@@ -107,6 +107,13 @@ struct ChatRequest<'a> {
     messages: Vec<ChatMessage<'a>>,
     temperature: f32,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingConfig<'a>>,
+}
+
+#[derive(Serialize)]
+struct ThinkingConfig<'a> {
+    r#type: &'a str,
 }
 
 #[derive(Serialize)]
@@ -117,17 +124,36 @@ struct ChatMessage<'a> {
 
 #[derive(Deserialize)]
 struct ChatResponse {
+    #[serde(default)]
     choices: Vec<ChatChoice>,
 }
 
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ChatResponseMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ChatResponseMessage {
-    content: String,
+    #[serde(default)]
+    content: Option<ChatResponseContent>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ChatResponseContent {
+    Text(String),
+    Parts(Vec<ChatResponsePart>),
+}
+
+#[derive(Deserialize)]
+struct ChatResponsePart {
+    #[serde(default)]
+    text: Option<String>,
 }
 
 pub fn load_summary(root: &Path) -> Result<ModelSettingsSummary, String> {
@@ -228,7 +254,9 @@ pub async fn ask_with_failover(
                 },
             ],
             temperature: 0.2,
-            max_tokens: 1_200,
+            max_tokens: 2_400,
+            thinking: is_deepseek_endpoint(&configured.endpoint)
+                .then_some(ThinkingConfig { r#type: "disabled" }),
         };
         let response = client
             .post(configured.endpoint.clone())
@@ -240,13 +268,7 @@ pub async fn ask_with_failover(
             Ok(response) if response.status().is_success() => {
                 match response.json::<ChatResponse>().await {
                     Ok(body) => {
-                        if let Some(content) = body
-                            .choices
-                            .into_iter()
-                            .next()
-                            .map(|choice| choice.message.content.trim().to_owned())
-                            .filter(|content| !content.is_empty())
-                        {
+                        if let Some(content) = visible_answer(&body) {
                             return Ok(ModelAnswer {
                                 slot: configured.role,
                                 provider_label: configured.provider_label,
@@ -254,7 +276,7 @@ pub async fn ask_with_failover(
                                 content,
                             });
                         }
-                        failures.push(format!("{} 返回了空回答", configured.role.as_str()));
+                        failures.push(empty_answer_message(configured.role, &body));
                     }
                     Err(_) => {
                         failures.push(format!("{} 返回了无法识别的响应", configured.role.as_str()))
@@ -275,6 +297,51 @@ pub async fn ask_with_failover(
         "主模型和备选模型均未完成回答：{}",
         failures.join("；")
     ))
+}
+
+fn is_deepseek_endpoint(endpoint: &Url) -> bool {
+    endpoint
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"))
+}
+
+fn visible_answer(body: &ChatResponse) -> Option<String> {
+    body.choices.iter().find_map(|choice| {
+        let content = match choice.message.content.as_ref()? {
+            ChatResponseContent::Text(content) => content.trim().to_owned(),
+            ChatResponseContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|part| part.text.as_deref().map(str::trim))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        (!content.is_empty()).then_some(content)
+    })
+}
+
+fn empty_answer_message(role: ModelSlotRole, body: &ChatResponse) -> String {
+    let reached_limit = body.choices.iter().any(|choice| {
+        choice
+            .finish_reason
+            .as_deref()
+            .is_some_and(|reason| matches!(reason, "length" | "max_tokens"))
+    });
+    let contains_reasoning = body.choices.iter().any(|choice| {
+        choice
+            .message
+            .reasoning_content
+            .as_deref()
+            .is_some_and(|content| !content.trim().is_empty())
+    });
+    let reason = if reached_limit {
+        "达到输出上限，但没有形成最终回答"
+    } else if contains_reasoning {
+        "已完成内部推理，但没有形成最终回答"
+    } else {
+        "返回了空回答"
+    };
+    format!("{} {reason}", role.as_str())
 }
 
 fn http_failure_message(role: ModelSlotRole, status: u16) -> String {
@@ -565,6 +632,53 @@ mod tests {
         let mut clearing = enabled;
         clearing[0].clear_api_key = true;
         assert!(validate_credential_requirements(&clearing, |_| Ok(true)).is_err());
+    }
+
+    #[test]
+    fn disables_thinking_only_for_the_official_deepseek_endpoint() {
+        let deepseek = Url::parse("https://api.deepseek.com/chat/completions").unwrap();
+        let compatible = Url::parse("https://models.example/v1/chat/completions").unwrap();
+        assert!(is_deepseek_endpoint(&deepseek));
+        assert!(!is_deepseek_endpoint(&compatible));
+
+        let request = ChatRequest {
+            model: "deepseek-v4-flash",
+            messages: vec![ChatMessage {
+                role: "user",
+                content: "Synthetic question",
+            }],
+            temperature: 0.2,
+            max_tokens: 2_400,
+            thinking: Some(ThinkingConfig { r#type: "disabled" }),
+        };
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["thinking"]["type"], "disabled");
+        assert_eq!(value["max_tokens"], 2_400);
+    }
+
+    #[test]
+    fn reads_visible_string_and_part_answers_without_exposing_reasoning() {
+        let text: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":" Final answer ","reasoning_content":"private reasoning"},"finish_reason":"stop"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(visible_answer(&text).as_deref(), Some("Final answer"));
+
+        let parts: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":[{"type":"text","text":"First"},{"type":"text","text":"Second"}]},"finish_reason":"stop"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(visible_answer(&parts).as_deref(), Some("First\nSecond"));
+
+        let reasoning_only: ChatResponse = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":null,"reasoning_content":"must stay private"},"finish_reason":"length"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(visible_answer(&reasoning_only), None);
+        assert_eq!(
+            empty_answer_message(ModelSlotRole::Primary, &reasoning_only),
+            "primary 达到输出上限，但没有形成最终回答"
+        );
     }
 
     #[test]

@@ -43,6 +43,13 @@ DeepSeek 提供一键官方配置，按[官方首次调用说明](https://api-do
 `https://api-docs.deepseek.com/zh-cn` 是文档网站而不是 API，前后端都会明确拒绝把它保存为
 已启用模型。预设不包含 Key，作者仍须自行输入并保存。
 
+DeepSeek V4 默认启用高强度思考模式，思考内容与最终正文分别返回。知识体问答需要稳定、
+可保存的最终正文，因此 Rust 对官方 `api.deepseek.com` 的 Chat Completions 请求显式设置
+`thinking.type = disabled`，并提供 2400 个输出 token；其他 OpenAI 兼容端点不接收这个
+提供方专属参数。响应解析接受字符串或文本分段，但内部 `reasoning_content` 永远不作为
+答案展示或写入问答账本。若提供方达到输出上限或只有推理而无最终正文，应用显示具体原因
+并继续尝试下一个启用槽位。
+
 远端地址必须使用 HTTPS；只有 `localhost`、`127.0.0.1` 和 `::1` 允许 HTTP，以兼容作者
 自建的本机模型服务。
 

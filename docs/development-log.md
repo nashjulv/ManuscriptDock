@@ -3,6 +3,24 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — DeepSeek empty-answer recovery
+
+- Traced the reported empty primary answer to DeepSeek V4's default high-effort thinking mode combined
+  with the former 1200-token output cap. The official model ID and API endpoint were already correct.
+- Disabled thinking mode only for the official `api.deepseek.com` Chat Completions endpoint and raised
+  the final-answer allowance to 2400 tokens. Other OpenAI-compatible providers receive no DeepSeek-only
+  request fields.
+- Made response parsing accept visible text returned as a string or text-part array, tolerate nullable
+  content, and distinguish output-limit and reasoning-only failures. Private `reasoning_content` is
+  never displayed or persisted as an answer.
+
+### Verification
+
+- Synthetic Rust coverage verifies endpoint scoping, request serialization, string and part-array
+  answers, nullable content, output-limit diagnostics, and non-disclosure of reasoning text.
+- `npm run check`: passed TypeScript, frontend tests, production build, Rust tests, rustfmt, and Clippy
+  with warnings denied.
+
 ## 2026-08-30 — PDF brand asset and Chinese glyph correction
 
 - Replaced the manual cover's temporary vector approximation with the same crayon-textured PNG icon
