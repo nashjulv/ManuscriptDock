@@ -1187,6 +1187,39 @@ impl WorkspaceStore {
         Ok(profile)
     }
 
+    pub fn journal_recommendation_author_names(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let analysis_root = workspace_root.join("analysis");
+        if !analysis_root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut names = BTreeSet::new();
+        for entry in fs::read_dir(analysis_root)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if !file_name.starts_with("journal-profile-jmp-") || !file_name.ends_with(".json") {
+                continue;
+            }
+            let profile: JournalRecommendationProfile = read_json(&entry.path())?;
+            if profile.workspace_id != workspace_id {
+                return Err(WorkspaceError::InvalidWorkspaceId);
+            }
+            if !profile.author_name.trim().is_empty() {
+                names.insert(profile.author_name);
+            }
+        }
+        Ok(names.into_iter().collect())
+    }
+
     pub fn evaluate_readiness(
         &self,
         workspace_id: &str,
@@ -2776,6 +2809,12 @@ mod tests {
         let same_profile = store
             .save_journal_recommendation_profile(&workspace.id, input)
             .unwrap();
+        assert_eq!(
+            store
+                .journal_recommendation_author_names(&workspace.id)
+                .unwrap(),
+            vec!["Synthetic Author"]
+        );
         let run = store
             .recommend_journals(
                 &workspace.id,

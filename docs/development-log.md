@@ -3,6 +3,27 @@
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
+## 2026-08-30 — Standalone user manual and cross-model privacy closure
+
+- Added a standalone author-facing manual covering installation, the complete eight-stage workflow,
+  journal matching, model setup, workspace management, privacy boundaries, troubleshooting, and the
+  current MVP limitations.
+- Closed a privacy gap found while verifying the manual: the knowledge-body model projection no longer
+  contains the extracted author list. Known author names, email addresses, phone-like numbers, long
+  identifiers, and local paths are redacted from projected text and the outbound question at the Rust
+  network boundary; the original question remains only in the local immutable ledger.
+- Retained the separately authorized institution-policy rule: an institution name may be sent for that
+  extraction task, while the author name, source URL, contacts, identifiers, and manuscript body remain
+  excluded.
+
+### Verification
+
+- `npm run check`: passed TypeScript, 15 frontend tests, the Vite production build, 59 core tests,
+  9 desktop Rust tests, rustfmt, and Clippy with warnings denied.
+- `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the Windows x64 desktop
+  dependency graph with the shared privacy redaction path.
+- `npm run tauri -- build --debug --no-bundle`: produced the updated macOS debug executable.
+
 ## 2026-08-30 — Institution requirement model extraction and private directory boundary
 
 - Added an optional author-supplied institution-policy field to journal matching. After per-call consent,
