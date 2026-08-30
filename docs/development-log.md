@@ -15,6 +15,9 @@ run before each commit. It contains no real manuscripts or identifiable review m
 - Retained the separately authorized institution-policy rule: an institution name may be sent for that
   extraction task, while the author name, source URL, contacts, identifiers, and manuscript body remain
   excluded.
+- Exported the manual as a 12-page A4 PDF with a branded cover, linked two-page table of contents,
+  PDF outline bookmarks, page headers, page numbers, and print-safe tables. The final render contains no
+  blank pages or orphaned list items.
 
 ### Verification
 
@@ -23,6 +26,9 @@ run before each commit. It contains no real manuscripts or identifiable review m
 - `cargo xwin check --workspace --target x86_64-pc-windows-msvc`: passed the Windows x64 desktop
   dependency graph with the shared privacy redaction path.
 - `npm run tauri -- build --debug --no-bundle`: produced the updated macOS debug executable.
+- Rendered every PDF page to PNG and visually checked the cover, contents, tables, Chinese typography,
+  page boundaries, and final page; `pypdf` also confirmed 12 non-empty pages, metadata, and 26 outline
+  entries.
 
 ## 2026-08-30 — Institution requirement model extraction and private directory boundary
 
