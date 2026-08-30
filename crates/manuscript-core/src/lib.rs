@@ -21,16 +21,17 @@ pub use journal_match::{
     JOURNAL_MATCH_SCHEMA_VERSION, JOURNAL_PROFILE_SCHEMA_VERSION,
 };
 pub use knowledge::{
-    discipline_catalog, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
-    AiReviewReportHistory, AiReviewReportVersion, AiReviewStatus, AssertionBasis, AssertionStatus,
-    CapabilityAvailability, CapabilityContract, ClaimElementReference, ClaimFiveTuple,
-    DisciplineCatalogItem, DisciplineClassification, ElementState, IdentityVersionLayer,
-    InteractionRuntimeLayer, KnowledgeBodyError, KnowledgeBodyLifecycleStatus,
-    KnowledgeBodyNetwork, KnowledgeBodyNode, KnowledgeBodyObjectSet, KnowledgeBodyRole,
-    KnowledgeBodyServiceArchitecture, KnowledgeBoundaryEvidenceLayer, KnowledgeObjectType,
-    NetworkAssertion, RelationKind, RelationProtocol, RuntimeBindingPolicy,
-    ValidationRightsReputationLayer, VersionedObjectReference, DISCIPLINE_INDEX_SCHEME,
-    DISCIPLINE_INDEX_VERSION, KNOWLEDGE_BODY_SCHEMA_VERSION,
+    apply_candidate_decisions, discipline_catalog, local_knowledge_body_snapshot,
+    AcademicKnowledgeBodySnapshot, AiReviewReportHistory, AiReviewReportVersion, AiReviewStatus,
+    AssertionBasis, AssertionStatus, CapabilityAvailability, CapabilityContract,
+    ClaimElementReference, ClaimFiveTuple, DisciplineCatalogItem, DisciplineClassification,
+    ElementState, IdentityVersionLayer, InteractionRuntimeLayer, KnowledgeBodyError,
+    KnowledgeBodyLifecycleStatus, KnowledgeBodyNetwork, KnowledgeBodyNode, KnowledgeBodyObjectSet,
+    KnowledgeBodyRole, KnowledgeBodyServiceArchitecture, KnowledgeBoundaryEvidenceLayer,
+    KnowledgeCandidateDecision, KnowledgeObjectType, NetworkAssertion, RelationKind,
+    RelationProtocol, RuntimeBindingPolicy, ValidationRightsReputationLayer,
+    VersionedObjectReference, DISCIPLINE_INDEX_SCHEME, DISCIPLINE_INDEX_VERSION,
+    KNOWLEDGE_BODY_SCHEMA_VERSION,
 };
 pub use readiness::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, ExternalTransmission,

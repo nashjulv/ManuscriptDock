@@ -227,6 +227,7 @@ interface KnowledgeBodyObjectSet { artifactVersion: VersionedObjectReference; cl
 interface AiReviewReportVersion { reportId: string; version: number; previousVersion: number | null; reviewedClaim: VersionedObjectReference; reviewerId: string; reviewerVersion: string; createdUnixMs: number; status: string; summary: string; externalTransmission: string; }
 interface AiReviewReportHistory { reportId: string; currentVersion: number | null; versions: AiReviewReportVersion[]; }
 interface KnowledgeCandidateContent { candidateId: string; text: string; sourceLabel: string; sourceFragmentId: string | null; modality: SourceModality; confidencePercent: number; authorConfirmed: boolean; }
+type KnowledgeCandidateDecision = "included" | "excluded";
 interface ExtractedKnowledgeElement { object: VersionedObjectReference; state: ElementState; candidates: KnowledgeCandidateContent[]; }
 interface KnowledgeExtractionLayer { decompositionId: string; decompositionHash: string; analysisVersion: number; sourceSnapshotVersion: number; generatedBy: string; confirmationPolicy: string; claim: ExtractedKnowledgeElement; scope: ExtractedKnowledgeElement; method: ExtractedKnowledgeElement; result: ExtractedKnowledgeElement; evidence: ExtractedKnowledgeElement; }
 type CapabilityAvailability = "available" | "requires_runtime" | "planned";
@@ -388,7 +389,7 @@ interface WorkspaceLifecycle {
 type SelectionState = "idle" | "selecting" | "selected" | "error";
 type WorkspaceStage = "source" | "check" | "revision" | "versions" | "journals" | "attestation" | "submission" | "knowledge";
 type MobilePane = "operation" | "evidence";
-type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning" | "more" | "archive" | "trash" | "restore";
+type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "close" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning" | "more" | "archive" | "trash" | "restore";
 
 const WORKSPACE_STAGES: Array<{ id: WorkspaceStage; zh: string; en: string; shortZh: string; shortEn: string }> = [
   { id: "source", zh: "导入", en: "Import", shortZh: "导入", shortEn: "Import" },
@@ -426,6 +427,7 @@ function Icon({ name }: { name: IconName }) {
     lock: <><rect x="5.5" y="10" width="13" height="10" rx="2" /><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" /></>,
     file: <><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8M16 13H8M16 17H8" /></>,
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></>,
+    close: <><circle cx="12" cy="12" r="9" /><path d="m9 9 6 6M15 9l-6 6" /></>,
     versions: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /><path d="M5.6 5.6 3 8.2" /></>,
     structure: <><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></>,
     target: <><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></>,
@@ -549,6 +551,8 @@ function ManuscriptDockApp() {
   const [isRecordingSubmission, setIsRecordingSubmission] = useState(false);
   const [isFinalizingKnowledge, setIsFinalizingKnowledge] = useState(false);
   const [isLoadingKnowledgeBody, setIsLoadingKnowledgeBody] = useState(false);
+  const [knowledgeCandidateDecisions, setKnowledgeCandidateDecisions] = useState<Record<string, KnowledgeCandidateDecision>>({});
+  const [knowledgeReviewConfirmed, setKnowledgeReviewConfirmed] = useState(false);
   const [activeStage, setActiveStage] = useState<WorkspaceStage>("source");
   const [mobilePane, setMobilePane] = useState<MobilePane>("operation");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -575,6 +579,8 @@ function ManuscriptDockApp() {
     setKnowledgeBodyRecord(null);
     setSelectedDisciplineCode("");
     setIsLoadingKnowledgeBody(false);
+    setKnowledgeCandidateDecisions({});
+    setKnowledgeReviewConfirmed(false);
   }
 
   function resetDownstreamLifecycle() {
@@ -887,7 +893,14 @@ function ManuscriptDockApp() {
       setIsLoadingKnowledgeBody(true);
       setErrorMessage(null);
       void invoke<AcademicKnowledgeBodySnapshot>("get_knowledge_body_snapshot", { workspaceId: activeWorkspace.id })
-        .then(setKnowledgeBodySnapshot)
+        .then((snapshot) => {
+          setKnowledgeBodySnapshot(snapshot);
+          setKnowledgeCandidateDecisions(Object.fromEntries(
+            knowledgeCandidates(snapshot)
+              .filter((candidate) => candidate.authorConfirmed)
+              .map((candidate) => [candidate.candidateId, "included"]),
+          ));
+        })
         .catch((error: unknown) => setErrorMessage(normalizeError(error)))
         .finally(() => setIsLoadingKnowledgeBody(false));
     }
@@ -981,12 +994,16 @@ function ManuscriptDockApp() {
   }
 
   async function finalizeKnowledgeBody() {
-    if (!activeWorkspace || !selectedDisciplineCode || isFinalizingKnowledge) return;
+    if (!activeWorkspace || !selectedDisciplineCode || !knowledgeBodySnapshot || !knowledgeReviewConfirmed || isFinalizingKnowledge) return;
+    const candidates = knowledgeCandidates(knowledgeBodySnapshot);
+    if (candidates.some((candidate) => !knowledgeCandidateDecisions[candidate.candidateId])) return;
     setIsFinalizingKnowledge(true); setErrorMessage(null);
     try {
-      const record = await invoke<KnowledgeBodyRecord>("finalize_knowledge_body", { workspaceId: activeWorkspace.id, disciplineCode: selectedDisciplineCode });
+      const decisions = candidates.map((candidate) => ({ candidateId: candidate.candidateId, included: knowledgeCandidateDecisions[candidate.candidateId] === "included" }));
+      const record = await invoke<KnowledgeBodyRecord>("finalize_knowledge_body", { workspaceId: activeWorkspace.id, disciplineCode: selectedDisciplineCode, decisions, authorConfirmed: true });
       setKnowledgeBodyRecord(record);
       setKnowledgeBodySnapshot(record.snapshot);
+      setKnowledgeReviewConfirmed(false);
     } catch (error) { setErrorMessage(normalizeError(error)); }
     finally { setIsFinalizingKnowledge(false); }
   }
@@ -1103,7 +1120,7 @@ function ManuscriptDockApp() {
           </div>
           <div className="workspace-panes" data-mobile-pane={mobilePane}>
             <section id="operation-pane" className="operation-pane" role="tabpanel" aria-label={`${currentStageLabel} ${text("操作", "Actions")}`}>
-              <OperationPane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} disciplineCatalog={disciplineCatalog} selectedDisciplineCode={selectedDisciplineCode} attestation={attestation} submission={submission} submissionExport={submissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionCandidate={versionCandidate} versionNote={versionNote} versionNotice={versionNotice} attestationConfirmed={attestationConfirmed} submissionConfirmed={submissionConfirmed} submissionTarget={submissionTarget} submissionReceipt={submissionReceipt} isLoadingRuleCatalog={isLoadingRuleCatalog} isLoadingSubmissionElements={isLoadingSubmissionElements} isLoadingLifecycle={isLoadingLifecycle} isLoadingKnowledgeBody={isLoadingKnowledgeBody} isLoadingDisciplineCatalog={isLoadingDisciplineCatalog} isApplyingRevision={isApplyingRevision} isAnalyzing={isAnalyzing} isEvaluating={isEvaluating} isSelectingVersion={isSelectingVersion} isSavingVersion={isSavingVersion} isRestoringVersion={isRestoringVersion} isAttesting={isAttesting} isExportingSubmission={isExportingSubmission} isRecordingSubmission={isRecordingSubmission} isFinalizingKnowledge={isFinalizingKnowledge} onAnalyze={analyzeWorkspace} onEvaluate={evaluateReadiness} onToggleRulePack={toggleRulePack} onOpenStage={openStage} onRevisionValueChange={(field, value) => setRevisionValues((current) => ({ ...current, [field]: value }))} onApplyRevision={applyRevision} onSelectVersionCandidate={selectVersionCandidate} onVersionNoteChange={setVersionNote} onSaveVersion={saveVersion} onSelectVersion={(version) => compareVersions(activeWorkspace, version, activeWorkspace.snapshotVersion)} onRestoreVersion={restoreVersion} onAttestationConfirmed={setAttestationConfirmed} onCreateAttestation={createAttestation} onExportSubmission={exportSubmission} onSubmissionConfirmed={setSubmissionConfirmed} onSubmissionTargetChange={setSubmissionTarget} onSubmissionReceiptChange={setSubmissionReceipt} onRecordSubmission={recordSubmission} onDisciplineChange={setSelectedDisciplineCode} onFinalizeKnowledge={finalizeKnowledgeBody} />
+              <OperationPane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} disciplineCatalog={disciplineCatalog} selectedDisciplineCode={selectedDisciplineCode} knowledgeCandidateDecisions={knowledgeCandidateDecisions} knowledgeReviewConfirmed={knowledgeReviewConfirmed} attestation={attestation} submission={submission} submissionExport={submissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionCandidate={versionCandidate} versionNote={versionNote} versionNotice={versionNotice} attestationConfirmed={attestationConfirmed} submissionConfirmed={submissionConfirmed} submissionTarget={submissionTarget} submissionReceipt={submissionReceipt} isLoadingRuleCatalog={isLoadingRuleCatalog} isLoadingSubmissionElements={isLoadingSubmissionElements} isLoadingLifecycle={isLoadingLifecycle} isLoadingKnowledgeBody={isLoadingKnowledgeBody} isLoadingDisciplineCatalog={isLoadingDisciplineCatalog} isApplyingRevision={isApplyingRevision} isAnalyzing={isAnalyzing} isEvaluating={isEvaluating} isSelectingVersion={isSelectingVersion} isSavingVersion={isSavingVersion} isRestoringVersion={isRestoringVersion} isAttesting={isAttesting} isExportingSubmission={isExportingSubmission} isRecordingSubmission={isRecordingSubmission} isFinalizingKnowledge={isFinalizingKnowledge} onAnalyze={analyzeWorkspace} onEvaluate={evaluateReadiness} onToggleRulePack={toggleRulePack} onOpenStage={openStage} onRevisionValueChange={(field, value) => setRevisionValues((current) => ({ ...current, [field]: value }))} onApplyRevision={applyRevision} onSelectVersionCandidate={selectVersionCandidate} onVersionNoteChange={setVersionNote} onSaveVersion={saveVersion} onSelectVersion={(version) => compareVersions(activeWorkspace, version, activeWorkspace.snapshotVersion)} onRestoreVersion={restoreVersion} onAttestationConfirmed={setAttestationConfirmed} onCreateAttestation={createAttestation} onExportSubmission={exportSubmission} onSubmissionConfirmed={setSubmissionConfirmed} onSubmissionTargetChange={setSubmissionTarget} onSubmissionReceiptChange={setSubmissionReceipt} onRecordSubmission={recordSubmission} onDisciplineChange={setSelectedDisciplineCode} onKnowledgeCandidateDecision={(candidateId, decision) => setKnowledgeCandidateDecisions((current) => ({ ...current, [candidateId]: decision }))} onKnowledgeReviewConfirmed={setKnowledgeReviewConfirmed} onFinalizeKnowledge={finalizeKnowledgeBody} />
             </section>
             <aside id="evidence-pane" className="evidence-pane" role="tabpanel" aria-label={`${currentStageLabel} ${text("证据", "Evidence")}`}><EvidencePane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} attestation={attestation} submission={submission} submissionExport={submissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionComparison={versionComparison} isComparingVersions={isComparingVersions} /></aside>
           </div>
@@ -1225,6 +1242,7 @@ interface PaneProps { stage: WorkspaceStage; workspace: WorkspaceSummary; struct
 
 type OperationPaneProps = PaneProps & {
   versionCandidate: ManuscriptSummary | null; versionNote: string; versionNotice: string | null;
+  knowledgeCandidateDecisions: Record<string, KnowledgeCandidateDecision>; knowledgeReviewConfirmed: boolean;
   attestationConfirmed: boolean; submissionConfirmed: boolean; submissionTarget: string; submissionReceipt: string;
   isLoadingRuleCatalog: boolean; isLoadingSubmissionElements: boolean; isLoadingLifecycle: boolean; isLoadingKnowledgeBody: boolean; isLoadingDisciplineCatalog: boolean;
   isApplyingRevision: boolean; isAnalyzing: boolean; isEvaluating: boolean; isSelectingVersion: boolean; isSavingVersion: boolean; isRestoringVersion: boolean;
@@ -1235,12 +1253,14 @@ type OperationPaneProps = PaneProps & {
   onAttestationConfirmed: (confirmed: boolean) => void; onCreateAttestation: () => void; onExportSubmission: () => void;
   onSubmissionConfirmed: (confirmed: boolean) => void; onSubmissionTargetChange: (target: string) => void; onSubmissionReceiptChange: (receipt: string) => void; onRecordSubmission: () => void;
   onDisciplineChange: (code: string) => void;
+  onKnowledgeCandidateDecision: (candidateId: string, decision: KnowledgeCandidateDecision) => void;
+  onKnowledgeReviewConfirmed: (confirmed: boolean) => void;
   onFinalizeKnowledge: () => void;
 };
 
 function OperationPane(props: OperationPaneProps) {
   const { locale, text } = useI18n();
-  const { stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, disciplineCatalog = [], selectedDisciplineCode = "", attestation = null, submission = null, submissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory, selectedVersion, versionCandidate, versionNote, versionNotice, attestationConfirmed, submissionConfirmed, submissionTarget, submissionReceipt, isLoadingRuleCatalog, isLoadingSubmissionElements, isLoadingLifecycle, isLoadingKnowledgeBody, isLoadingDisciplineCatalog, isApplyingRevision, isAnalyzing, isEvaluating, isSelectingVersion, isSavingVersion, isRestoringVersion, isAttesting, isExportingSubmission, isRecordingSubmission, isFinalizingKnowledge, onAnalyze, onEvaluate, onToggleRulePack, onOpenStage, onRevisionValueChange, onApplyRevision, onSelectVersionCandidate, onVersionNoteChange, onSaveVersion, onSelectVersion, onRestoreVersion, onAttestationConfirmed, onCreateAttestation, onExportSubmission, onSubmissionConfirmed, onSubmissionTargetChange, onSubmissionReceiptChange, onRecordSubmission, onDisciplineChange, onFinalizeKnowledge } = props;
+  const { stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, disciplineCatalog = [], selectedDisciplineCode = "", knowledgeCandidateDecisions, knowledgeReviewConfirmed, attestation = null, submission = null, submissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory, selectedVersion, versionCandidate, versionNote, versionNotice, attestationConfirmed, submissionConfirmed, submissionTarget, submissionReceipt, isLoadingRuleCatalog, isLoadingSubmissionElements, isLoadingLifecycle, isLoadingKnowledgeBody, isLoadingDisciplineCatalog, isApplyingRevision, isAnalyzing, isEvaluating, isSelectingVersion, isSavingVersion, isRestoringVersion, isAttesting, isExportingSubmission, isRecordingSubmission, isFinalizingKnowledge, onAnalyze, onEvaluate, onToggleRulePack, onOpenStage, onRevisionValueChange, onApplyRevision, onSelectVersionCandidate, onVersionNoteChange, onSaveVersion, onSelectVersion, onRestoreVersion, onAttestationConfirmed, onCreateAttestation, onExportSubmission, onSubmissionConfirmed, onSubmissionTargetChange, onSubmissionReceiptChange, onRecordSubmission, onDisciplineChange, onKnowledgeCandidateDecision, onKnowledgeReviewConfirmed, onFinalizeKnowledge } = props;
 
   if (isLoadingLifecycle) return <EmptyStage icon="package" kicker={text("恢复流程", "Restore workflow")} title={text("正在恢复当前版本的流程记录", "Restoring lifecycle records for the current version")} copy={text("只读取与当前内容指纹匹配的结构、检查、存证、投稿和知识体记录。", "Only structure, checks, attestation, submission, and knowledge records matching the current fingerprint are restored.")} />;
 
@@ -1281,8 +1301,24 @@ function OperationPane(props: OperationPaneProps) {
   const finalizedDecompositionHash = knowledgeBodyRecord?.snapshot.extraction?.decompositionHash ?? null;
   const currentDecompositionHash = knowledgeBodySnapshot.extraction?.decompositionHash ?? null;
   const requiresUpdatedSnapshot = knowledgeBodyRecord !== null && (knowledgeBodyRecord.snapshot.schemaVersion !== knowledgeBodySnapshot.schemaVersion || finalizedDecompositionHash !== currentDecompositionHash);
-  if (!knowledgeBodyRecord?.disciplineClassification || requiresUpdatedSnapshot) return <><PanelHeading kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={requiresUpdatedSnapshot ? text("用统一分解资产更新知识体", "Update the knowledge body from the unified decomposition") : knowledgeBodyRecord ? text("补充学科索引分类", "Add discipline classification") : text("固化本次研究记忆", "Finalize this research memory")} copy={text("候选知识体已经从当前论文中提取；由作者确认学科分类后，再与存证和投稿记录一同固化。", "The candidate knowledge body has been extracted from the current manuscript. The author confirms a discipline before it is finalized with the attestation and submission record.")} /><KnowledgeCandidatePreview snapshot={knowledgeBodySnapshot} structureReport={structureReport} compact /><DisciplineSelector catalog={disciplineCatalog} selectedCode={selectedDisciplineCode} loading={isLoadingDisciplineCatalog} onChange={onDisciplineChange} /><BoundaryNote title={text("分类与固化边界", "Classification and finalization boundary")} copy={text("语义内容目前是本地提取候选，尚未得到作者逐条确认；学科分类完全由作者选择，不会调用大模型或发布到网络。", "Semantic content remains locally extracted and awaits item-level author confirmation. Classification is author-selected without model calls or network publishing.")} /><button className="primary-button" type="button" disabled={!selectedDisciplineCode || isLoadingDisciplineCatalog || isFinalizingKnowledge} onClick={onFinalizeKnowledge}>{isFinalizingKnowledge ? text("正在固化…", "Finalizing…") : requiresUpdatedSnapshot ? text("更新知识体快照", "Update knowledge-body snapshot") : knowledgeBodyRecord ? text("保存分类并生成新记录", "Save classification as a new record") : text("确认分类并固化知识体", "Confirm classification and finalize")}<Icon name="arrow" /></button></>;
-  return <KnowledgeBodyOperation workspace={workspace} snapshot={knowledgeBodySnapshot ?? knowledgeBodyRecord.snapshot} record={knowledgeBodyRecord} structureReport={structureReport} />;
+  if (!knowledgeBodyRecord?.disciplineClassification || requiresUpdatedSnapshot) {
+    const candidates = knowledgeCandidates(knowledgeBodySnapshot);
+    const decidedCount = candidates.filter((candidate) => knowledgeCandidateDecisions[candidate.candidateId]).length;
+    const reviewComplete = candidates.length > 0 && decidedCount === candidates.length;
+    return <>
+      <PanelHeading kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={requiresUpdatedSnapshot ? text("审核并更新知识体", "Review and update the knowledge body") : text("逐条确认研究知识", "Review the research knowledge item by item")} copy={text("对每条本地提取结果选择“纳入”或“排除”，再确认学科分类；只有纳入项会升级为作者确认的知识。", "Choose Include or Exclude for every locally extracted item, then confirm the discipline. Only included items become author-confirmed knowledge.")} />
+      <KnowledgeCandidatePreview snapshot={knowledgeBodySnapshot} structureReport={structureReport} decisions={knowledgeCandidateDecisions} onDecision={onKnowledgeCandidateDecision} reviewable />
+      <p className="knowledge-review-progress" role="status">{text(`已审核 ${decidedCount} / ${candidates.length} 条`, `Reviewed ${decidedCount} / ${candidates.length} items`)}</p>
+      <DisciplineSelector catalog={disciplineCatalog} selectedCode={selectedDisciplineCode} loading={isLoadingDisciplineCatalog} onChange={onDisciplineChange} />
+      <label className="confirmation-control knowledge-review-attestation">
+        <input type="checkbox" checked={knowledgeReviewConfirmed} disabled={!reviewComplete} onChange={(event) => onKnowledgeReviewConfirmed(event.target.checked)} />
+        <span>{text("我已逐条核对候选内容及来源，并确认纳入项准确表达当前论文；排除项不会成为已确认知识。", "I reviewed every candidate and its source, and confirm that included items accurately represent this manuscript; excluded items will not become confirmed knowledge.")}</span>
+      </label>
+      <BoundaryNote title={text("本地作者审核", "Local author review")} copy={text("审核决定绑定当前分解哈希并写入不可变知识体快照；不会调用模型或发送论文。", "Review decisions are bound to the current decomposition hash and written into the immutable knowledge-body snapshot; no model is called and no manuscript is sent.")} />
+      <button className="primary-button" type="button" disabled={!selectedDisciplineCode || !reviewComplete || !knowledgeReviewConfirmed || isLoadingDisciplineCatalog || isFinalizingKnowledge} onClick={onFinalizeKnowledge}>{isFinalizingKnowledge ? text("正在固化…", "Finalizing…") : requiresUpdatedSnapshot ? text("确认审核并更新快照", "Confirm review and update snapshot") : text("确认审核并固化知识体", "Confirm review and finalize")}<Icon name="arrow" /></button>
+    </>;
+  }
+  return <KnowledgeBodyOperation workspace={workspace} snapshot={knowledgeBodyRecord.snapshot} record={knowledgeBodyRecord} structureReport={structureReport} />;
 }
 
 function JournalMatchStage({ workspace, onContinue }: { workspace: WorkspaceSummary; onContinue: () => void }) {
@@ -1346,7 +1382,12 @@ function StructureCheckSummary({ report }: { report: StructureReport }) {
   return <section className="check-structure-summary"><header><div><span>{text("结构提取完成", "Structure extracted")}</span><h3>{report.title ?? text("未检测到标题", "No title detected")}</h3></div><strong>v{report.sourceSnapshotVersion}</strong></header><div className="metric-row"><Metric label={text("作者", "Authors")} value={report.authors.length} /><Metric label={text("章节", "Sections")} value={report.sections.length} /><Metric label={text("图", "Figures")} value={report.figureCount} /><Metric label={text("表", "Tables")} value={report.tableCount} /></div>{report.warnings.map((warning) => <p className="inline-warning" key={warning}><Icon name="warning" />{warning}</p>)}</section>;
 }
 
-function KnowledgeCandidatePreview({ snapshot, structureReport, compact = false }: { snapshot: AcademicKnowledgeBodySnapshot; structureReport?: StructureReport; compact?: boolean }) {
+function knowledgeCandidates(snapshot: AcademicKnowledgeBodySnapshot) {
+  const extraction = snapshot.extraction;
+  return extraction ? [extraction.claim, extraction.scope, extraction.method, extraction.result, extraction.evidence].flatMap((element) => element.candidates) : [];
+}
+
+function KnowledgeCandidatePreview({ snapshot, structureReport, compact = false, reviewable = false, decisions = {}, onDecision }: { snapshot: AcademicKnowledgeBodySnapshot; structureReport?: StructureReport; compact?: boolean; reviewable?: boolean; decisions?: Record<string, KnowledgeCandidateDecision>; onDecision?: (candidateId: string, decision: KnowledgeCandidateDecision) => void }) {
   const { text } = useI18n();
   const extraction = snapshot.extraction;
   const elements: Array<{ key: SemanticElementKind; label: string; value?: ExtractedKnowledgeElement }> = [
@@ -1358,14 +1399,18 @@ function KnowledgeCandidatePreview({ snapshot, structureReport, compact = false 
   ];
   const candidateCount = elements.reduce((total, element) => total + (element.value?.candidates.length ?? 0), 0);
   const coverage = structureReport?.extractionCoverage ?? { textFragments: 0, tableFragments: 0, figureFragments: 0 };
-  return <section className="knowledge-candidate-preview" data-compact={compact} aria-labelledby="knowledge-candidate-heading">
-    <header><div><span>{text("本地确定性语义提取", "Local deterministic semantic extraction")}</span><h3 id="knowledge-candidate-heading">{text(`${candidateCount} 条知识候选`, `${candidateCount} knowledge candidates`)}</h3></div><strong>{text("待作者确认", "Author confirmation pending")}</strong></header>
+  const confirmedCount = knowledgeCandidates(snapshot).filter((candidate) => candidate.authorConfirmed).length;
+  return <section className="knowledge-candidate-preview" data-compact={compact} data-reviewable={reviewable} aria-labelledby="knowledge-candidate-heading">
+    <header><div><span>{text("本地确定性语义提取", "Local deterministic semantic extraction")}</span><h3 id="knowledge-candidate-heading">{text(`${candidateCount} 条知识候选`, `${candidateCount} knowledge candidates`)}</h3></div><strong>{confirmedCount > 0 ? text(`${confirmedCount} 条已确认`, `${confirmedCount} confirmed`) : reviewable ? text("逐条审核", "Item review") : text("待作者确认", "Author confirmation pending")}</strong></header>
     <p className="knowledge-extraction-coverage">{text(`已分析 ${coverage.textFragments} 个文本片段、${coverage.tableFragments} 个表格片段和 ${coverage.figureFragments} 个图片片段。`, `Analyzed ${coverage.textFragments} text fragments, ${coverage.tableFragments} table fragments, and ${coverage.figureFragments} figure fragments.`)}</p>
     <div className="knowledge-candidate-grid">{elements.map((element) => {
       const candidates = element.value?.candidates ?? [];
-      return <article key={element.key} data-state={element.value?.state ?? "pending"}><header><h4>{element.label}</h4><span>{candidates.length > 0 ? text(`候选 v${element.value?.object.version ?? 0}`, `Candidate v${element.value?.object.version ?? 0}`) : text("未提取", "Not extracted")}</span></header>{candidates.length > 0 ? <ul>{candidates.slice(0, compact ? 1 : 3).map((candidate) => <li key={candidate.candidateId}><p>{candidate.text}</p><small>{candidate.sourceFragmentId ? `${candidate.sourceFragmentId} · ` : ""}{candidate.sourceLabel} · {candidate.modality.toUpperCase()} · {candidate.confidencePercent}%</small></li>)}</ul> : <p>{text("当前可解析内容中没有足够明确的语义片段；不会用占位文字冒充知识。", "No sufficiently explicit semantic passage was found in the parseable content; placeholders are not presented as knowledge.")}</p>}</article>;
+      return <article key={element.key} data-state={element.value?.state ?? "pending"}><header><h4>{element.label}</h4><span>{element.value?.state === "established" ? text(`已确认 v${element.value.object.version}`, `Established v${element.value.object.version}`) : candidates.length > 0 ? text(`候选 v${element.value?.object.version ?? 0}`, `Candidate v${element.value?.object.version ?? 0}`) : text("未提取", "Not extracted")}</span></header>{candidates.length > 0 ? <ul>{candidates.slice(0, compact ? 1 : 3).map((candidate) => {
+        const decision = candidate.authorConfirmed ? "included" : decisions[candidate.candidateId];
+        return <li key={candidate.candidateId} data-decision={decision ?? "pending"}><p>{candidate.text}</p><small>{candidate.sourceFragmentId ? `${candidate.sourceFragmentId} · ` : ""}{candidate.sourceLabel} · {candidate.modality.toUpperCase()} · {candidate.confidencePercent}%</small>{candidate.authorConfirmed ? <span className="candidate-confirmed-badge"><Icon name="check" />{text("作者已确认", "Author confirmed")}</span> : reviewable && onDecision ? <div className="candidate-decision" role="group" aria-label={text(`审核 ${element.label} 候选`, `Review ${element.label} candidate`)}><button type="button" aria-pressed={decision === "included"} onClick={() => onDecision(candidate.candidateId, "included")}><Icon name="check" />{text("纳入知识体", "Include")}</button><button type="button" aria-pressed={decision === "excluded"} onClick={() => onDecision(candidate.candidateId, "excluded")}><Icon name="close" />{text("排除", "Exclude")}</button></div> : null}</li>;
+      })}</ul> : <p>{text("当前可解析内容中没有足够明确的语义片段；不会用占位文字冒充知识。", "No sufficiently explicit semantic passage was found in the parseable content; placeholders are not presented as knowledge.")}</p>}</article>;
     })}</div>
-    <p className="knowledge-candidate-policy">{text("候选对象可以支持带不确定性说明的问答；只有作者逐条确认后，状态才会从 candidate 升级为 established。", "Candidates can support uncertainty-aware questions and answers. They become established only after item-level author confirmation.")}</p>
+    <p className="knowledge-candidate-policy">{text("候选对象可以支持带不确定性说明的问答；只有作者选择纳入并完成整组审核后，状态才会从 candidate 升级为 established。", "Candidates can support uncertainty-aware questions and answers. They become established only after the author includes them and completes the full review.")}</p>
   </section>;
 }
 
@@ -1572,6 +1617,11 @@ function relationProtocolLabel(kind: RelationKind) {
 
 type KnowledgeView = "single" | "pair" | "network";
 
+function conciseKnowledgeText(value: string, limit = 128) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit).trimEnd()}…` : normalized;
+}
+
 function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<PaneProps, "stage">) {
   const { locale, text } = useI18n();
   const [view, setView] = useState<KnowledgeView>("single");
@@ -1582,11 +1632,24 @@ function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<P
   const objects = knowledgeBodySnapshot?.objects;
   const aiReview = knowledgeBodySnapshot?.aiReviewReport;
   const architecture = knowledgeBodySnapshot?.serviceArchitecture;
+  const extraction = knowledgeBodySnapshot?.extraction;
+  const semanticElements: Array<{ key: SemanticElementKind; label: string; element?: ExtractedKnowledgeElement }> = [
+    { key: "claim", label: "Claim", element: extraction?.claim },
+    { key: "scope", label: "Scope", element: extraction?.scope },
+    { key: "method", label: "Method", element: extraction?.method },
+    { key: "result", label: "Result", element: extraction?.result },
+    { key: "evidence", label: "Evidence", element: extraction?.evidence },
+  ];
+  const summaries = semanticElements.map((item) => {
+    const candidate = item.element?.candidates.find((entry) => entry.authorConfirmed) ?? item.element?.candidates[0];
+    return { ...item, candidate, summary: candidate ? conciseKnowledgeText(candidate.text) : text("当前分解未形成可靠内容", "No reliable content was formed by the current decomposition") };
+  });
+  const claimSummary = summaries.find((item) => item.key === "claim");
   const previousReviewVersions = (knowledgeBodySnapshot?.aiReviewHistory.versions ?? []).filter((report) => report.version !== aiReview?.version).map((report) => `v${report.version}`).join(" · ");
   const capabilityContracts = architecture?.capabilityContracts ?? [];
   const layers = [
     { key: "identity", label: text("身份与版本", "Identity & version"), version: `S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}`, state: text(`Artifact v${objects?.artifactVersion.version ?? workspace.snapshotVersion} · 稳定 ID`, `Artifact v${objects?.artifactVersion.version ?? workspace.snapshotVersion} · Stable ID`), complete: true },
-    { key: "knowledge", label: text("知识、边界与证据", "Knowledge, boundary & evidence"), version: `Claim v${claim?.claim.version ?? 1}`, state: `Scope v${objects?.scope.version ?? 0} · Method v${objects?.method.version ?? 0} · Result v${objects?.result.version ?? 0} · EvidenceRelation v${objects?.evidenceRelation.version ?? 0} · Anchor v${objects?.sourceAnchor.version ?? workspace.snapshotVersion}`, complete: (objects?.scope.version ?? 0) > 0 && (objects?.method.version ?? 0) > 0 },
+    { key: "knowledge", label: text("知识、边界与证据", "Knowledge, boundary & evidence"), version: `Claim v${claim?.claim.version ?? 1}`, state: claimSummary?.summary ?? text("等待论文分解", "Awaiting decomposition"), complete: claimSummary?.element?.state === "established" },
     { key: "capability", label: text("能力契约", "Capability contracts"), version: `v1 · ${capabilityContracts.length}`, state: text("输入 · 输出 · 前置 · 拒绝", "Input · Output · Preconditions · Refusal"), complete: capabilityContracts.length > 0 },
     { key: "runtime", label: text("交互与执行运行时", "Interaction & runtime"), version: "RuntimeProfile · v1", state: text("可替换模型 · 单次授权", "Replaceable model · Per-call consent"), complete: architecture !== undefined },
     { key: "trust", label: text("验证、权利与信誉", "Validation, rights & reputation"), version: `Reputation · v${architecture?.validationRightsAndReputation.reputationRecord.version ?? 0}`, state: aiReview ? text(`AIReview v${aiReview.version}${previousReviewVersions ? ` · 历史 ${previousReviewVersions}` : ""}`, `AIReview v${aiReview.version}${previousReviewVersions ? ` · History ${previousReviewVersions}` : ""}`) : text("Rights v1 · 审核待建立", "Rights v1 · Review pending"), complete: architecture !== undefined },
@@ -1612,12 +1675,14 @@ function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<P
             <line x1="300" y1="230" x2="162" y2="372" className="reputation-connection" />
           </svg>
           <div className="claim-center" aria-hidden="true">
+            <span className="claim-knowledge-summary">{claimSummary?.summary}</span>
             <ClaimDodecahedron />
-            <span className="claim-core"><strong>Claim · v{claim?.claim.version ?? 1}</strong><small>{text("知识核心 · 边界受限", "Knowledge core · Bounded")}</small></span>
+            <span className="claim-core"><strong>Claim · v{claim?.claim.version ?? 1}</strong><small>{claimSummary?.element?.state === "established" ? text("作者已确认", "Author confirmed") : text("提取候选 · 待确认", "Extracted candidate · Review pending")}</small></span>
           </div>
           {layers.map((layer) => <div className={`service-layer-node service-layer-${layer.key}`} data-complete={layer.complete} key={layer.key} aria-hidden="true"><span className="service-layer-sphere"><strong>{layer.label}</strong><small>{layer.version}</small><em title={layer.state}>{layer.state}</em></span></div>)}
         </div>
       ) : availableView && network ? <KnowledgeNetworkCanvas bodies={view === "pair" ? network.bodies.slice(0, 2) : network.bodies} assertions={network.assertions} view={view} /> : null}
+      {view === "single" ? <section className="knowledge-summary-legend" aria-labelledby="knowledge-summary-heading"><header><div><span>{text("当前论文的解构知识", "Decomposed knowledge from this manuscript")}</span><h3 id="knowledge-summary-heading">{text("知识摘要与来源", "Knowledge summaries and sources")}</h3></div><strong>{text("逐项可追溯", "Traceable by item")}</strong></header><ol>{summaries.map((item) => <li key={item.key} data-state={item.element?.state ?? "pending"}><div className="knowledge-summary-label"><strong>{item.label}</strong><span>{item.element?.state === "established" ? text("作者已确认", "Confirmed") : item.candidate ? text("提取候选", "Candidate") : text("未建立", "Pending")}</span></div><p>{item.summary}</p>{item.candidate ? <small>{item.candidate.sourceLabel}{item.candidate.sourceFragmentId ? ` · ${item.candidate.sourceFragmentId}` : ""} · {item.candidate.confidencePercent}%</small> : null}</li>)}</ol></section> : null}
       <p className="knowledge-space-note">{view === "single" ? text("单一知识体是具有稳定身份、明确知识边界、可验证证据、能力契约和可替换运行时的知识服务单元。内容快照不可变；信誉记录可独立更新；v0 表示尚未正式建立。", "A single KnowledgeBody is a knowledge-service unit with stable identity, explicit boundaries, verifiable evidence, capability contracts, and a replaceable runtime. Content snapshots are immutable; reputation records evolve independently; v0 means not yet established.") : text("圆形边界表示知识体自身边界；绿色菱形表示带依据、状态和版本的声明对象。相似度不会自动成为关系。", "Circular boundaries preserve each knowledge body; green diamonds are versioned assertions with basis and status. Similarity never becomes a relationship automatically.")}</p>
     </div>
   );

@@ -626,11 +626,13 @@ describe("App", () => {
     const claim = reference("claim:classified", "claim", 1);
     const anchor = reference("anchor:classified", "source_anchor", 1);
     const method = reference("method:classified", "method", 0);
+    const candidate = { candidateId: "kb:classified:candidate:claim:1", text: "The study proposes a traceable synthetic method.", sourceLabel: "Abstract", sourceFragmentId: "fragment:abstract", modality: "text", confidencePercent: 84, authorConfirmed: false };
     const snapshot = {
-      schemaVersion: 1, knowledgeBodyId: "kb:classified", snapshotVersion: 1, manuscript: reference("artifact:classified", "artifact_version", 1),
-      claim: { claim, proposition: { ...reference("proposition:classified", "proposition", 0), state: "pending" }, conditions: { ...reference("scope:classified", "scope", 0), state: "pending" }, evidence: { ...reference("evidence:classified", "evidence", 0), state: "pending" }, sources: { ...anchor, state: "established" }, status: { ...reference("status:classified", "status", 1), state: "established" } },
+      schemaVersion: 3, knowledgeBodyId: "kb:classified", snapshotVersion: 1, manuscript: reference("artifact:classified", "artifact_version", 1),
+      claim: { claim, proposition: { ...reference("proposition:classified", "proposition", 1), state: "candidate" }, conditions: { ...reference("scope:classified", "scope", 0), state: "pending" }, evidence: { ...reference("evidence:classified", "evidence", 0), state: "pending" }, sources: { ...anchor, state: "established" }, status: { ...reference("status:classified", "status", 1), state: "candidate" } },
       objects: { artifactVersion: reference("artifact:classified", "artifact_version", 1), claim, scope: reference("scope:classified", "scope", 0), method, result: reference("result:classified", "result", 0), evidenceRelation: reference("evidence-relation:classified", "evidence_relation", 0), sourceAnchor: anchor, aiReviewReport: null, provenance: reference("provenance:classified", "provenance", 1), knowledgeBodySnapshot: reference("snapshot:classified", "knowledge_body_snapshot", 1) },
       aiReviewReport: null, aiReviewHistory: { reportId: "review:classified", currentVersion: null, versions: [] },
+      extraction: { decompositionId: "decomposition:classified", decompositionHash: "d".repeat(64), analysisVersion: 6, sourceSnapshotVersion: 1, generatedBy: "local_deterministic_semantic_extraction", confirmationPolicy: "machine_candidates_require_author_confirmation", claim: { object: reference("proposition:classified", "proposition", 1), state: "candidate", candidates: [candidate] }, scope: { object: reference("scope:classified", "scope", 0), state: "pending", candidates: [] }, method: { object: method, state: "pending", candidates: [] }, result: { object: reference("result:classified", "result", 0), state: "pending", candidates: [] }, evidence: { object: reference("evidence:classified", "evidence", 0), state: "pending", candidates: [] } },
       network: { bodies: [{ body: reference("kb:classified", "knowledge_body", 1), displayId: "K-A", title: "Classified Study", role: "current_study", claim, sourceAnchor: anchor, method }], assertions: [], supportedRelations: ["citation", "claim_relation", "evidence_relation", "method_transfer", "reproduction", "alignment", "version_relation", "classification"] },
       externalTransmission: "not_performed",
     };
@@ -657,16 +659,18 @@ describe("App", () => {
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 classified-study.tex" }));
     await user.click(screen.getByRole("button", { name: "知识体" }));
-    const finalize = await screen.findByRole("button", { name: "确认分类并固化知识体" });
+    const finalize = await screen.findByRole("button", { name: "确认审核并固化知识体" });
     expect(finalize).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "纳入知识体" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "学科索引分类" }), "life_sciences");
+    await user.click(screen.getByRole("checkbox", { name: /我已逐条核对候选内容及来源/ }));
     expect(finalize).toBeEnabled();
     await user.click(finalize);
 
     expect(await screen.findByRole("heading", { name: "知识体哈希与学科索引" })).toBeVisible();
     expect(screen.getByText("生命科学")).toBeVisible();
     expect(screen.getByText("f".repeat(64))).toBeVisible();
-    expect(invokeMock).toHaveBeenCalledWith("finalize_knowledge_body", { workspaceId: workspace.id, disciplineCode: "life_sciences" });
+    expect(invokeMock).toHaveBeenCalledWith("finalize_knowledge_body", { workspaceId: workspace.id, disciplineCode: "life_sciences", decisions: [{ candidateId: candidate.candidateId, included: true }], authorConfirmed: true });
   });
 
   it("exposes the staged workspace and author-controlled knowledge body", async () => {
@@ -694,6 +698,14 @@ describe("App", () => {
       objects: { artifactVersion: reference("artifact:K-A", "artifact_version", 3), claim: bodies[0].claim, scope: reference("scope:K-A", "scope", 3), method: bodies[0].method, result: reference("result:K-A", "result", 2), evidenceRelation: reference("evidence-relation:K-A", "evidence_relation", 2), sourceAnchor: bodies[0].sourceAnchor, aiReviewReport: reference("review:K-A", "ai_review_report", 2), provenance: reference("provenance:K-A", "provenance", 2), knowledgeBodySnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7) },
       aiReviewReport: reference("review:K-A", "ai_review_report", 2),
       aiReviewHistory: { reportId: "review:K-A", currentVersion: 2, versions: [{ reportId: "review:K-A", version: 1, previousVersion: null }, { reportId: "review:K-A", version: 2, previousVersion: 1 }] },
+      extraction: {
+        decompositionId: "decomposition:K-A", decompositionHash: "7".repeat(64), analysisVersion: 6, sourceSnapshotVersion: 7, generatedBy: "local_deterministic_semantic_extraction", confirmationPolicy: "machine_candidates_require_author_confirmation",
+        claim: { object: reference("proposition:K-A", "proposition", 3), state: "established", candidates: [{ candidateId: "candidate:claim:K-A", text: "The proposed method improves traceable manuscript analysis under the reported conditions.", sourceLabel: "Abstract", sourceFragmentId: "fragment:abstract", modality: "text", confidencePercent: 91, authorConfirmed: true }] },
+        scope: { object: reference("scope:K-A", "scope", 3), state: "established", candidates: [{ candidateId: "candidate:scope:K-A", text: "The claim applies to the evaluated academic manuscript corpus.", sourceLabel: "Methods", sourceFragmentId: "fragment:methods:1", modality: "text", confidencePercent: 86, authorConfirmed: true }] },
+        method: { object: bodies[0].method, state: "established", candidates: [{ candidateId: "candidate:method:K-A", text: "The study uses a deterministic extraction and comparison pipeline.", sourceLabel: "Methods", sourceFragmentId: "fragment:methods:2", modality: "text", confidencePercent: 88, authorConfirmed: true }] },
+        result: { object: reference("result:K-A", "result", 2), state: "established", candidates: [{ candidateId: "candidate:result:K-A", text: "The pipeline reports improved traceability in the synthetic evaluation.", sourceLabel: "Results", sourceFragmentId: "fragment:results:1", modality: "text", confidencePercent: 89, authorConfirmed: true }] },
+        evidence: { object: reference("evidence:K-A", "evidence", 2), state: "established", candidates: [{ candidateId: "candidate:evidence:K-A", text: "Reported measurements support the primary claim within the stated scope.", sourceLabel: "Table 1", sourceFragmentId: "fragment:table:1", modality: "table", confidencePercent: 87, authorConfirmed: true }] },
+      },
       serviceArchitecture: {
         identityAndVersion: { knowledgeBody: bodies[0].body, currentSnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7), sourceArtifact: reference("artifact:K-A", "artifact_version", 3), creatorProvenance: reference("provenance:K-A", "provenance", 2), lifecycleStatus: "active", supersedes: null, immutableHistory: true },
         knowledgeBoundaryAndEvidence: { claims: [bodies[0].claim], scope: reference("scope:K-A", "scope", 3), method: bodies[0].method, result: reference("result:K-A", "result", 2), evidence: reference("evidence:K-A", "evidence", 2), evidenceRelation: reference("evidence-relation:K-A", "evidence_relation", 2), sourceAnchor: bodies[0].sourceAnchor, knownLimitations: [], unverifiedObjects: [] },
@@ -757,11 +769,13 @@ describe("App", () => {
     const spatialMap = screen.getByRole("img", { name: /中心是 Claim v3 十二面体/ });
     expect(spatialMap.querySelector(".claim-dodecahedron")).toBeInTheDocument();
     expect(spatialMap.querySelectorAll(".dodeca-edge")).toHaveLength(30);
-    expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3知识核心 · 边界受限");
+    expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3作者已确认");
     expect(spatialMap.querySelectorAll(".service-layer-node")).toHaveLength(5);
     expect(spatialMap).toHaveTextContent("身份与版本S7Artifact v3 · 稳定 ID");
     expect(spatialMap).toHaveTextContent("能力契约v1 · 1输入 · 输出 · 前置 · 拒绝");
     expect(spatialMap).toHaveTextContent("验证、权利与信誉Reputation · v4AIReview v2 · 历史 v1");
+    expect(screen.getByRole("heading", { name: "知识摘要与来源" })).toBeVisible();
+    expect(screen.getAllByText("The proposed method improves traceable manuscript analysis under the reported conditions.").length).toBeGreaterThanOrEqual(2);
 
     await user.click(screen.getByRole("tab", { name: "2. 两体关联" }));
     expect(screen.getByRole("img", { name: /2 个保持边界的知识体/ })).toBeVisible();

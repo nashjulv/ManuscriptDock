@@ -267,7 +267,15 @@ ManuscriptDock 当前不保存期刊账号，也不代替作者点击最终提�
 
 ## 12. 第八步：固化学术知识体
 
-完成投稿登记后，选择主要学科。当前分类完全由作者确认，使用
+完成投稿登记后，先逐条审核本机分解出的 Claim、Scope、Method、Result 与 Evidence。
+每条候选必须选择“纳入知识体”或“排除”：
+
+- 纳入项在整组审核确认后从 `candidate` 升级为 `established`；
+- 排除项保留来源与审核决定，但不会显示为作者确认的知识；
+- 候选缺失的要素保持 `pending`，应用不会用占位内容补齐；
+- 未完成全部候选决定或未勾选作者审核声明时，不能固化知识体。
+
+随后选择主要学科。当前分类完全由作者确认，使用
 `ManuscriptDock Discipline Index v1.0`；系统不会根据标题或摘要自动替作者决定。
 
 点击固化后，应用创建不可变知识体快照，并显示：
@@ -278,6 +286,10 @@ ManuscriptDock 当前不保存期刊账号，也不代替作者点击最终提�
 - ArtifactVersion、Claim、Scope、Method、Result、EvidenceRelation、SourceAnchor、
   Provenance、AIReviewReport 和 KnowledgeBodySnapshot 的版本状态；
 - 身份与版本、知识边界与证据、能力契约、交互运行时、验证权利与信誉五部分架构。
+
+空间图的 Claim 十二面体上方显示当前 Claim 摘要；图下方的“知识摘要与来源”逐项展示
+Claim、Scope、Method、Result、Evidence 的实际文本摘要、确认状态、来源片段和置信度。
+这些文字直接来自当前分解资产，不是图例占位文案。
 
 当前 `AIReviewReport` 可以为空。未来 PWC 评审形成新审核版本时，知识体快照必须引用具体
 版本，不会悄悄覆盖历史。

@@ -5,11 +5,12 @@ use manuscript_core::{
     AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, InstitutionRuleEvidence,
     InstitutionRuleStatus, JournalMatchPreferences, JournalRecommendationProfile,
     JournalRecommendationProfileInput, JournalRecommendationRun, KnowledgeBodyRecord,
-    KnowledgeDialogueLedger, KnowledgeInquiryStance, KnowledgeInquiryTarget, LocalAttestation,
-    ManuscriptSelection, ReadinessEvaluation, RevisionApplication, RevisionChangeInput,
-    RevisionDraft, RulePackCatalog, StructureAnalysis, SubmissionElementCatalog, SubmissionExport,
-    SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, WorkspaceCatalog,
-    WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
+    KnowledgeCandidateDecision, KnowledgeDialogueLedger, KnowledgeInquiryStance,
+    KnowledgeInquiryTarget, LocalAttestation, ManuscriptSelection, ReadinessEvaluation,
+    RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
+    SubmissionElementCatalog, SubmissionExport, SubmissionRecord, VersionComparison,
+    VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCreation, WorkspaceLifecycle,
+    WorkspaceStore,
 };
 use model_service::{ModelSettingsSummary, ModelSlotInput};
 use serde::{Deserialize, Serialize};
@@ -267,11 +268,18 @@ async fn record_manual_submission(
 async fn finalize_knowledge_body(
     workspace_id: String,
     discipline_code: String,
+    decisions: Vec<KnowledgeCandidateDecision>,
+    author_confirmed: bool,
     app: AppHandle,
 ) -> Result<KnowledgeBodyRecord, String> {
     let root = workspace_root(&app)?;
     WorkspaceStore::new(root)
-        .finalize_knowledge_body(&workspace_id, &discipline_code)
+        .finalize_knowledge_body(
+            &workspace_id,
+            &discipline_code,
+            &decisions,
+            author_confirmed,
+        )
         .map_err(|error| error.to_string())
 }
 

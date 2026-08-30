@@ -12,9 +12,9 @@ use crate::{
         JOURNAL_PROFILE_SCHEMA_VERSION,
     },
     knowledge::{
-        discipline_catalog_item, local_knowledge_body_snapshot, AcademicKnowledgeBodySnapshot,
-        DisciplineClassification, KnowledgeBodyError, DISCIPLINE_INDEX_SCHEME,
-        DISCIPLINE_INDEX_VERSION,
+        apply_candidate_decisions, discipline_catalog_item, local_knowledge_body_snapshot,
+        AcademicKnowledgeBodySnapshot, DisciplineClassification, KnowledgeBodyError,
+        KnowledgeCandidateDecision, DISCIPLINE_INDEX_SCHEME, DISCIPLINE_INDEX_VERSION,
     },
     readiness::{
         evaluate_readiness, render_readiness_html, ReadinessError, READINESS_REPORT_VERSION,
@@ -1624,7 +1624,12 @@ impl WorkspaceStore {
         &self,
         workspace_id: &str,
         discipline_code: &str,
+        decisions: &[KnowledgeCandidateDecision],
+        author_confirmed: bool,
     ) -> Result<KnowledgeBodyRecord, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
         let discipline = discipline_catalog_item(discipline_code.trim())
             .ok_or(WorkspaceError::InvalidDisciplineClassification)?;
         let lifecycle = self.lifecycle(workspace_id)?;
@@ -1645,7 +1650,9 @@ impl WorkspaceStore {
                 read_current_decomposition(&workspace_root, &manifest.workspace)?
             }
         };
-        let snapshot = local_knowledge_body_snapshot(&manifest.workspace, decomposition.as_ref());
+        let mut snapshot =
+            local_knowledge_body_snapshot(&manifest.workspace, decomposition.as_ref());
+        apply_candidate_decisions(&mut snapshot, decisions)?;
         snapshot.validate()?;
         if let Some(existing_record) = &existing {
             if existing_record
@@ -2859,10 +2866,10 @@ mod tests {
         WorkspaceError, WorkspaceStore,
     };
     use crate::{
-        InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
-        JournalRecommendationProfileInput, KnowledgeInquiryStance, KnowledgeInquiryTarget,
-        ManuscriptPurpose, ReadinessOutcome, RevisionApplication, RevisionChangeInput,
-        RevisionFieldKind,
+        ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
+        JournalRecommendationProfileInput, KnowledgeBodyError, KnowledgeCandidateDecision,
+        KnowledgeInquiryStance, KnowledgeInquiryTarget, ManuscriptPurpose, ReadinessOutcome,
+        RevisionApplication, RevisionChangeInput, RevisionFieldKind,
     };
     use std::{
         fs::{self, File},
@@ -3585,17 +3592,74 @@ Synthetic method.",
                 true,
             )
             .unwrap();
+        let candidate_decisions = store
+            .knowledge_body_snapshot(&workspace.id)
+            .unwrap()
+            .extraction
+            .unwrap()
+            .all_candidates()
+            .map(|candidate| KnowledgeCandidateDecision {
+                candidate_id: candidate.candidate_id.clone(),
+                included: true,
+            })
+            .collect::<Vec<_>>();
+        assert!(!candidate_decisions.is_empty());
         assert!(matches!(
-            store.finalize_knowledge_body(&workspace.id, "unknown-discipline"),
+            store.finalize_knowledge_body(
+                &workspace.id,
+                "computer_information_sciences",
+                &candidate_decisions,
+                false,
+            ),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+        assert!(matches!(
+            store.finalize_knowledge_body(
+                &workspace.id,
+                "computer_information_sciences",
+                &candidate_decisions[..candidate_decisions.len() - 1],
+                true,
+            ),
+            Err(WorkspaceError::Knowledge(
+                KnowledgeBodyError::InvalidCandidateReview
+            ))
+        ));
+        assert!(matches!(
+            store.finalize_knowledge_body(
+                &workspace.id,
+                "unknown-discipline",
+                &candidate_decisions,
+                true,
+            ),
             Err(WorkspaceError::InvalidDisciplineClassification)
         ));
         let knowledge = store
-            .finalize_knowledge_body(&workspace.id, "computer_information_sciences")
+            .finalize_knowledge_body(
+                &workspace.id,
+                "computer_information_sciences",
+                &candidate_decisions,
+                true,
+            )
             .unwrap();
         assert_eq!(knowledge.attestation_id, attestation.attestation_id);
         assert_eq!(knowledge.submission_id, submission.submission_id);
         assert_eq!(knowledge.snapshot.manuscript.version, 1);
         let extraction = knowledge.snapshot.extraction.as_ref().unwrap();
+        for element in [
+            &extraction.claim,
+            &extraction.scope,
+            &extraction.method,
+            &extraction.result,
+            &extraction.evidence,
+        ] {
+            if !element.candidates.is_empty() {
+                assert_eq!(element.state, ElementState::Established);
+                assert!(element
+                    .candidates
+                    .iter()
+                    .all(|candidate| candidate.author_confirmed));
+            }
+        }
         let exported_decomposition: DecompositionManifest =
             read_json(&package_root.join("decomposition-manifest.json")).unwrap();
         let exported_package_manifest: serde_json::Value =
@@ -3690,7 +3754,12 @@ Synthetic method.",
             .contains("完整性验证失败"));
 
         let reclassified = store
-            .finalize_knowledge_body(&workspace.id, "engineering_technology")
+            .finalize_knowledge_body(
+                &workspace.id,
+                "engineering_technology",
+                &candidate_decisions,
+                true,
+            )
             .unwrap();
         let reclassified_assignment = reclassified.discipline_classification.as_ref().unwrap();
         assert_eq!(

@@ -135,6 +135,10 @@ EvidenceRelation 和 SourceAnchor，并显式保存已知限制与未验证对�
 - Runtime 使用虚线，表示可替换且不属于知识本体；
 - Reputation 使用点线和双边界，表示它属于知识体外部状态但独立于固定内容演进；
 - 每个星区在物件最上层显示名称，其下显示版本和状态；颜色不是唯一编码；
+- Claim 核心上方显示当前分解得到的 Claim 摘要；空间图下方提供 Claim、Scope、Method、
+  Result、Evidence 五项可读图例，逐项给出摘要、候选/已确认状态、来源片段和置信度；
+- 图例只能读取同一 `DecompositionManifest` 的真实语义候选，不得用字段名或版本号冒充
+  论文知识；
 - 减少动态模式固定十二面体视角，屏幕阅读器获得完整的五部分等价描述。
 
 两体与关联网络仍使用一等声明对象连接独立知识体，不因为单体内部重组而改变
@@ -143,8 +147,10 @@ ReproductionAssertion、AlignmentAssertion、VersionRelation 和 ClassificationA
 
 ## 4. 兼容与真实性边界
 
-- 新建快照采用 schema v2，并必须包含五部分架构；
+- 新建快照采用 schema v3，并必须包含五部分架构和可选的统一分解层；
 - 既有 schema v1 快照仍可读取和校验，不会因升级失效；
+- 机器候选必须由作者逐项决定“纳入”或“排除”；后端校验决定集合与当前分解候选完全
+  一致，只有纳入项进入 `established`，审核决定随知识体哈希固化；
 - 当前 `AIReviewReport` 默认缺省，不用确定性检查伪装专业评审；
 - 当前 `ReputationRecord v0` 表示尚未建立外部信誉记录；
 - 方法适用性检查处于 `planned`，在 Scope 和 Method 未确认前必须拒绝；

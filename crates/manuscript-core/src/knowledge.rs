@@ -3,7 +3,11 @@ use crate::{
     workspace::WorkspaceSummary,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 3;
 pub const DISCIPLINE_INDEX_SCHEME: &str = "ManuscriptDock Discipline Index";
@@ -167,6 +171,13 @@ pub struct KnowledgeCandidateContent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct KnowledgeCandidateDecision {
+    pub candidate_id: String,
+    pub included: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtractedKnowledgeElement {
     pub object: VersionedObjectReference,
     pub state: ElementState,
@@ -187,6 +198,20 @@ pub struct KnowledgeExtractionLayer {
     pub method: ExtractedKnowledgeElement,
     pub result: ExtractedKnowledgeElement,
     pub evidence: ExtractedKnowledgeElement,
+}
+
+impl KnowledgeExtractionLayer {
+    pub fn all_candidates(&self) -> impl Iterator<Item = &KnowledgeCandidateContent> {
+        [
+            &self.claim,
+            &self.scope,
+            &self.method,
+            &self.result,
+            &self.evidence,
+        ]
+        .into_iter()
+        .flat_map(|element| element.candidates.iter())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -536,10 +561,19 @@ impl AcademicKnowledgeBodySnapshot {
                 || extraction.generated_by.trim().is_empty()
                 || extraction.confirmation_policy.trim().is_empty()
                 || candidate_elements.iter().any(|(element, expected)| {
+                    let expected_state = if element.candidates.is_empty() {
+                        ElementState::Pending
+                    } else if element
+                        .candidates
+                        .iter()
+                        .any(|candidate| candidate.author_confirmed)
+                    {
+                        ElementState::Established
+                    } else {
+                        ElementState::Candidate
+                    };
                     element.object != **expected
-                        || (element.candidates.is_empty() && element.state != ElementState::Pending)
-                        || (!element.candidates.is_empty()
-                            && element.state == ElementState::Pending)
+                        || element.state != expected_state
                         || element.candidates.iter().any(|candidate| {
                             candidate.candidate_id.trim().is_empty()
                                 || candidate.text.trim().is_empty()
@@ -547,6 +581,9 @@ impl AcademicKnowledgeBodySnapshot {
                                 || candidate.confidence_percent > 100
                         })
                 })
+                || extraction.claim.state != self.claim.proposition.state
+                || extraction.scope.state != self.claim.conditions.state
+                || extraction.evidence.state != self.claim.evidence.state
             {
                 return Err(KnowledgeBodyError::InvalidSnapshot);
             }
@@ -646,6 +683,7 @@ pub enum KnowledgeBodyError {
     UnresolvedAiReviewReference,
     InvalidServiceArchitecture,
     InvalidNetworkAssertion,
+    InvalidCandidateReview,
 }
 
 impl fmt::Display for KnowledgeBodyError {
@@ -662,11 +700,117 @@ impl fmt::Display for KnowledgeBodyError {
             Self::InvalidNetworkAssertion => {
                 write!(formatter, "关联知识体声明缺少成立依据或协议类型无效")
             }
+            Self::InvalidCandidateReview => {
+                write!(
+                    formatter,
+                    "知识候选审核必须逐条选择纳入或排除，且必须对应当前论文分解"
+                )
+            }
         }
     }
 }
 
 impl Error for KnowledgeBodyError {}
+
+pub fn apply_candidate_decisions(
+    snapshot: &mut AcademicKnowledgeBodySnapshot,
+    decisions: &[KnowledgeCandidateDecision],
+) -> Result<(), KnowledgeBodyError> {
+    let extraction = snapshot
+        .extraction
+        .as_mut()
+        .ok_or(KnowledgeBodyError::InvalidCandidateReview)?;
+    let decision_map = decisions
+        .iter()
+        .map(|decision| (decision.candidate_id.as_str(), decision.included))
+        .collect::<BTreeMap<_, _>>();
+    if decision_map.len() != decisions.len() {
+        return Err(KnowledgeBodyError::InvalidCandidateReview);
+    }
+
+    let expected_ids = [
+        &extraction.claim,
+        &extraction.scope,
+        &extraction.method,
+        &extraction.result,
+        &extraction.evidence,
+    ]
+    .into_iter()
+    .flat_map(|element| {
+        element
+            .candidates
+            .iter()
+            .map(|candidate| candidate.candidate_id.as_str())
+    })
+    .collect::<BTreeSet<_>>();
+    if expected_ids.len() != decision_map.len()
+        || expected_ids
+            .iter()
+            .any(|candidate_id| !decision_map.contains_key(candidate_id))
+    {
+        return Err(KnowledgeBodyError::InvalidCandidateReview);
+    }
+
+    fn apply_element(element: &mut ExtractedKnowledgeElement, decision_map: &BTreeMap<&str, bool>) {
+        for candidate in &mut element.candidates {
+            candidate.author_confirmed = decision_map
+                .get(candidate.candidate_id.as_str())
+                .copied()
+                .unwrap_or(false);
+        }
+        element.state = if element.candidates.is_empty() {
+            ElementState::Pending
+        } else if element
+            .candidates
+            .iter()
+            .any(|candidate| candidate.author_confirmed)
+        {
+            ElementState::Established
+        } else {
+            ElementState::Candidate
+        };
+    }
+
+    apply_element(&mut extraction.claim, &decision_map);
+    apply_element(&mut extraction.scope, &decision_map);
+    apply_element(&mut extraction.method, &decision_map);
+    apply_element(&mut extraction.result, &decision_map);
+    apply_element(&mut extraction.evidence, &decision_map);
+    snapshot.claim.proposition.state = extraction.claim.state;
+    snapshot.claim.conditions.state = extraction.scope.state;
+    snapshot.claim.evidence.state = extraction.evidence.state;
+    snapshot.claim.status.state = ElementState::Established;
+
+    if let Some(architecture) = snapshot.service_architecture.as_mut() {
+        architecture
+            .knowledge_boundary_and_evidence
+            .known_limitations
+            .retain(|limitation| {
+                limitation != "locally_extracted_semantic_candidates_require_author_confirmation"
+            });
+        architecture
+            .knowledge_boundary_and_evidence
+            .known_limitations
+            .push("author_review_completed_for_current_decomposition".to_owned());
+        architecture
+            .knowledge_boundary_and_evidence
+            .unverified_objects = [
+            (&extraction.scope, snapshot.objects.scope.clone()),
+            (&extraction.method, snapshot.objects.method.clone()),
+            (&extraction.result, snapshot.objects.result.clone()),
+            (
+                &extraction.evidence,
+                snapshot.claim.evidence.reference.clone(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(element, object)| {
+            (element.state != ElementState::Established).then_some(object)
+        })
+        .collect();
+    }
+    snapshot.validate()
+}
 
 fn extracted_element(
     knowledge_body_id: &str,

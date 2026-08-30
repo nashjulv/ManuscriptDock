@@ -1139,3 +1139,27 @@ Local Rust verification used the installed stable toolchain, which is exactly Ru
 - The candidate review surface follows the existing PWC-derived ManuscriptDock design system:
   progressive disclosure, explicit text states rather than color-only meaning, readable metadata,
   and a one-column compact layout below 720 px.
+
+## 2026-08-31 — Author-confirmed semantic knowledge and readable spatial legend
+
+### Delivered
+
+- Added a real item-level author review flow for every Claim, Scope, Method, Result, and Evidence
+  candidate. Each item must be explicitly included or excluded before finalization, followed by a
+  separate author attestation.
+- Made Rust reject missing, duplicate, stale, or incomplete candidate decisions. Included candidates
+  become `established`; excluded candidates remain non-established, and all decisions are covered by
+  the immutable knowledge-body hash.
+- Replaced the version-only spatial legend with manuscript-specific content: the Claim summary sits
+  above the dodecahedron, while a traceable five-item legend shows semantic summaries, confirmation
+  state, source fragment, and confidence.
+- Confirmed that the stale desktop logo came from the older `/Applications/ManuscriptDock.app`
+  installation rather than the repository assets; the installed app must be replaced by the newly
+  bundled application to update the macOS Dock icon.
+
+### Verification
+
+- Frontend coverage exercises include/exclude controls, the separate author confirmation, finalization
+  payload, readable spatial summaries, and confirmed states.
+- Core lifecycle coverage rejects incomplete reviews and verifies that included candidates persist as
+  `established` with `authorConfirmed: true`.
