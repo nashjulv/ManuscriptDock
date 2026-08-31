@@ -1,4 +1,4 @@
-# ManuscriptDock 文档
+# 投稿舱 ManuscriptDock V0.12 文档
 
 ## 使用指南
 
@@ -7,6 +7,7 @@
 
 ## 产品设计
 
+- [版本规则](versioning-policy.md)：当前版本、每次更新递增 `0.01`、界面显示与安装包 SemVer 的同步约定。
 - [产品设计总纲](product-design-overview.md)：品牌、用户、价值主张、信息架构和 MVP 边界。
 - [投稿规则系统](submission-rule-system.md)：统一论文模型、分层规则包、覆盖等级和维护机制。
 - [内置出版标准目录](publication-standards-catalog.md)：首批中国、国际、出版商和研究报告规则及其真实覆盖边界。

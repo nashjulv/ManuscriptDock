@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import manuscriptDockLogo from "./assets/manuscriptdock-logo.svg";
+import { PRODUCT_VERSION } from "./version";
 import { I18nProvider, localize, localizeBackendText, useI18n, type Locale } from "./i18n";
 
 type ManuscriptKind = "word" | "pdf" | "latex";
@@ -1030,6 +1031,7 @@ function ManuscriptDockApp() {
                 <h2 id="brand-statement-title" className="brand-statement-title">
                   <span lang="zh-CN">投稿舱</span>
                   <span lang="en">ManuscriptDock</span>
+                  <span className="brand-version">{PRODUCT_VERSION}</span>
                 </h2>
                 <div className="brand-positioning">
                   <p lang="zh-CN">本地论文投稿准备工作台</p>
@@ -1134,7 +1136,7 @@ function ManuscriptDockApp() {
 
 function ProductBar({ manuscriptName, onNewManuscript, isSelecting = false }: { manuscriptName?: string; onNewManuscript?: () => void; isSelecting?: boolean }) {
   const { locale, setLocale, text } = useI18n();
-  return <header className="product-bar"><div className="brand" aria-label="投稿舱 ManuscriptDock"><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
+  return <header className="product-bar"><div className="brand" aria-label={`投稿舱 ManuscriptDock ${PRODUCT_VERSION}`}><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span><span className="brand-version">{PRODUCT_VERSION}</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
 }
 
 function SubmissionGuide() {

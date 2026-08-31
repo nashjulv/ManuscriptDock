@@ -44,6 +44,7 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-copy { min-width: 0; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
 .brand-cn { color: var(--text); font-size: 15px; }
 .brand-name { color: var(--text-secondary); font-size: 14px; letter-spacing: -.01em; }
+.brand-version { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .current-manuscript { min-width: 0; margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 13px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .bar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .language-switch { height: 30px; display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--border-strong); border-radius: 6px; }
@@ -78,6 +79,7 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-statement-title { display: flex; align-items: baseline; gap: 10px; margin: 0; color: var(--text); }
 .brand-statement-title [lang="zh-CN"] { font-size: 27px; line-height: 38px; letter-spacing: .02em; }
 .brand-statement-title [lang="en"] { color: var(--text-secondary); font-size: 20px; line-height: 30px; letter-spacing: -.01em; }
+.brand-statement-title .brand-version { align-self: center; font-size: 12px; line-height: 22px; }
 .brand-positioning { margin-top: 8px; }
 .brand-positioning p, .brand-slogan p { margin: 0; }
 .brand-positioning [lang="zh-CN"] { color: var(--text-secondary); font-size: 15px; line-height: 23px; }
@@ -660,6 +662,7 @@ h1, h2, h3, p { margin-top: 0; }
   .brand-copy { display: grid; gap: 0; }
   .brand-cn { font-size: 13px; line-height: 15px; }
   .brand-name { font-size: 11px; line-height: 13px; }
+  .brand-copy .brand-version { font-size: 12px; line-height: 14px; }
   .landing-review-layout { grid-template-columns: 42px minmax(0, 1fr); }
   .task-rail { padding-top: 10px; }
   .rail-button { width: 34px; height: 34px; flex-basis: 34px; }
@@ -669,6 +672,7 @@ h1, h2, h3, p { margin-top: 0; }
   .brand-statement-title { align-items: flex-start; flex-direction: column; gap: 0; }
   .brand-statement-title [lang="zh-CN"] { font-size: 24px; line-height: 34px; }
   .brand-statement-title [lang="en"] { font-size: 18px; line-height: 26px; }
+  .brand-statement-title .brand-version { align-self: flex-start; }
   .intake-panel, .recent-section { padding: 12px; }
   .track-grid { grid-template-columns: 1fr; gap: 8px; }
   .track-card { min-height: auto; padding: 16px; }

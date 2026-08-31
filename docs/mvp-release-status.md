@@ -1,4 +1,4 @@
-# ManuscriptDock 0.1.0 开发 MVP 完成状态
+# 投稿舱 ManuscriptDock V0.12 开发 MVP 完成状态
 
 - 状态：M0–M9 开发完成，可用于本机技术与用户流程验证
 - 日期：2026-08-25

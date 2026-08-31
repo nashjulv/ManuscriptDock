@@ -1,5 +1,12 @@
 # ManuscriptDock Development Log
 
+## 2026-08-31 — Prerelease version baseline V0.12
+
+- Established `V0.12` as the current visible product version and `0.12.0` as its SemVer package and installer equivalent.
+- Added the version after the product name in the desktop top bar, landing identity and native window title while preserving the stable application name and bundle identifier for in-place upgrades.
+- Recorded the default prerelease cadence: each tested, user-visible product update increments by `0.01`, retaining two display digits and carrying in base ten.
+- Added a repository-level version policy and future-agent instruction so subsequent updates keep UI, npm, Cargo, Tauri and documentation versions synchronized.
+
 This log records completed feature slices, their trust-boundary implications, and the checks
 run before each commit. It contains no real manuscripts or identifiable review material.
 
