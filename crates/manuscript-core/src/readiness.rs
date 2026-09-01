@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt};
 
 pub const READINESS_REPORT_VERSION: u32 = 2;
-pub const OUTPUT_SNAPSHOT_VERSION: u32 = 1;
+pub const OUTPUT_SNAPSHOT_VERSION: u32 = 2;
 
 const RULE_PACK_PUBLIC_KEYS_HEX: &[&str] = &[
     "a76e0138d7ebdbbaf68323babd34eb50d414da97b925c1598cc708d48464f8b9",
@@ -479,24 +479,26 @@ fn push_unique_string(values: &mut Vec<String>, value: &str) {
 }
 
 pub(crate) fn render_readiness_html(report: &ReadinessReport, manuscript_name: &str) -> String {
-    let outcome = match report.outcome {
-        ReadinessOutcome::Ready => "已具备基础投稿条件",
-        ReadinessOutcome::NeedsAttention => "仍有事项需要处理",
-        ReadinessOutcome::Blocked => "存在阻断项",
+    let (outcome, outcome_en) = match report.outcome {
+        ReadinessOutcome::Ready => ("已具备基础投稿条件", "Basic submission requirements met"),
+        ReadinessOutcome::NeedsAttention => ("仍有事项需要处理", "Items still need attention"),
+        ReadinessOutcome::Blocked => ("存在阻断项", "Blocking issues found"),
     };
     let mut findings = String::new();
     for finding in &report.findings {
-        let status = match finding.status {
-            FindingStatus::Passed => "通过",
-            FindingStatus::Warning => "建议",
-            FindingStatus::Blocked => "阻断",
-            FindingStatus::Confirmation => "作者确认",
+        let (status, status_en) = match finding.status {
+            FindingStatus::Passed => ("通过", "Passed"),
+            FindingStatus::Warning => ("建议", "Suggestion"),
+            FindingStatus::Blocked => ("阻断", "Blocked"),
+            FindingStatus::Confirmation => ("作者确认", "Author confirmation"),
         };
         findings.push_str(&format!(
-            "<li><strong>{}</strong><span>{}</span><p>{}</p><code>{}</code></li>",
+            "<li><strong><span lang=\"zh-CN\">{}</span><span class=\"translation\" lang=\"en\">{}</span></strong><span>{}</span><p><span lang=\"zh-CN\">{}</span><span class=\"translation\" lang=\"en\">{}</span></p><code>{}</code></li>",
             escape_html(status),
+            escape_html(status_en),
             escape_html(&finding.rule_id),
             escape_html(&finding.message),
+            escape_html(&finding.message_en),
             escape_html(&finding.source_location)
         ));
     }
@@ -505,20 +507,29 @@ pub(crate) fn render_readiness_html(report: &ReadinessReport, manuscript_name: &
         .iter()
         .map(|pack| {
             format!(
-                "<li>{} · v{} · 覆盖等级 {} · 来源可信，内容未被篡改</li>",
+                "<li><span lang=\"zh-CN\">{} · v{} · 覆盖等级 {} · 来源可信，内容未被篡改</span><span class=\"translation\" lang=\"en\">{} · v{} · Coverage {} · Trusted source; content integrity verified</span></li>",
                 escape_html(&pack.source_label),
                 escape_html(&pack.version),
-                escape_html(&pack.coverage)
+                escape_html(&pack.coverage),
+                escape_html(&pack.source_label_en),
+                escape_html(&pack.version),
+                escape_html(&pack.coverage),
             )
         })
         .collect::<String>();
 
     format!(
-        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>投稿准备报告</title><style>{}</style></head><body><main><p class=\"eyebrow\">ManuscriptDock · 本地报告</p><h1>{}</h1><p class=\"file\">{}</p><section class=\"summary\"><strong>{}</strong><span>通过 {} · 建议 {} · 阻断 {} · 待确认 {}</span></section><h2>检查明细</h2><ol>{}</ol><h2>规则来源</h2><ul class=\"packs\">{}</ul><footer>源快照 v{} · 内容指纹 {} · 未发生外部传输</footer></main></body></html>",
+        "<!doctype html><html lang=\"mul\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>投稿准备报告 · Submission readiness report</title><style>{}</style></head><body><main><p class=\"eyebrow\"><span lang=\"zh-CN\">ManuscriptDock · 本地报告</span><span class=\"translation\" lang=\"en\">ManuscriptDock · Local report</span></p><h1><span lang=\"zh-CN\">{}</span><span class=\"translation\" lang=\"en\">{}</span></h1><p class=\"file\">{}</p><section class=\"summary\"><strong><span lang=\"zh-CN\">{}</span><span class=\"translation\" lang=\"en\">{}</span></strong><span><span lang=\"zh-CN\">通过 {} · 建议 {} · 阻断 {} · 待确认 {}</span><span class=\"translation\" lang=\"en\">Passed {} · Suggestions {} · Blocked {} · Confirmations {}</span></span></section><h2><span lang=\"zh-CN\">检查明细</span><span class=\"translation\" lang=\"en\">Check details</span></h2><ol>{}</ol><h2><span lang=\"zh-CN\">规则来源</span><span class=\"translation\" lang=\"en\">Rule sources</span></h2><ul class=\"packs\">{}</ul><footer><span lang=\"zh-CN\">源快照 v{} · 内容指纹 {} · 未发生外部传输</span><span class=\"translation\" lang=\"en\">Source snapshot v{} · Content fingerprint {} · No external transmission</span></footer></main></body></html>",
         REPORT_CSS,
         escape_html(outcome),
+        escape_html(outcome_en),
         escape_html(manuscript_name),
         escape_html(outcome),
+        escape_html(outcome_en),
+        report.passed_count,
+        report.warning_count,
+        report.blocked_count,
+        report.confirmation_count,
         report.passed_count,
         report.warning_count,
         report.blocked_count,
@@ -526,7 +537,9 @@ pub(crate) fn render_readiness_html(report: &ReadinessReport, manuscript_name: &
         findings,
         packs,
         report.source_snapshot_version,
-        escape_html(&report.source_content_hash[..12.min(report.source_content_hash.len())])
+        escape_html(&report.source_content_hash[..12.min(report.source_content_hash.len())]),
+        report.source_snapshot_version,
+        escape_html(&report.source_content_hash[..12.min(report.source_content_hash.len())]),
     )
 }
 
@@ -849,7 +862,7 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-const REPORT_CSS: &str = "body{margin:0;background:#f7f7f5;color:#1f2321;font:15px/1.65 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}main{max-width:760px;margin:0 auto;padding:64px 28px}.eyebrow{color:#176b52;font-size:12px;font-weight:700;letter-spacing:.1em}h1{margin:.2em 0;font:500 36px/1.15 Georgia,serif}.file{color:#666c68}.summary{display:flex;justify-content:space-between;gap:20px;margin:28px 0;padding:20px;border:1px solid #dedfdb;border-radius:12px;background:#fff}.summary span{color:#666c68}h2{margin-top:34px;font-size:17px}ol,.packs{padding:0;list-style:none}ol li{display:grid;grid-template-columns:90px 1fr;gap:5px 14px;padding:16px 0;border-top:1px solid #dedfdb}ol li strong{color:#176b52}ol li span{font-size:12px;color:#666c68}ol li p{grid-column:2;margin:0}ol li code{grid-column:2;color:#868c88;font-size:11px}.packs li{padding:7px 0;color:#666c68}footer{margin-top:40px;padding-top:18px;border-top:1px solid #dedfdb;color:#868c88;font-size:11px}@media(max-width:560px){main{padding:36px 18px}.summary{flex-direction:column}ol li{grid-template-columns:1fr}ol li p,ol li code{grid-column:1}}";
+const REPORT_CSS: &str = "body{margin:0;background:#f7f7f5;color:#1f2321;font:15px/1.65 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}main{max-width:760px;margin:0 auto;padding:64px 28px}.translation{display:block;color:#666c68;font-size:.9em}.eyebrow{color:#176b52;font-size:12px;font-weight:700;letter-spacing:.1em}.eyebrow .translation{color:#50806f}h1{margin:.2em 0;font:500 36px/1.15 Georgia,serif}.file{color:#666c68}.summary{display:flex;justify-content:space-between;gap:20px;margin:28px 0;padding:20px;border:1px solid #dedfdb;border-radius:12px;background:#fff}.summary span{color:#666c68}h2{margin-top:34px;font-size:17px}ol,.packs{padding:0;list-style:none}ol li{display:grid;grid-template-columns:110px 1fr;gap:5px 14px;padding:16px 0;border-top:1px solid #dedfdb}ol li strong{color:#176b52}ol li>span{font-size:12px;color:#666c68}ol li p{grid-column:2;margin:0}ol li code{grid-column:2;color:#868c88;font-size:11px}.packs li{padding:7px 0;color:#666c68}footer{margin-top:40px;padding-top:18px;border-top:1px solid #dedfdb;color:#868c88;font-size:11px}@media(max-width:560px){main{padding:36px 18px}.summary{flex-direction:column}ol li{grid-template-columns:1fr}ol li p,ol li code{grid-column:1}}";
 
 #[cfg(test)]
 mod tests {
@@ -1033,6 +1046,8 @@ mod tests {
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("未发生外部传输"));
+        assert!(html.contains("No external transmission"));
+        assert!(html.contains("Submission readiness report"));
     }
 
     fn complete_structure() -> StructureReport {

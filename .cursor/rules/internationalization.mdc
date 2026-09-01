@@ -1,0 +1,15 @@
+---
+description: Review every ManuscriptDock code change for Simplified Chinese and English localization impact.
+globs:
+alwaysApply: true
+---
+
+# Internationalization review
+
+Follow `AGENTS.md`, especially its `Internationalization Review` section, for every new or modified code path.
+
+- Review user-visible React copy, accessible labels, errors, Rust/Tauri messages, generated or exported documents, rule-pack fields, and dynamic data for both `zh-CN` and `en`.
+- Use the existing i18n helpers and paired Chinese/English contract fields. Do not add a one-language user-facing string or assume an unmapped backend string will be translated.
+- Keep user-authored manuscript and quoted source content unchanged while localizing its surrounding interface and provenance labels.
+- Add or update focused tests for both locales when the change is user-visible, then mention the internationalization review outcome in the completion summary.
+- This rule is advisory context for Cursor. Do not add hooks, CI gates, or build blockers unless the user explicitly requests enforcement.

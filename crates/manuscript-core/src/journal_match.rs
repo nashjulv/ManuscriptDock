@@ -2,7 +2,7 @@ use crate::StructureReport;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 3;
+pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 4;
 pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.2";
 pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2025.1";
 pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 2;
@@ -232,7 +232,11 @@ pub struct JournalRecommendation {
     pub name_en: String,
     pub region: JournalRegion,
     pub publisher: String,
+    #[serde(default)]
+    pub publisher_en: String,
     pub rank_system: String,
+    #[serde(default)]
+    pub rank_system_en: String,
     pub rank_tier: String,
     pub overall_fit: u8,
     pub estimated_submission_preparation_days: u32,
@@ -240,6 +244,8 @@ pub struct JournalRecommendation {
     pub institution_eligibility: String,
     pub scores: JournalFitScores,
     pub reasons: Vec<String>,
+    #[serde(default)]
+    pub reasons_en: Vec<String>,
     pub ranking_source_url: String,
     pub homepage_url: String,
     pub open_access_status: String,
@@ -268,6 +274,8 @@ pub struct JournalRecommendationRun {
     pub school_rule_status: String,
     pub institution_directory_status: String,
     pub limitations: Vec<String>,
+    #[serde(default)]
+    pub limitations_en: Vec<String>,
     pub external_transmission: String,
 }
 
@@ -300,6 +308,33 @@ struct ScoreContext<'a> {
 
 const RANK_DOMESTIC: &str = "https://www.ccf.org.cn/ccftjgjxskwml/";
 const RANK_INTERNATIONAL: &str = "https://www.ccf.org.cn/Academic_Evaluation/AI/";
+
+fn publisher_english_label(publisher: &str) -> &str {
+    match publisher {
+        "中国科学院计算技术研究所 / 中国计算机学会" => {
+            "Institute of Computing Technology, Chinese Academy of Sciences / China Computer Federation"
+        }
+        "中国科学院软件研究所 / 中国计算机学会" => {
+            "Institute of Software, Chinese Academy of Sciences / China Computer Federation"
+        }
+        "中国科学院自动化研究所 / 中国自动化学会" => {
+            "Institute of Automation, Chinese Academy of Sciences / Chinese Association of Automation"
+        }
+        "中国中文信息学会 / 中国科学院软件研究所" => {
+            "Chinese Information Processing Society of China / Institute of Software, Chinese Academy of Sciences"
+        }
+        "中国自动化学会 / 国家智能计算机研究开发中心" => {
+            "Chinese Association of Automation / National Research Center for Intelligent Computing Systems"
+        }
+        "中国科学院空天信息创新研究院 / 中国图象图形学学会" => {
+            "Aerospace Information Research Institute, Chinese Academy of Sciences / China Society of Image and Graphics"
+        }
+        "中国人工智能学会 / 哈尔滨工程大学" => {
+            "Chinese Association for Artificial Intelligence / Harbin Engineering University"
+        }
+        _ => publisher,
+    }
+}
 
 const CANDIDATES: &[Candidate] = &[
     Candidate {
@@ -767,6 +802,15 @@ pub fn recommend_journals(
             "当前候选范围仅覆盖内置的计算机与人工智能期刊快照。".into(),
             "机构评价目录只在后台参与资格判断；数据条件未经来源和版本核验时不显示、不推断，也不计入得分。".into(),
         ],
+        limitations_en: vec![
+            "Fit scores describe current submission-preparation suitability, not acceptance probability, and do not replace the latest journal instructions.".into(),
+            "The deadline measures internal preparation time only; it does not predict peer review, acceptance, publication, or indexing dates.".into(),
+            "The author name is stored only for local ownership. Institution rank and adviser reputation are not prestige scores; official institution policy affects eligibility and purpose only.".into(),
+            "Current content readiness is a structural signal, not a score for novelty or scholarly contribution. No top-journal success claim is allowed without a versioned PWC review profile.".into(),
+            "Domestic T1/T2/T3 and international CCF A/B/C are independent catalogs and are not treated as equivalent tiers.".into(),
+            "The current candidate scope covers only the bundled computer-science and artificial-intelligence journal snapshot.".into(),
+            "Institution evaluation directories are used only for backend eligibility. Unverified data conditions are neither shown nor inferred and do not affect scores.".into(),
+        ],
         external_transmission,
     }
 }
@@ -1102,16 +1146,34 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
             threshold - *maturity
         )
     };
+    let readiness_reason_en = if *maturity >= threshold {
+        format!(
+            "structural readiness {} meets the submission-preparation threshold of {} for this tier",
+            maturity, threshold
+        )
+    } else {
+        format!(
+            "structural readiness {} is {} points below the submission-preparation threshold for this tier",
+            maturity,
+            threshold - *maturity
+        )
+    };
     JournalRecommendation {
         id: candidate.id.into(),
         name: candidate.name.into(),
         name_en: candidate.name_en.into(),
         region: candidate.region,
         publisher: candidate.publisher.into(),
+        publisher_en: publisher_english_label(candidate.publisher).into(),
         rank_system: if candidate.region == JournalRegion::Domestic {
             "CCF 中国计算机领域高质量科技期刊分级目录".into()
         } else {
             "CCF 推荐国际学术刊物目录（人工智能）".into()
+        },
+        rank_system_en: if candidate.region == JournalRegion::Domestic {
+            "CCF High-Quality Science and Technology Journal Classification in Computing".into()
+        } else {
+            "CCF Recommended International Academic Venues in Artificial Intelligence".into()
         },
         rank_tier: candidate.tier.into(),
         overall_fit: overall,
@@ -1133,6 +1195,20 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
             ),
             format!("当前稿件完备度适配 {} 分；{}", readiness, readiness_reason),
             format!("目标策略适配 {} 分", target),
+        ],
+        reasons_en: vec![
+            format!("Topic-scope fit: {}", topic_score),
+            format!("Author-specialty fit: {}", specialty),
+            format!("Manuscript-purpose fit: {}", purpose_fit),
+            format!(
+                "Submission-preparation timing fit: {} ({}-day internal plan)",
+                time_feasibility, estimated_submission_preparation_days
+            ),
+            format!(
+                "Current-manuscript readiness fit: {}; {}",
+                readiness, readiness_reason_en
+            ),
+            format!("Target-strategy fit: {}", target),
         ],
         ranking_source_url: source.into(),
         homepage_url: candidate.homepage.into(),
@@ -1301,6 +1377,15 @@ mod tests {
         assert_eq!(run.domestic.len(), 3);
         assert_eq!(run.international.len(), 3);
         assert!(run.domestic.iter().all(|j| j.overall_fit <= 100));
+        assert!(run
+            .domestic
+            .iter()
+            .all(|journal| !journal.publisher_en.contains('中')));
+        assert!(run
+            .domestic
+            .iter()
+            .all(|journal| journal.reasons_en.len() == journal.reasons.len()));
+        assert_eq!(run.limitations_en.len(), run.limitations.len());
     }
     #[test]
     fn author_topic_adjustment_changes_recommendations() {

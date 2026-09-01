@@ -1,5 +1,22 @@
 # ManuscriptDock Development Log
 
+## 2026-09-02 — V0.15 responsive bilingual top bar
+
+- Kept the language switch, local-only status and import-another action on one line in English by
+  preventing top-bar controls from shrinking or wrapping.
+- Fixed the empty manuscript-name grid placeholder so compact desktop windows no longer place the
+  top-bar actions on a hidden second row.
+
+## 2026-09-02 — V0.14 client internationalization completion
+
+- Completed the existing Simplified Chinese and English client localization pass across dynamic
+  system errors, structure warnings, source labels, journal publishers and recommendation reasons.
+- Added operating-system locale initialization, localized page metadata, locale-aware file sizes,
+  language-switch-safe notices, and English-safe fallback behavior for unmapped system messages.
+- Made the exported readiness preview bilingual while preserving manuscript content in its original
+  language, and added project-level internationalization review guidance for Codex, Claude Code and
+  Cursor without mandatory hooks or CI gates.
+
 ## 2026-09-01 — V0.13 local source identity and version visibility
 
 - Added schema v4 `SourceIdentityVersion` to preserve source-declared title, authors, affiliations,

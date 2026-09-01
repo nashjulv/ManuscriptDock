@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { PRODUCT_VERSION } from "./version";
 
 export type Locale = "zh-CN" | "en";
 
@@ -10,6 +11,11 @@ interface I18nValue {
 }
 
 const STORAGE_KEY = "manuscriptdock.locale";
+const PRODUCT_TITLE = `投稿舱 ManuscriptDock ${PRODUCT_VERSION}`;
+const PAGE_DESCRIPTIONS: Record<Locale, string> = {
+  "zh-CN": "ManuscriptDock 投稿舱：本地优先的论文投稿准备工作台",
+  en: "ManuscriptDock: a local-first manuscript submission workspace",
+};
 const I18nContext = createContext<I18nValue | null>(null);
 
 export function localize(locale: Locale, chinese: string, english: string) {
@@ -44,6 +50,7 @@ const BACKEND_ENGLISH: Record<string, string> = {
   "ManuscriptDock 通用论文结构基线": "ManuscriptDock general manuscript-structure baseline",
   "本地选择状态不可用，请重启应用后再试": "The local selection state is unavailable. Restart the app and try again.",
   "该文件选择已失效，请重新选择论文": "This file selection has expired. Select the manuscript again.",
+  "该文件选择已失效，请重新选择修改稿": "This file selection has expired. Select the revised manuscript again.",
   "本地工作区标识无效": "The local workspace identifier is invalid.",
   "未找到需要管理的本地工作区": "The local workspace to manage was not found.",
   "目标位置已存在同一工作区，未移动任何文件": "The destination already contains this workspace; no files were moved.",
@@ -53,47 +60,173 @@ const BACKEND_ENGLISH: Record<string, string> = {
   "新版本必须与当前稿件保持相同文件类型；格式转换应作为投稿输出保存": "A new version must use the same file type as the current manuscript; save format conversions as submission outputs.",
   "版本说明不能超过 200 个字符": "The version note cannot exceed 200 characters.",
   "系统时间无效，无法创建审计记录": "The system time is invalid, so an audit record could not be created.",
+  "系统时间早于 Unix 纪元": "The system clock is earlier than the Unix epoch.",
   "内置规则信任锚无效": "The built-in rule trust anchor is invalid.",
   "所选文件没有可显示的文件名": "The selected file has no displayable filename.",
   "请选择一个论文文件，而不是文件夹": "Select a manuscript file, not a folder.",
   "当前仅支持 DOCX、PDF 和 TEX 格式": "Only DOCX, PDF, and TEX formats are currently supported.",
   "无法打开该文件。请确认文件可访问后重试。": "The file could not be opened. Check that it is accessible and try again.",
+  "最近的本地工作区暂时无法读取": "Recent local workspaces could not be loaded.",
+  "TEX 文件不是有效的 UTF-8 文本": "The TEX file is not valid UTF-8 text.",
+  "PDF 仅提供只读证据；请使用 DOCX 或 TEX 源稿进行结构化修订": "PDF is read-only evidence; use a DOCX or TEX source for structured revision.",
+  "PDF 保持只读；请提供 DOCX 或 TEX 源稿进行结构化修订": "PDF remains read-only; provide a DOCX or TEX source for structured revision.",
+  "DOCX 首轮仅安全回写使用 Title 样式的标题；摘要和关键词继续保留为只读证据": "The first DOCX revision pass can safely write only a title using the Title style; abstract and keywords remain read-only evidence.",
+  "没有检测到字段变化，未创建重复版本": "No field changes were detected, so no duplicate version was created.",
+  "修改后内容与当前版本相同，未创建重复版本": "The revised content matches the current version, so no duplicate version was created.",
+  "请完整填写姓名、学校、专业、论文用途和有效的未来投稿截止日期": "Complete the name, institution, specialty, manuscript purpose, and a valid future submission deadline.",
+  "投稿背景档案不完整或字段格式无效": "The submission context profile is incomplete or contains invalid fields.",
+  "学校要求抽取结果缺少可追溯来源、有效规则版本或合法的分区条件": "The extracted institution policy lacks traceable sources, a valid rule version, or valid partition conditions.",
+  "未找到已保存的投稿背景档案，请先保存后再计算推荐": "No saved submission context profile was found. Save it before calculating recommendations.",
+  "当前论文版本尚未完成投稿检查，请先重新检查": "The current manuscript version has not completed submission checks. Run the checks again.",
+  "需要作者明确确认后才能创建记录": "Explicit author confirmation is required before creating this record.",
+  "投稿目标不能为空，且不能超过 200 个字符": "The submission target is required and cannot exceed 200 characters.",
+  "当前论文版本尚未完成本地存证": "The current manuscript version has not completed local attestation.",
+  "当前论文版本尚未登记投稿记录": "The current manuscript version has no recorded submission.",
+  "请选择有效的学科索引分类后再固化知识体": "Choose a valid discipline classification before finalizing the knowledge body.",
+  "当前论文版本尚未固化知识体，不能建立问答记录": "The current manuscript version has not finalized a knowledge body, so a dialogue record cannot be created.",
+  "知识体问题不能为空，且不能超过 4000 个字符": "The knowledge-body question is required and cannot exceed 4,000 characters.",
+  "未找到当前知识体对应的问题记录": "No question record was found for the current knowledge body.",
+  "模型回答、模型名称和提供方不能为空，且长度必须在限制内": "The model answer, model name, and provider are required and must remain within their length limits.",
+  "请选择可写入的导出文件夹": "Choose a writable export folder.",
+  "目标文件夹中已存在同名投稿包，未覆盖任何文件": "A submission package with the same name already exists in the destination; no files were overwritten.",
+  "知识体快照版本无效": "The knowledge-body snapshot version is invalid.",
+  "AI 审核报告版本链无效": "The AI review report version chain is invalid.",
+  "知识体快照引用的 AI 审核报告版本不存在": "The knowledge-body snapshot references an AI review report version that does not exist.",
+  "知识体五部分服务架构或能力契约无效": "The five-part knowledge-body service architecture or capability contract is invalid.",
+  "关联知识体声明缺少成立依据或协议类型无效": "A related knowledge-body assertion lacks a valid basis or protocol type.",
+  "知识候选审核必须逐条选择纳入或排除，且必须对应当前论文分解": "Every knowledge candidate must be included or excluded and must belong to the current manuscript decomposition.",
+  "尚未配置可用模型，请先在知识体的模型设置中保存主模型或备选模型": "No model is configured. Save a primary or fallback model in the knowledge-body model settings.",
+  "达到输出上限，但没有形成最终回答": "The output limit was reached before a final answer was produced.",
+  "已完成内部推理，但没有形成最终回答": "Internal reasoning completed without producing a final answer.",
+  "返回了空回答": "The model returned an empty answer.",
+  "请求格式未被模型服务接受，请检查模型兼容性": "The model service rejected the request format. Check model compatibility.",
+  "API Key 无效或无权调用该模型，请检查提供方权限": "The API key is invalid or lacks access to this model. Check provider permissions.",
+  "账户余额不足或计费未开通，请检查模型提供方账户余额": "The account has insufficient balance or billing is not enabled. Check the model-provider account.",
+  "未找到对话接口，请检查 API 地址": "The chat endpoint was not found. Check the API base URL.",
+  "请求参数未被模型服务接受，请检查模型名称和接口兼容性": "The model service rejected the request parameters. Check the model name and API compatibility.",
+  "请求频率或账户限额已达到上限，请稍后重试或使用备选模型": "The request or account limit has been reached. Retry later or use a fallback model.",
+  "模型服务暂时故障或繁忙，请稍后重试或使用备选模型": "The model service is temporarily unavailable or busy. Retry later or use a fallback model.",
+  "模型设置必须包含 1 个主模型和 2 个备选模型": "Model settings must contain one primary and two fallback slots.",
+  "模型设置槽位重复或缺失": "Model-setting slots are duplicated or missing.",
+  "模型设置字段超过长度限制": "A model-setting field exceeds its length limit.",
+  "模型 API 地址无效": "The model API base URL is invalid.",
+  "模型 API 地址不能包含账号、密码、查询参数或片段": "The model API base URL cannot contain credentials, query parameters, or a fragment.",
+  "远程模型 API 必须使用 HTTPS；只有本机 localhost 可以使用 HTTP": "Remote model APIs must use HTTPS; only localhost may use HTTP.",
+  "无法生成模型问答地址": "The model chat endpoint could not be constructed.",
+  "模型设置文件格式无效": "The model settings file is invalid.",
+  "模型设置版本暂不受支持": "This model-settings version is not supported.",
+  "需要作者确认本次模型外发后才能提问": "Author confirmation is required before sending this model request.",
+  "当前论文版本尚未固化知识体": "The current manuscript version has not finalized a knowledge body.",
+  "需要作者确认学校名称、学科、论文用途和脱敏规则原文的本次模型外发": "Author confirmation is required before sending the institution, discipline, manuscript purpose, and redacted policy text.",
+  "请粘贴 40–30000 字符的学校正式要求原文": "Paste 40–30,000 characters from the official institution policy.",
+  "学校要求来源必须是有效的 HTTPS 官方页面": "The institution-policy source must be a valid official HTTPS page.",
+  "所提供原文未包含适用于当前学校、专业和论文用途的明确投稿要求": "The supplied text contains no explicit submission requirement applicable to the current institution, specialty, and manuscript purpose.",
+  "模型未返回学校要求 JSON 对象": "The model did not return an institution-policy JSON object.",
+  "模型返回的学校要求 JSON 不完整": "The institution-policy JSON returned by the model is incomplete.",
+  "模型返回的学校要求结构无法校验，请重试或更换模型": "The institution-policy structure returned by the model could not be validated. Retry or use another model.",
 };
 
 const BACKEND_PATTERNS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
-  [/^无法读取所选文件路径：(.+)$/, (match) => `The selected file path could not be read: ${match[1]}`],
-  [/^无法读取所选文件：(.+)$/, (match) => `The selected file could not be read: ${match[1]}`],
-  [/^无法读取本地源快照：(.+)$/, (match) => `The local source snapshot could not be read: ${match[1]}`],
-  [/^DOCX 结构无法解析：(.+)$/, (match) => `The DOCX structure could not be parsed: ${match[1]}`],
-  [/^PDF 结构无法解析：(.+)$/, (match) => `The PDF structure could not be parsed: ${match[1]}`],
+  [/^无法读取所选文件路径：(.+)$/, (match) => `The selected file path could not be read: ${systemDetail(match[1])}`],
+  [/^无法读取所选文件：(.+)$/, (match) => `The selected file could not be read: ${systemDetail(match[1])}`],
+  [/^无法读取本地源快照：(.+)$/, (match) => `The local source snapshot could not be read: ${systemDetail(match[1])}`],
+  [/^无法读取导出文件夹：(.+)$/, (match) => `The export folder could not be read: ${systemDetail(match[1])}`],
+  [/^无法定位本地应用数据目录：(.+)$/, (match) => `The local app-data directory could not be located: ${systemDetail(match[1])}`],
+  [/^无法定位模型设置目录：(.+)$/, (match) => `The model-settings directory could not be located: ${systemDetail(match[1])}`],
+  [/^无法创建模型设置目录：(.+)$/, (match) => `The model-settings directory could not be created: ${systemDetail(match[1])}`],
+  [/^无法读取模型设置：(.+)$/, (match) => `Model settings could not be read: ${systemDetail(match[1])}`],
+  [/^无法编码模型设置：(.+)$/, (match) => `Model settings could not be encoded: ${systemDetail(match[1])}`],
+  [/^无法写入模型设置：(.+)$/, (match) => `Model settings could not be written: ${systemDetail(match[1])}`],
+  [/^无法提交模型设置：(.+)$/, (match) => `Model settings could not be committed: ${systemDetail(match[1])}`],
+  [/^无法初始化模型连接：(.+)$/, (match) => `The model connection could not be initialized: ${systemDetail(match[1])}`],
+  [/^无法从系统凭据库删除 API Key：(.+)$/, (match) => `The API key could not be deleted from the system credential store: ${systemDetail(match[1])}`],
+  [/^无法将 API Key 保存到系统凭据库：(.+)$/, (match) => `The API key could not be saved to the system credential store: ${systemDetail(match[1])}`],
+  [/^无法从系统凭据库读取 (.+) API Key：(.+)$/, (match) => `The ${match[1]} API key could not be read from the system credential store: ${systemDetail(match[2])}`],
+  [/^系统凭据库不可用：(.+)$/, (match) => `The system credential store is unavailable: ${systemDetail(match[1])}`],
+  [/^无法读取系统凭据库状态：(.+)$/, (match) => `The system credential-store status could not be read: ${systemDetail(match[1])}`],
+  [/^无法生成最小知识体投影：(.+)$/, (match) => `The minimal knowledge-body projection could not be generated: ${systemDetail(match[1])}`],
+  [/^无法生成学校要求最小投影：(.+)$/, (match) => `The minimal institution-policy projection could not be generated: ${systemDetail(match[1])}`],
+  [/^DOCX 结构无法解析：(.+)$/, (match) => `The DOCX structure could not be parsed: ${localizeBackendText("en", match[1])}`],
+  [/^PDF 结构无法解析：(.+)$/, (match) => `The PDF structure could not be parsed: ${localizeBackendText("en", match[1])}`],
+  [/^无法生成本地修订稿：(.+)$/, (match) => `The local revision could not be generated: ${systemDetail(match[1])}`],
+  [/^当前稿件中无法安全定位修订字段 (.+)$/, (match) => `The revision field ${match[1]} could not be located safely in the current manuscript.`],
+  [/^修订字段 (.+) 不能为空或超过 20000 个字符$/, (match) => `The revision field ${match[1]} is empty or exceeds 20,000 characters.`],
+  [/^DOCX 无法安全修订：(.+)$/, (match) => `The DOCX file cannot be revised safely: ${localizeBackendText("en", match[1])}`],
   [/^检测到 (\d+) 个页面需要 OCR 或字体解码复核：(.+)；当前版本未执行 OCR$/, (match) => `${match[1]} pages require OCR or font-decoding review: ${match[2]}. OCR was not run in this version.`],
   [/^PDF 文档分类：(.+)（置信度 (.+)%）；已优先执行原生结构提取$/, (match) => `PDF classification: ${match[1]} (${match[2]}% confidence). Native structure extraction was run first.`],
   [/^PDF 文档分类：(.+)；已优先执行原生结构提取$/, (match) => `PDF classification: ${match[1]}. Native structure extraction was run first.`],
   [/^原生表格候选页：(.+)；已优先保留版面结构，不使用文本 OCR 覆盖$/, (match) => `Native table candidates were detected on pages ${match[1]}; layout structure was retained and will not be overwritten by text OCR.`],
   [/^多栏版面候选页：(.+)；已按坐标重排阅读顺序$/, (match) => `Multi-column layout was detected on pages ${match[1]}; reading order was rearranged using coordinates.`],
-  [/^本地工作区写入失败：(.+)$/, (match) => `The local workspace could not be written: ${match[1]}`],
-  [/^本地工作区记录无效：(.+)$/, (match) => `The local workspace record is invalid: ${match[1]}`],
-  [/^无法定位本地应用数据目录：(.+)$/, (match) => `The local app-data directory could not be located: ${match[1]}`],
+  [/^本地工作区写入失败：(.+)$/, (match) => `The local workspace could not be written: ${systemDetail(match[1])}`],
+  [/^本地工作区记录无效：(.+)$/, (match) => `The local workspace record is invalid: ${localizeBackendText("en", match[1])}`],
   [/^规则包 (.+) 的签名验证失败$/, (match) => `Signature verification failed for rule pack ${match[1]}`],
-  [/^投稿规则包无效：(.+)$/, (match) => `The submission rule pack is invalid: ${match[1]}`],
+  [/^投稿规则包无效：(.+)$/, (match) => `The submission rule pack is invalid: ${localizeBackendText("en", match[1])}`],
   [/^工作区 (.+) 的标识不一致，已跳过$/, (match) => `Workspace ${match[1]} has a mismatched identifier and was skipped`],
   [/^工作区 (.+) 无法读取，已跳过$/, (match) => `Workspace ${match[1]} could not be read and was skipped`],
   [/^归档工作区 (.+) 的标识不一致，已跳过$/, (match) => `Archived workspace ${match[1]} has a mismatched identifier and was skipped`],
   [/^归档工作区 (.+) 无法读取，已跳过$/, (match) => `Archived workspace ${match[1]} could not be read and was skipped`],
+  [/^(.+) 已启用，但提供方、地址或模型名称不完整$/, (match) => `${match[1]} is enabled but its provider, URL, or model name is incomplete.`],
   [/^(.+) 已启用，但尚未提供 API Key；请输入 Key 后再保存$/, (match) => `${match[1]} is enabled but has no API key. Enter a key before saving.`],
-  [/^主模型和备选模型均未完成回答：(.+) 账户余额不足或计费未开通，请检查模型提供方账户余额（HTTP 402）$/, (match) => `No configured model completed the answer: ${match[1]} has insufficient balance or billing is not enabled (HTTP 402). Check the provider account balance.`],
-  [/^主模型和备选模型均未完成回答：(.+) API Key 无效或无权调用该模型，请检查提供方权限（HTTP (401|403)）$/, (match) => `No configured model completed the answer: ${match[1]} has an invalid API key or lacks model access (HTTP ${match[2]}). Check provider permissions.`],
-  [/^主模型和备选模型均未完成回答：(.+) 请求频率或账户限额已达到上限，请稍后重试或使用备选模型（HTTP 429）$/, (match) => `No configured model completed the answer: ${match[1]} reached a rate or account limit (HTTP 429). Retry later or use a fallback model.`],
+  [/^主模型和备选模型均未完成回答：(.+)$/, (match) => `No configured model completed the answer: ${localizeBackendText("en", match[1])}`],
+  [/^(primary|fallback_1|fallback_2) 返回了无法识别的响应$/, (match) => `${match[1]} returned an unrecognized response.`],
+  [/^(primary|fallback_1|fallback_2) 连接超时$/, (match) => `${match[1]} timed out.`],
+  [/^(primary|fallback_1|fallback_2) 连接失败$/, (match) => `${match[1]} could not connect.`],
+  [/^(primary|fallback_1|fallback_2) 返回 HTTP (\d+)$/, (match) => `${match[1]} returned HTTP ${match[2]}.`],
   [/^未找到论文版本 v(.+)$/, (match) => `Manuscript version v${match[1]} was not found`],
-  [/^该文件选择已失效，请重新选择修改稿$/, () => "This file selection has expired. Select the revised manuscript again."],
   [/^文件大小为 (.+) 字节，超过 (.+) 字节的本地处理上限$/, (match) => `The file is ${match[1]} bytes, above the local processing limit of ${match[2]} bytes`],
+  [/^主题范围适配 (\d+) 分$/, (match) => `Topic-scope fit: ${match[1]}`],
+  [/^作者专业背景适配 (\d+) 分$/, (match) => `Author-specialty fit: ${match[1]}`],
+  [/^论文用途适配 (\d+) 分$/, (match) => `Manuscript-purpose fit: ${match[1]}`],
+  [/^投稿准备时间适配 (\d+) 分（内部规划 (\d+) 天）$/, (match) => `Submission-preparation timing fit: ${match[1]} (${match[2]}-day internal plan)`],
+  [/^当前稿件完备度适配 (\d+) 分；当前版本结构完备度 (\d+)，达到该层级的投稿准备门槛 (\d+)$/, (match) => `Current-manuscript readiness fit: ${match[1]}; structural readiness ${match[2]} meets the tier threshold of ${match[3]}`],
+  [/^当前稿件完备度适配 (\d+) 分；当前版本结构完备度 (\d+)，距离该层级的投稿准备门槛还差 (\d+)$/, (match) => `Current-manuscript readiness fit: ${match[1]}; structural readiness ${match[2]} is ${match[3]} points below the tier threshold`],
+  [/^目标策略适配 (\d+) 分$/, (match) => `Target-strategy fit: ${match[1]}`],
 ];
 
+const SOURCE_LABEL_ENGLISH: Record<string, string> = {
+  "摘要 / Abstract": "Abstract",
+  "LaTeX 正文": "LaTeX body",
+  "LaTeX 表格环境": "LaTeX table environment",
+  "LaTeX 图片环境": "LaTeX figure environment",
+  "提取文本": "Extracted text",
+  "首页作者单位": "First-page author affiliation",
+  "首页通讯信息": "First-page contact information",
+  "PDF 首页": "PDF first page",
+};
+
+const SOURCE_LABEL_PATTERNS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^PDF Markdown · 行 (\d+)$/, (match) => `PDF Markdown · Line ${match[1]}`],
+  [/^Word 段落 (\d+)$/, (match) => `Word paragraph ${match[1]}`],
+  [/^Word (.+) · 段落 (\d+)$/, (match) => `Word ${match[1]} · Paragraph ${match[2]}`],
+  [/^(.+) · 片段 (\d+)$/, (match) => `${localizeSourceLabel("en", match[1])} · Fragment ${match[2]}`],
+];
+
+function containsChinese(value: string) {
+  return /[\u3400-\u9fff]/u.test(value);
+}
+
+function systemDetail(value: string) {
+  return containsChinese(value) ? "See the local audit record for system details." : value;
+}
+
 export function localizeBackendText(locale: Locale, value: string) {
-  if (locale === "zh-CN") return value;
+  if (locale === "zh-CN" || value.trim() === "") return value;
   const exact = BACKEND_ENGLISH[value];
   if (exact) return exact;
   for (const [pattern, translate] of BACKEND_PATTERNS) {
+    const match = value.match(pattern);
+    if (match) return translate(match);
+  }
+  return containsChinese(value)
+    ? "The operation could not be completed. Switch to Chinese for the original system detail, then retry or review the local audit record."
+    : value;
+}
+
+export function localizeSourceLabel(locale: Locale, value: string) {
+  if (locale === "zh-CN" || value.trim() === "") return value;
+  const exact = SOURCE_LABEL_ENGLISH[value];
+  if (exact) return exact;
+  for (const [pattern, translate] of SOURCE_LABEL_PATTERNS) {
     const match = value.match(pattern);
     if (match) return translate(match);
   }
@@ -102,7 +235,10 @@ export function localizeBackendText(locale: Locale, value: string) {
 
 function initialLocale(): Locale {
   if (typeof window === "undefined") return "zh-CN";
-  return window.localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "zh-CN";
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored === "zh-CN" || stored === "en") return stored;
+  const preferred = window.navigator.languages?.[0] ?? window.navigator.language;
+  return preferred?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -115,6 +251,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = locale;
+    document.documentElement.dir = "ltr";
+    document.title = PRODUCT_TITLE;
+    document.querySelector('meta[name="description"]')?.setAttribute("content", PAGE_DESCRIPTIONS[locale]);
   }, [locale]);
 
   const value = useMemo(() => ({ locale, setLocale, text }), [locale, setLocale, text]);

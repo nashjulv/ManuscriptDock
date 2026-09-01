@@ -15,6 +15,8 @@ describe("App", () => {
     isTauriMock.mockReset();
     isTauriMock.mockReturnValue(false);
     window.localStorage.clear();
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "zh-CN" });
+    Object.defineProperty(window.navigator, "languages", { configurable: true, value: ["zh-CN"] });
   });
 
   it("explains the local-first import step", () => {
@@ -22,9 +24,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.13")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.13" }));
-    expect(brandStatement.getByText("V0.13")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.15")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.15" }));
+    expect(brandStatement.getByText("V0.15")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -32,6 +34,7 @@ describe("App", () => {
     expect(screen.getByText("你自主决定是否联网、使用模型和外部投送。")).toBeVisible();
     expect(screen.getByRole("button", { name: "选择论文" })).toBeEnabled();
     expect(screen.getByText("没有文件会在此阶段上传")).toBeVisible();
+    expect(container.querySelector(".product-bar > .current-manuscript")).toHaveAttribute("aria-hidden", "true");
     const navigationIcons = within(screen.getByRole("navigation", { name: "工作台导航" }))
       .getAllByRole("button")
       .map((button) => button.querySelector("svg")?.innerHTML);
@@ -159,6 +162,7 @@ describe("App", () => {
 
   it("recovers recent local workspaces when running inside Tauri", async () => {
     isTauriMock.mockReturnValue(true);
+    const user = userEvent.setup();
     invokeMock.mockResolvedValue({
       workspaces: [
         {
@@ -183,6 +187,15 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "最近工作区" })).toBeVisible();
     expect(screen.getByText("recovered-study.pdf")).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("list_workspaces");
+
+    await user.click(screen.getByRole("button", { name: "打开 recovered-study.pdf" }));
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    const importAnother = await screen.findByRole("button", { name: "Import another" });
+    const actions = importAnother.closest(".bar-actions");
+    expect(actions).not.toBeNull();
+    expect(within(actions as HTMLElement).getByRole("button", { name: "中文" })).toBeVisible();
+    expect(within(actions as HTMLElement).getByRole("button", { name: "EN" })).toBeVisible();
+    expect(within(actions as HTMLElement).getByText("Local only")).toBeVisible();
   });
 
   it("archives, restores, and confirms permanent deletion for each manuscript workspace", async () => {
@@ -828,13 +841,13 @@ describe("App", () => {
   it("recommends three domestic and three international journals and recalculates after adjustment", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = { id: "journal-workspace", manuscript: { name: "vision-study.tex", extension: "tex", kind: "latex", sizeBytes: 4096, modifiedUnixMs: null }, contentHash: "e".repeat(64), importedUnixMs: Date.UTC(2026, 7, 30), snapshotVersion: 2 };
-    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, estimatedSubmissionPreparationDays: 28, deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", scores: { institutionRules: null, topicScope: 100, specialtyFit: 96, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100, purposeFit: 85, timeFeasibility: 100 }, reasons: ["主题范围适配 100 分"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
+    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "合成学会", publisherEn: "Synthetic Society", rankSystem: "合成目录", rankSystemEn: "Synthetic catalog", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, estimatedSubmissionPreparationDays: 28, deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", scores: { institutionRules: null, topicScope: 100, specialtyFit: 96, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100, purposeFit: 85, timeFeasibility: 100 }, reasons: ["主题范围适配 100 分"], reasonsEn: ["Topic-scope fit: 100"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
     let runCount = 0;
     invokeMock.mockImplementation((command, args) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], archivedWorkspaces: [], warnings: [] });
       if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
       if (command === "save_journal_recommendation_profile") { const profile = (args as { profile: Record<string, string> }).profile; return Promise.resolve({ ...profile, schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount + 1, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }); }
-      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; const recommendationProfile = { authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31", schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }; return Promise.resolve({ schemaVersion: 2, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.1", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, evaluatedUnixMs: Date.UTC(2026,7,30), recommendationProfile, deadlineDaysRemaining: 120, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "official_source_search_required_excluded_from_score", limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
+      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; const recommendationProfile = { authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31", schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }; return Promise.resolve({ schemaVersion: 4, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.1", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, evaluatedUnixMs: Date.UTC(2026,7,30), recommendationProfile, deadlineDaysRemaining: 120, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "official_source_search_required_excluded_from_score", limitations: ["不是录用概率"], limitationsEn: ["Not an acceptance probability"], externalTransmission: "not_performed" }); }
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
@@ -867,5 +880,14 @@ describe("App", () => {
     expect(await screen.findByText(/jmr-2/)).toBeVisible();
     expect(invokeMock).toHaveBeenLastCalledWith("recommend_journals", { workspaceId: workspace.id, profileId: `jmp-${"a".repeat(20)}`, preferences: expect.objectContaining({ topic: "natural_language_processing" }) });
     expect(invokeMock).toHaveBeenCalledWith("save_journal_recommendation_profile", { workspaceId: workspace.id, profile: expect.objectContaining({ authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31" }) });
+
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    const domesticHeading = screen.getByRole("heading", { name: "3 domestic journals" });
+    const domesticGroup = domesticHeading.closest("section");
+    expect(domesticGroup).not.toBeNull();
+    expect(domesticGroup).toHaveTextContent("Synthetic Society");
+    expect(domesticGroup).toHaveTextContent("Topic-scope fit: 100");
+    expect(domesticGroup).not.toHaveTextContent("合成学会");
+    expect(domesticGroup).not.toHaveTextContent("主题范围适配");
   });
 });
