@@ -9,7 +9,7 @@ use std::{
     fmt,
 };
 
-pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 3;
+pub const KNOWLEDGE_BODY_SCHEMA_VERSION: u32 = 4;
 pub const DISCIPLINE_INDEX_SCHEME: &str = "ManuscriptDock Discipline Index";
 pub const DISCIPLINE_INDEX_VERSION: &str = "1.0";
 
@@ -174,6 +174,46 @@ pub struct KnowledgeCandidateContent {
 pub struct KnowledgeCandidateDecision {
     pub candidate_id: String,
     pub included: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationContactKind {
+    Email,
+    Orcid,
+    Correspondence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationContact {
+    pub kind: PublicationContactKind,
+    pub value: String,
+    pub source_label: String,
+    pub source_fragment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceIdentityStatus {
+    AwaitingExtraction,
+    NotDetected,
+    Extracted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceIdentityVersion {
+    pub version: u32,
+    pub title: Option<String>,
+    pub authors: Vec<String>,
+    pub affiliations: Vec<String>,
+    pub contacts: Vec<PublicationContact>,
+    pub source_artifact: VersionedObjectReference,
+    pub status: SourceIdentityStatus,
+    pub disclosure_basis: String,
+    pub local_visibility: String,
+    pub external_model_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -518,6 +558,8 @@ pub struct AcademicKnowledgeBodySnapshot {
     pub ai_review_report: Option<VersionedObjectReference>,
     pub ai_review_history: AiReviewReportHistory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<SourceIdentityVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extraction: Option<KnowledgeExtractionLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_architecture: Option<KnowledgeBodyServiceArchitecture>,
@@ -587,6 +629,31 @@ impl AcademicKnowledgeBodySnapshot {
             {
                 return Err(KnowledgeBodyError::InvalidSnapshot);
             }
+        }
+        match (&self.source_identity, self.schema_version) {
+            (Some(identity), _) => {
+                if identity.version != self.snapshot_version
+                    || identity.source_artifact != self.manuscript
+                    || identity.disclosure_basis != "source_document_declared_metadata"
+                    || identity.local_visibility != "visible_in_local_workspace"
+                    || identity.external_model_policy != "excluded_from_default_model_projection"
+                    || identity
+                        .authors
+                        .iter()
+                        .any(|author| author.trim().is_empty())
+                    || identity
+                        .affiliations
+                        .iter()
+                        .any(|affiliation| affiliation.trim().is_empty())
+                    || identity.contacts.iter().any(|contact| {
+                        contact.value.trim().is_empty() || contact.source_label.trim().is_empty()
+                    })
+                {
+                    return Err(KnowledgeBodyError::InvalidSnapshot);
+                }
+            }
+            (None, 1..=3) => {}
+            (None, _) => return Err(KnowledgeBodyError::InvalidSnapshot),
         }
         self.ai_review_history.validate()?;
         match &self.ai_review_report {
@@ -857,6 +924,237 @@ fn semantic_element_label(element: SemanticElementKind) -> &'static str {
     }
 }
 
+fn source_identity_version(
+    report: Option<&crate::structure::StructureReport>,
+    source_artifact: VersionedObjectReference,
+    version: u32,
+) -> SourceIdentityVersion {
+    let mut affiliations = Vec::new();
+    let mut contacts = Vec::new();
+    if let Some(report) = report {
+        for fragment in report.source_fragments.iter().take(120) {
+            if looks_like_affiliation(&fragment.text)
+                && !report
+                    .authors
+                    .iter()
+                    .any(|author| author.eq_ignore_ascii_case(fragment.text.trim()))
+            {
+                push_unique_case_insensitive(&mut affiliations, &fragment.text);
+            }
+            for email in extract_email_addresses(&fragment.text) {
+                push_unique_contact(
+                    &mut contacts,
+                    PublicationContact {
+                        kind: PublicationContactKind::Email,
+                        value: email,
+                        source_label: fragment.source_label.clone(),
+                        source_fragment_id: Some(fragment.fragment_id.clone()),
+                    },
+                );
+            }
+            for orcid in extract_orcid_identifiers(&fragment.text) {
+                push_unique_contact(
+                    &mut contacts,
+                    PublicationContact {
+                        kind: PublicationContactKind::Orcid,
+                        value: orcid,
+                        source_label: fragment.source_label.clone(),
+                        source_fragment_id: Some(fragment.fragment_id.clone()),
+                    },
+                );
+            }
+            if looks_like_correspondence_line(&fragment.text)
+                && !contacts.iter().any(|contact| {
+                    contact.source_fragment_id.as_deref() == Some(fragment.fragment_id.as_str())
+                })
+            {
+                push_unique_contact(
+                    &mut contacts,
+                    PublicationContact {
+                        kind: PublicationContactKind::Correspondence,
+                        value: bounded_identity_text(&fragment.text, 320),
+                        source_label: fragment.source_label.clone(),
+                        source_fragment_id: Some(fragment.fragment_id.clone()),
+                    },
+                );
+            }
+        }
+    }
+    let title = report.and_then(|report| report.title.clone());
+    let authors = report
+        .map(|report| report.authors.clone())
+        .unwrap_or_default();
+    let status = match report {
+        None => SourceIdentityStatus::AwaitingExtraction,
+        Some(_)
+            if title.is_none()
+                && authors.is_empty()
+                && affiliations.is_empty()
+                && contacts.is_empty() =>
+        {
+            SourceIdentityStatus::NotDetected
+        }
+        Some(_) => SourceIdentityStatus::Extracted,
+    };
+    SourceIdentityVersion {
+        version,
+        title,
+        authors,
+        affiliations,
+        contacts,
+        source_artifact,
+        status,
+        disclosure_basis: "source_document_declared_metadata".to_owned(),
+        local_visibility: "visible_in_local_workspace".to_owned(),
+        external_model_policy: "excluded_from_default_model_projection".to_owned(),
+    }
+}
+
+fn looks_like_affiliation(text: &str) -> bool {
+    let normalized = text.trim();
+    if normalized.chars().count() < 4 || normalized.chars().count() > 320 {
+        return false;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let excluded = [
+        "abstract",
+        "keywords",
+        "references",
+        "摘要",
+        "关键词",
+        "参考文献",
+    ];
+    if excluded.iter().any(|marker| lower.starts_with(marker)) {
+        return false;
+    }
+    [
+        "university",
+        "institute",
+        "department",
+        "school of",
+        "college of",
+        "laboratory",
+        "centre for",
+        "center for",
+        "hospital",
+        "academy",
+        "大学",
+        "学院",
+        "研究院",
+        "研究所",
+        "实验室",
+        "医院",
+        "中心",
+        "学系",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn looks_like_correspondence_line(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "corresponding author",
+        "correspondence:",
+        "contact:",
+        "通讯作者",
+        "通信作者",
+        "联系人",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn extract_email_addresses(text: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut current = String::new();
+    let flush = |current: &mut String, candidates: &mut Vec<String>| {
+        let candidate = current.trim_matches(['.', '-', '_']).to_owned();
+        current.clear();
+        let Some((local, domain)) = candidate.split_once('@') else {
+            return;
+        };
+        if local.is_empty()
+            || domain.is_empty()
+            || domain.contains('@')
+            || !domain.contains('.')
+            || domain.starts_with('.')
+            || domain.ends_with('.')
+        {
+            return;
+        }
+        push_unique_case_insensitive(candidates, &candidate);
+    };
+    for character in text.chars().chain(std::iter::once(' ')) {
+        if character.is_ascii_alphanumeric()
+            || matches!(character, '.' | '_' | '%' | '+' | '-' | '@')
+        {
+            current.push(character);
+        } else if !current.is_empty() {
+            flush(&mut current, &mut candidates);
+        }
+    }
+    candidates
+}
+
+fn extract_orcid_identifiers(text: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    for token in text.split(|character: char| {
+        !(character.is_ascii_alphanumeric() || matches!(character, '-' | '/' | ':' | '.'))
+    }) {
+        let candidate = token
+            .trim_end_matches(['.', '/', ':'])
+            .strip_prefix("https://orcid.org/")
+            .or_else(|| {
+                token
+                    .trim_end_matches(['.', '/', ':'])
+                    .strip_prefix("http://orcid.org/")
+            })
+            .unwrap_or(token.trim_end_matches(['.', '/', ':']));
+        let groups = candidate.split('-').collect::<Vec<_>>();
+        if groups.len() == 4
+            && groups.iter().all(|group| group.len() == 4)
+            && groups[..3]
+                .iter()
+                .all(|group| group.chars().all(|character| character.is_ascii_digit()))
+            && groups[3].chars().enumerate().all(|(index, character)| {
+                character.is_ascii_digit() || (index == 3 && matches!(character, 'X' | 'x'))
+            })
+        {
+            push_unique_case_insensitive(&mut values, &candidate.to_ascii_uppercase());
+        }
+    }
+    values
+}
+
+fn push_unique_case_insensitive(values: &mut Vec<String>, value: &str) {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !normalized.is_empty()
+        && !values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&normalized))
+    {
+        values.push(normalized);
+    }
+}
+
+fn push_unique_contact(contacts: &mut Vec<PublicationContact>, contact: PublicationContact) {
+    if !contacts.iter().any(|existing| {
+        existing.kind == contact.kind && existing.value.eq_ignore_ascii_case(&contact.value)
+    }) {
+        contacts.push(contact);
+    }
+}
+
+fn bounded_identity_text(text: &str, maximum_chars: usize) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= maximum_chars {
+        normalized
+    } else {
+        normalized.chars().take(maximum_chars).collect::<String>() + "…"
+    }
+}
+
 pub fn local_knowledge_body_snapshot(
     workspace: &WorkspaceSummary,
     decomposition: Option<&DecompositionManifest>,
@@ -948,6 +1246,11 @@ pub fn local_knowledge_body_snapshot(
     let snapshot_reference = object(
         "snapshot:current",
         KnowledgeObjectType::KnowledgeBodySnapshot,
+        workspace.snapshot_version,
+    );
+    let source_identity = source_identity_version(
+        structure_report,
+        artifact.clone(),
         workspace.snapshot_version,
     );
     let extraction = structure_report
@@ -1052,6 +1355,7 @@ pub fn local_knowledge_body_snapshot(
             current_version: None,
             versions: Vec::new(),
         },
+        source_identity: Some(source_identity),
         extraction,
         service_architecture: Some(KnowledgeBodyServiceArchitecture {
             identity_and_version: IdentityVersionLayer {
@@ -1204,7 +1508,10 @@ pub fn local_knowledge_body_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ManuscriptKind, ManuscriptSummary};
+    use crate::{
+        AnalysisQuality, ExtractedSourceFragment, ExtractionCoverage, ManuscriptKind,
+        ManuscriptSummary, SourceModality, StructureReport,
+    };
 
     fn workspace() -> WorkspaceSummary {
         WorkspaceSummary {
@@ -1323,6 +1630,10 @@ mod tests {
         assert_eq!(snapshot.objects.scope.version, 0);
         assert_eq!(snapshot.objects.provenance.version, 1);
         assert_eq!(snapshot.objects.knowledge_body_snapshot.version, 3);
+        let identity = snapshot.source_identity.as_ref().unwrap();
+        assert_eq!(identity.status, SourceIdentityStatus::AwaitingExtraction);
+        assert_eq!(identity.source_artifact, snapshot.manuscript);
+        assert_eq!(identity.local_visibility, "visible_in_local_workspace");
         let architecture = snapshot.service_architecture.unwrap();
         assert_eq!(architecture.capability_contracts.len(), 3);
         assert_eq!(
@@ -1340,6 +1651,78 @@ mod tests {
                 .reputation_record
                 .version,
             0
+        );
+    }
+
+    #[test]
+    fn preserves_source_declared_identity_and_contacts_in_the_local_snapshot() {
+        let artifact = VersionedObjectReference {
+            object_id: "kb:synthetic:artifact:manuscript".to_owned(),
+            object_type: KnowledgeObjectType::ArtifactVersion,
+            version: 3,
+        };
+        let report = StructureReport {
+            analysis_version: 6,
+            workspace_id: workspace().id,
+            source_content_hash: "a".repeat(64),
+            source_snapshot_version: 3,
+            quality: AnalysisQuality::Complete,
+            title: Some("Traceable Identity Study".to_owned()),
+            authors: vec!["Ada Author".to_owned(), "Ben Researcher".to_owned()],
+            abstract_present: true,
+            abstract_text: Some("We propose a synthetic method.".to_owned()),
+            keywords_present: false,
+            sections: Vec::new(),
+            figure_count: 0,
+            table_count: 0,
+            references_present: true,
+            declarations: Vec::new(),
+            page_count: None,
+            word_count: 100,
+            semantic_candidates: Vec::new(),
+            source_fragments: vec![
+                ExtractedSourceFragment {
+                    fragment_id: "fragment:3:affiliation".to_owned(),
+                    text: "Department of Computer Science, Synthetic University".to_owned(),
+                    source_label: "首页作者单位".to_owned(),
+                    modality: SourceModality::Text,
+                },
+                ExtractedSourceFragment {
+                    fragment_id: "fragment:3:contact".to_owned(),
+                    text: "Corresponding author: ada.author@example.edu; ORCID 0000-0002-1825-0097"
+                        .to_owned(),
+                    source_label: "首页通讯信息".to_owned(),
+                    modality: SourceModality::Text,
+                },
+            ],
+            extraction_coverage: ExtractionCoverage {
+                text_fragments: 2,
+                table_fragments: 0,
+                figure_fragments: 0,
+            },
+            pdf_processing: None,
+            warnings: Vec::new(),
+        };
+
+        let identity = source_identity_version(Some(&report), artifact.clone(), 3);
+
+        assert_eq!(identity.status, SourceIdentityStatus::Extracted);
+        assert_eq!(identity.authors, report.authors);
+        assert_eq!(identity.affiliations.len(), 1);
+        assert!(identity
+            .contacts
+            .iter()
+            .any(|contact| contact.kind == PublicationContactKind::Email
+                && contact.value == "ada.author@example.edu"));
+        assert!(identity
+            .contacts
+            .iter()
+            .any(|contact| contact.kind == PublicationContactKind::Orcid
+                && contact.value == "0000-0002-1825-0097"));
+        assert_eq!(identity.source_artifact, artifact);
+        assert_eq!(
+            identity.external_model_policy,
+            "excluded_from_default_model_projection"
         );
     }
 

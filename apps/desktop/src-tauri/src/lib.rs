@@ -340,6 +340,9 @@ async fn ask_knowledge_body(
     let mut private_name_values = structure
         .map(|report| report.authors.clone())
         .unwrap_or_default();
+    if let Some(identity) = knowledge.snapshot.source_identity.as_ref() {
+        private_name_values.extend(identity.authors.clone());
+    }
     private_name_values.extend(
         store
             .journal_recommendation_author_names(&workspace_id)

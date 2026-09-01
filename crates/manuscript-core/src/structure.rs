@@ -1038,18 +1038,22 @@ fn infer_from_plain_text(text: &str) -> ExtractedStructure {
 
 fn text_fragments(text: &str, source_prefix: &str) -> Vec<ContentFragment> {
     text.lines()
-        .flat_map(|line| {
+        .enumerate()
+        .flat_map(|(line_index, line)| {
             let sentences = semantic_sentences(line);
             if sentences.is_empty() {
-                vec![normalize_line(line)]
+                vec![(line_index, normalize_line(line))]
             } else {
                 sentences
+                    .into_iter()
+                    .map(|sentence| (line_index, sentence))
+                    .collect()
             }
         })
-        .filter(|line| line.chars().count() >= 16)
+        .filter(|(line_index, line)| line.chars().count() >= if *line_index < 80 { 4 } else { 16 })
         .take(400)
         .enumerate()
-        .map(|(index, line)| ContentFragment {
+        .map(|(index, (_, line))| ContentFragment {
             modality: infer_source_modality(&line),
             text: bounded_text(&line, 1_200),
             source_label: format!("{source_prefix} · 片段 {}", index + 1),

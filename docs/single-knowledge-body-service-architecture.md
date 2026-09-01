@@ -38,6 +38,17 @@
 
 知识体身份与知识体版本不能合并：身份用于长期引用，版本用于复现实验和历史解释。
 
+从 schema v4 起，身份层同时保存 `SourceIdentityVersion`：论文标题、作者、作者单位、源稿
+明示的电子邮箱、ORCID 或通讯信息，以及它们对应的 `ArtifactVersion` 和来源片段。该对象
+表达“源稿公开或明示了谁及如何联系”，不是 Claim，也不进入研究语义候选的“纳入/排除”
+流程。只要本机分解已经识别到这些字段，知识体引入页和固化页都必须展示，不得因为它们
+属于身份信息而从本机视图排除。
+
+本机可见不等于自动外发。`SourceIdentityVersion.externalModelPolicy` 默认固定为
+`excluded_from_default_model_projection`；知识体问答仍在 Rust 网络出口排除作者姓名、联系
+方式和身份标识。未来公开知识体对外展示身份时，应使用单独的发布授权范围，不能复用模型
+问答授权。
+
 ### 2.2 知识、边界与证据
 
 `KnowledgeBoundaryEvidenceLayer` 组合 Claim、Scope、Method、Result、Evidence、
@@ -147,10 +158,12 @@ ReproductionAssertion、AlignmentAssertion、VersionRelation 和 ClassificationA
 
 ## 4. 兼容与真实性边界
 
-- 新建快照采用 schema v3，并必须包含五部分架构和可选的统一分解层；
+- 新建快照采用 schema v4，并必须包含五部分架构、`SourceIdentityVersion` 和可选的统一分解层；
 - 既有 schema v1 快照仍可读取和校验，不会因升级失效；
 - 机器候选必须由作者逐项决定“纳入”或“排除”；后端校验决定集合与当前分解候选完全
   一致，只有纳入项进入 `established`，审核决定随知识体哈希固化；
+- 源稿明示身份与联系方式不属于上述研究语义候选，随对应 `ArtifactVersion` 保留并在本机
+  直接展示；
 - 当前 `AIReviewReport` 默认缺省，不用确定性检查伪装专业评审；
 - 当前 `ReputationRecord v0` 表示尚未建立外部信誉记录；
 - 方法适用性检查处于 `planned`，在 Scope 和 Method 未确认前必须拒绝；

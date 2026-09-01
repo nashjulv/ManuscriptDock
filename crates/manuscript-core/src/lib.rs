@@ -28,8 +28,9 @@ pub use knowledge::{
     ElementState, IdentityVersionLayer, InteractionRuntimeLayer, KnowledgeBodyError,
     KnowledgeBodyLifecycleStatus, KnowledgeBodyNetwork, KnowledgeBodyNode, KnowledgeBodyObjectSet,
     KnowledgeBodyRole, KnowledgeBodyServiceArchitecture, KnowledgeBoundaryEvidenceLayer,
-    KnowledgeCandidateDecision, KnowledgeObjectType, NetworkAssertion, RelationKind,
-    RelationProtocol, RuntimeBindingPolicy, ValidationRightsReputationLayer,
+    KnowledgeCandidateDecision, KnowledgeObjectType, NetworkAssertion, PublicationContact,
+    PublicationContactKind, RelationKind, RelationProtocol, RuntimeBindingPolicy,
+    SourceIdentityStatus, SourceIdentityVersion, ValidationRightsReputationLayer,
     VersionedObjectReference, DISCIPLINE_INDEX_SCHEME, DISCIPLINE_INDEX_VERSION,
     KNOWLEDGE_BODY_SCHEMA_VERSION,
 };

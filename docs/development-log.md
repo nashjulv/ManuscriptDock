@@ -1,5 +1,17 @@
 # ManuscriptDock Development Log
 
+## 2026-09-01 — V0.13 local source identity and version visibility
+
+- Added schema v4 `SourceIdentityVersion` to preserve source-declared title, authors, affiliations,
+  email, ORCID and correspondence details alongside the exact `ArtifactVersion` and source fragment.
+- Removed identity metadata from the semantic Include/Exclude decision path: source-declared identity
+  remains visible locally before and after knowledge-body finalization, while Claim-like candidates
+  still require item-level author review.
+- Added a dedicated identity-and-version card and made the spatial identity node summarize actual
+  author and contact counts instead of showing only a stable ID placeholder.
+- Kept the Rust network boundary unchanged: the complete local identity object is omitted from the
+  default model projection, and its author names are added to question redaction.
+
 ## 2026-08-31 — Prerelease version baseline V0.12
 
 - Established `V0.12` as the current visible product version and `0.12.0` as its SemVer package and installer equivalent.

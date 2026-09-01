@@ -588,6 +588,22 @@ h1, h2, h3, p { margin-top: 0; }
 .discipline-selector select { width: 100%; min-height: 42px; padding: 8px 34px 8px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 7px; font: inherit; font-size: 13px; }
 .discipline-selector select:focus { border-color: var(--text-secondary); outline: 2px solid var(--border-strong); outline-offset: 1px; }
 .discipline-selector p { margin: 8px 0 0; color: var(--text-muted); font-size: 11px; line-height: 17px; }
+.source-identity-card { margin: 16px 0; padding: 14px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 9px; }
+.source-identity-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 11px; border-bottom: 1px solid var(--border); }
+.source-identity-card > header span { color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.source-identity-card > header h3 { margin: 3px 0 0; font-size: 16px; font-weight: 500; }
+.source-identity-card > header > strong { padding: 4px 8px; color: var(--button-text); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 58%, var(--border)); border-radius: 999px; font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; }
+.source-identity-card dl { margin: 0; }
+.source-identity-card dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.source-identity-card dt { color: var(--text-muted); font-size: 12px; line-height: 19px; }
+.source-identity-card dd { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+.source-identity-card ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.source-identity-card li strong { display: inline-block; min-width: 76px; margin-right: 8px; color: var(--text); font-size: 12px; font-weight: 500; }
+.source-identity-card li span { color: var(--text-secondary); }
+.source-identity-card li small { display: block; margin-left: 84px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.source-identity-card > p { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 19px; }
+.source-identity-policy { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; }
+.source-identity-policy svg { width: 16px; height: 16px; margin-top: 1px; color: var(--text-secondary); }
 .knowledge-candidate-preview { margin: 16px 0; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
 .knowledge-candidate-preview > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .knowledge-candidate-preview > header span { color: var(--text-muted); font-size: 11px; line-height: 16px; }
@@ -734,6 +750,8 @@ h1, h2, h3, p { margin-top: 0; }
   .submission-action-card { align-items: stretch; flex-direction: column; }
   .submission-action-card .secondary-button, .submission-record-form .primary-button { width: 100%; min-height: 44px; }
   .lifecycle-record > div { grid-template-columns: 1fr; gap: 3px; }
+  .source-identity-card dl > div { grid-template-columns: 1fr; gap: 3px; }
+  .source-identity-card li small { margin-left: 0; }
   .knowledge-identity-card dl > div { grid-template-columns: 1fr; gap: 3px; }
 }
 

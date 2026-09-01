@@ -22,9 +22,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.12")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.12" }));
-    expect(brandStatement.getByText("V0.12")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.13")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.13" }));
+    expect(brandStatement.getByText("V0.13")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -630,10 +630,11 @@ describe("App", () => {
     const method = reference("method:classified", "method", 0);
     const candidate = { candidateId: "kb:classified:candidate:claim:1", text: "The study proposes a traceable synthetic method.", sourceLabel: "Abstract", sourceFragmentId: "fragment:abstract", modality: "text", confidencePercent: 84, authorConfirmed: false };
     const snapshot = {
-      schemaVersion: 3, knowledgeBodyId: "kb:classified", snapshotVersion: 1, manuscript: reference("artifact:classified", "artifact_version", 1),
+      schemaVersion: 4, knowledgeBodyId: "kb:classified", snapshotVersion: 1, manuscript: reference("artifact:classified", "artifact_version", 1),
       claim: { claim, proposition: { ...reference("proposition:classified", "proposition", 1), state: "candidate" }, conditions: { ...reference("scope:classified", "scope", 0), state: "pending" }, evidence: { ...reference("evidence:classified", "evidence", 0), state: "pending" }, sources: { ...anchor, state: "established" }, status: { ...reference("status:classified", "status", 1), state: "candidate" } },
       objects: { artifactVersion: reference("artifact:classified", "artifact_version", 1), claim, scope: reference("scope:classified", "scope", 0), method, result: reference("result:classified", "result", 0), evidenceRelation: reference("evidence-relation:classified", "evidence_relation", 0), sourceAnchor: anchor, aiReviewReport: null, provenance: reference("provenance:classified", "provenance", 1), knowledgeBodySnapshot: reference("snapshot:classified", "knowledge_body_snapshot", 1) },
       aiReviewReport: null, aiReviewHistory: { reportId: "review:classified", currentVersion: null, versions: [] },
+      sourceIdentity: { version: 1, title: "Classified Study", authors: ["Synthetic Author"], affiliations: ["Synthetic University"], contacts: [{ kind: "email", value: "author@example.edu", sourceLabel: "首页通讯信息", sourceFragmentId: "fragment:contact" }], sourceArtifact: reference("artifact:classified", "artifact_version", 1), status: "extracted", disclosureBasis: "source_document_declared_metadata", localVisibility: "visible_in_local_workspace", externalModelPolicy: "excluded_from_default_model_projection" },
       extraction: { decompositionId: "decomposition:classified", decompositionHash: "d".repeat(64), analysisVersion: 6, sourceSnapshotVersion: 1, generatedBy: "local_deterministic_semantic_extraction", confirmationPolicy: "machine_candidates_require_author_confirmation", claim: { object: reference("proposition:classified", "proposition", 1), state: "candidate", candidates: [candidate] }, scope: { object: reference("scope:classified", "scope", 0), state: "pending", candidates: [] }, method: { object: method, state: "pending", candidates: [] }, result: { object: reference("result:classified", "result", 0), state: "pending", candidates: [] }, evidence: { object: reference("evidence:classified", "evidence", 0), state: "pending", candidates: [] } },
       network: { bodies: [{ body: reference("kb:classified", "knowledge_body", 1), displayId: "K-A", title: "Classified Study", role: "current_study", claim, sourceAnchor: anchor, method }], assertions: [], supportedRelations: ["citation", "claim_relation", "evidence_relation", "method_transfer", "reproduction", "alignment", "version_relation", "classification"] },
       externalTransmission: "not_performed",
@@ -644,7 +645,7 @@ describe("App", () => {
     const record = { recordId: "knowledge-classified", workspaceId: workspace.id, manuscriptVersion: 1, attestationId: attestation.attestationId, submissionId: submission.submissionId, finalizedUnixMs: Date.UTC(2026, 7, 24, 8, 30), disciplineClassification: classification, snapshot, recordHash: "f".repeat(64), externalTransmission: "not_performed" };
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
-      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: { analysisVersion: 6, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1, quality: "complete", title: "Classified Study", authors: [], abstractPresent: true, abstractText: "We propose a synthetic method and report a traceable result.", keywordsPresent: true, sections: [], figureCount: 0, tableCount: 0, referencesPresent: true, declarations: [], pageCount: null, wordCount: 120, semanticCandidates: [], extractionCoverage: { textFragments: 1, tableFragments: 0, figureFragments: 0 }, warnings: [] }, readinessReport: null, attestation, submission, knowledgeBody: null });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: { analysisVersion: 6, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 1, quality: "complete", title: "Classified Study", authors: ["Synthetic Author"], abstractPresent: true, abstractText: "We propose a synthetic method and report a traceable result.", keywordsPresent: true, sections: [], figureCount: 0, tableCount: 0, referencesPresent: true, declarations: [], pageCount: null, wordCount: 120, semanticCandidates: [], extractionCoverage: { textFragments: 1, tableFragments: 0, figureFragments: 0 }, warnings: [] }, readinessReport: null, attestation, submission, knowledgeBody: null });
       if (command === "get_knowledge_body_snapshot") return Promise.resolve(snapshot);
       if (command === "list_discipline_index") return Promise.resolve([{ code: "life_sciences", label: "生命科学", labelEn: "Life sciences" }]);
       if (command === "finalize_knowledge_body") return Promise.resolve(record);
@@ -672,6 +673,11 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "知识体哈希与学科索引" })).toBeVisible();
     expect(screen.getByText("生命科学")).toBeVisible();
     expect(screen.getByText("f".repeat(64))).toBeVisible();
+    expect(screen.getByRole("heading", { name: "作者身份与公开联系方式" })).toBeVisible();
+    expect(screen.getByText("Synthetic Author")).toBeVisible();
+    expect(screen.getByText("Synthetic University")).toBeVisible();
+    expect(screen.getByText("author@example.edu")).toBeVisible();
+    expect(screen.getByText(/默认不会随知识体问答发送给外部模型/)).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("finalize_knowledge_body", { workspaceId: workspace.id, disciplineCode: "life_sciences", decisions: [{ candidateId: candidate.candidateId, included: true }], authorConfirmed: true });
   });
 
@@ -700,6 +706,7 @@ describe("App", () => {
       objects: { artifactVersion: reference("artifact:K-A", "artifact_version", 3), claim: bodies[0].claim, scope: reference("scope:K-A", "scope", 3), method: bodies[0].method, result: reference("result:K-A", "result", 2), evidenceRelation: reference("evidence-relation:K-A", "evidence_relation", 2), sourceAnchor: bodies[0].sourceAnchor, aiReviewReport: reference("review:K-A", "ai_review_report", 2), provenance: reference("provenance:K-A", "provenance", 2), knowledgeBodySnapshot: reference("snapshot:K-A", "knowledge_body_snapshot", 7) },
       aiReviewReport: reference("review:K-A", "ai_review_report", 2),
       aiReviewHistory: { reportId: "review:K-A", currentVersion: 2, versions: [{ reportId: "review:K-A", version: 1, previousVersion: null }, { reportId: "review:K-A", version: 2, previousVersion: 1 }] },
+      sourceIdentity: { version: 7, title: "Navigation Study", authors: ["Ada Author", "Ben Researcher"], affiliations: ["Synthetic Research Institute"], contacts: [{ kind: "email", value: "ada@example.edu", sourceLabel: "PDF 首页", sourceFragmentId: "fragment:identity:1" }], sourceArtifact: reference("artifact:K-A", "artifact_version", 3), status: "extracted", disclosureBasis: "source_document_declared_metadata", localVisibility: "visible_in_local_workspace", externalModelPolicy: "excluded_from_default_model_projection" },
       extraction: {
         decompositionId: "decomposition:K-A", decompositionHash: "7".repeat(64), analysisVersion: 6, sourceSnapshotVersion: 7, generatedBy: "local_deterministic_semantic_extraction", confirmationPolicy: "machine_candidates_require_author_confirmation",
         claim: { object: reference("proposition:K-A", "proposition", 3), state: "established", candidates: [{ candidateId: "candidate:claim:K-A", text: "The proposed method improves traceable manuscript analysis under the reported conditions.", sourceLabel: "Abstract", sourceFragmentId: "fragment:abstract", modality: "text", confidencePercent: 91, authorConfirmed: true }] },
@@ -773,7 +780,7 @@ describe("App", () => {
     expect(spatialMap.querySelectorAll(".dodeca-edge")).toHaveLength(30);
     expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3作者已确认");
     expect(spatialMap.querySelectorAll(".service-layer-node")).toHaveLength(5);
-    expect(spatialMap).toHaveTextContent("身份与版本S7Artifact v3 · 稳定 ID");
+    expect(spatialMap).toHaveTextContent("身份与版本S72 位作者 · 1 项联系方式 · Artifact v3");
     expect(spatialMap).toHaveTextContent("能力契约v1 · 1输入 · 输出 · 前置 · 拒绝");
     expect(spatialMap).toHaveTextContent("验证、权利与信誉Reputation · v4AIReview v2 · 历史 v1");
     expect(screen.getByRole("heading", { name: "知识摘要与来源" })).toBeVisible();

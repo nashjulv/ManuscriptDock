@@ -4,15 +4,15 @@
 
 - Public product name: `ManuscriptDock`
 - Chinese name: `投稿舱`
-- Current prerelease display version: `V0.12`
+- Current prerelease display version: `V0.13`
 - Category: local-first manuscript submission workspace
 - Desktop stack: Tauri 2.x, React 18, TypeScript 5, Vite 5, Rust/Cargo
 
 ## Versioning
 
-- Show the prerelease version immediately after the product name on primary identity surfaces: `投稿舱 ManuscriptDock V0.12`.
+- Show the prerelease version immediately after the product name on primary identity surfaces: `投稿舱 ManuscriptDock V0.13`.
 - After each user-visible product update, increment the display version by `0.01` using two digits after the decimal (`V0.12` → `V0.13`; `V0.19` → `V0.20`).
-- Keep package and installer metadata SemVer-compatible (`V0.12` maps to `0.12.0`).
+- Keep package and installer metadata SemVer-compatible (`V0.13` maps to `0.13.0`).
 - Preserve the stable package/product identifier `ManuscriptDock` so an update replaces the existing installation rather than creating a second application.
 
 ## Architecture Boundaries
