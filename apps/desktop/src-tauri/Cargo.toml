@@ -1,6 +1,6 @@
 [package]
 name = "manuscriptdock-desktop"
-version = "0.13.0"
+version = "0.22.0"
 description = "ManuscriptDock local-first manuscript submission workspace"
 edition.workspace = true
 license.workspace = true

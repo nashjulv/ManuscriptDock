@@ -1,9 +1,11 @@
-use crate::StructureReport;
+use crate::{
+    JournalDirectoryCatalog, JournalDirectoryEvidence, JournalMetricScheme, StructureReport,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 3;
-pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.2";
+pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 5;
+pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.4";
 pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2025.1";
 pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 2;
 
@@ -120,8 +122,7 @@ impl JournalRecommendationProfileInput {
         self.institution = self.institution.trim().to_owned();
         self.specialty = self.specialty.trim().to_owned();
         self.submission_deadline = self.submission_deadline.trim().to_owned();
-        if self.author_name.is_empty()
-            || self.author_name.chars().count() > 120
+        if self.author_name.chars().count() > 120
             || self.institution.is_empty()
             || self.institution.chars().count() > 200
             || self.specialty.is_empty()
@@ -243,6 +244,16 @@ pub struct JournalRecommendation {
     pub ranking_source_url: String,
     pub homepage_url: String,
     pub open_access_status: String,
+    #[serde(default)]
+    pub directory_evidence: Vec<JournalDirectoryEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalRecommendationPortfolio {
+    pub sprint: Vec<JournalRecommendation>,
+    pub matching: Vec<JournalRecommendation>,
+    pub safeguard: Vec<JournalRecommendation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -263,10 +274,12 @@ pub struct JournalRecommendationRun {
     pub recommendation_profile: JournalRecommendationProfileSummary,
     pub deadline_days_remaining: u32,
     pub preferences: JournalMatchPreferences,
-    pub domestic: Vec<JournalRecommendation>,
-    pub international: Vec<JournalRecommendation>,
+    pub domestic: JournalRecommendationPortfolio,
+    pub international: JournalRecommendationPortfolio,
     pub school_rule_status: String,
     pub institution_directory_status: String,
+    #[serde(default)]
+    pub journal_directory_version: Option<String>,
     pub limitations: Vec<String>,
     pub external_transmission: String,
 }
@@ -639,6 +652,16 @@ pub fn recommend_journals(
     preferences: JournalMatchPreferences,
     evaluated_unix_ms: u64,
 ) -> JournalRecommendationRun {
+    recommend_journals_with_directory(report, profile, preferences, evaluated_unix_ms, None)
+}
+
+pub fn recommend_journals_with_directory(
+    report: &StructureReport,
+    profile: JournalRecommendationProfile,
+    preferences: JournalMatchPreferences,
+    evaluated_unix_ms: u64,
+    directory: Option<&JournalDirectoryCatalog>,
+) -> JournalRecommendationRun {
     let (inferred_topic, topic_basis) = infer_topic(report);
     let topic = if preferences.topic == ResearchTopic::Auto {
         inferred_topic
@@ -666,25 +689,32 @@ pub fn recommend_journals(
     };
     let mut scored: Vec<_> = CANDIDATES
         .iter()
-        .map(|candidate| score_candidate(*candidate, &score_context))
+        .map(|candidate| {
+            let mut evidence = directory
+                .map(|catalog| catalog.evidence_for_title(candidate.name_en))
+                .unwrap_or_default();
+            if evidence.is_empty() {
+                evidence = directory
+                    .map(|catalog| catalog.evidence_for_title(candidate.name))
+                    .unwrap_or_default();
+            }
+            (
+                *candidate,
+                score_candidate(*candidate, &score_context, evidence),
+            )
+        })
         .collect();
     scored.sort_by(|a, b| {
-        b.overall_fit
-            .cmp(&a.overall_fit)
-            .then_with(|| a.name_en.cmp(&b.name_en))
+        b.1.overall_fit
+            .cmp(&a.1.overall_fit)
+            .then_with(|| a.1.name_en.cmp(&b.1.name_en))
     });
-    let domestic = scored
-        .iter()
-        .filter(|item| item.region == JournalRegion::Domestic)
-        .take(3)
-        .cloned()
-        .collect();
-    let international = scored
-        .iter()
-        .filter(|item| item.region == JournalRegion::International)
-        .take(3)
-        .cloned()
-        .collect();
+    let domestic = build_recommendation_portfolio(&scored, JournalRegion::Domestic);
+    let international = build_recommendation_portfolio(&scored, JournalRegion::International);
+    let directory_summary = directory.map(JournalDirectoryCatalog::summary);
+    let journal_directory_version = directory_summary
+        .as_ref()
+        .and_then(|summary| summary.catalog_fingerprint.clone());
     let encoded = serde_json::to_vec(&(
         report.workspace_id.as_str(),
         report.source_content_hash.as_str(),
@@ -692,6 +722,7 @@ pub fn recommend_journals(
         evaluated_unix_ms / 86_400_000,
         &profile,
         &preferences,
+        &journal_directory_version,
     ))
     .unwrap_or_default();
     let run_id = format!(
@@ -701,11 +732,26 @@ pub fn recommend_journals(
             .take(20)
             .collect::<String>()
     );
-    let institution_directory_status = profile
-        .institution_rule_evidence
-        .cas_partition_data_status
-        .clone()
-        .unwrap_or_else(|| "licensed_official_api_not_configured".into());
+    let directory_available = directory_summary
+        .as_ref()
+        .is_some_and(|summary| summary.available);
+    let cas_directory_available = directory_summary.as_ref().is_some_and(|summary| {
+        summary
+            .records_by_scheme
+            .get("cas_partition")
+            .is_some_and(|count| *count > 0)
+    });
+    let institution_directory_status = if cas_directory_available {
+        "local_user_supplied_directory_available".to_owned()
+    } else if directory_available {
+        "local_directory_without_cas_partition_data".to_owned()
+    } else {
+        profile
+            .institution_rule_evidence
+            .cas_partition_data_status
+            .clone()
+            .unwrap_or_else(|| "local_directory_not_imported".into())
+    };
     let external_transmission = profile.external_transmission.clone();
     let profile_summary = JournalRecommendationProfileSummary {
         profile_id: profile.profile_id.clone(),
@@ -722,9 +768,19 @@ pub fn recommend_journals(
                 .minimum_cas_partition
                 .is_some()
                 || profile.institution_rule_evidence.requires_cas_top)
-                && institution_directory_status != "licensed_official_api_verified" =>
+                && !cas_directory_available =>
         {
             "verified_rule_waiting_for_institution_directory_data"
+        }
+        InstitutionRuleStatus::Verified
+            if (profile
+                .institution_rule_evidence
+                .minimum_cas_partition
+                .is_some()
+                || profile.institution_rule_evidence.requires_cas_top)
+                && cas_directory_available =>
+        {
+            "verified_rule_set_applied_with_local_directory"
         }
         InstitutionRuleStatus::Verified => "verified_rule_set_applied",
         InstitutionRuleStatus::CandidateSourcesFound => "candidate_sources_require_verification",
@@ -758,6 +814,7 @@ pub fn recommend_journals(
         international,
         school_rule_status,
         institution_directory_status,
+        journal_directory_version,
         limitations: vec![
             "适配分计算当前投稿准备的最适合度，不是录用概率，也不替代期刊官网的最新投稿要求。".into(),
             "截止日期只评估完成投稿准备的内部规划余量，不预测同行评审、录用、见刊或数据库收录时间。".into(),
@@ -765,10 +822,114 @@ pub fn recommend_journals(
             "当前内容完备度是结构信号，不是论文创新性或学术贡献评分；取得版本化 PWC 审核档案前不得据此宣称顶刊成功率。".into(),
             "国内 T1/T2/T3 与国际 CCF A/B/C 是相互独立的目录，不做等级等同。".into(),
             "当前候选范围仅覆盖内置的计算机与人工智能期刊快照。".into(),
-            "机构评价目录只在后台参与资格判断；数据条件未经来源和版本核验时不显示、不推断，也不计入得分。".into(),
+            if directory_available {
+                "本地期刊目录来自用户提供的工作簿；仅在本机参与离线辅助并显示来源年份，不自动视为官方核验。".into()
+            } else {
+                "机构评价目录未导入；涉及分区的资格条件不推断，也不计入得分。".into()
+            },
         ],
         external_transmission,
     }
+}
+
+fn build_recommendation_portfolio(
+    scored: &[(Candidate, JournalRecommendation)],
+    region: JournalRegion,
+) -> JournalRecommendationPortfolio {
+    let mut selected_ids = Vec::<&str>::new();
+    let eligible = |recommendation: &JournalRecommendation| {
+        !recommendation
+            .institution_eligibility
+            .starts_with("blocked_by_verified")
+    };
+
+    let mut sprint = select_recommendations(scored, &mut selected_ids, 2, |candidate| {
+        candidate.region == region && candidate.level == 3
+    });
+    if sprint.len() < 2 {
+        sprint.extend(select_recommendations(
+            scored,
+            &mut selected_ids,
+            2 - sprint.len(),
+            |candidate| candidate.region == region,
+        ));
+    }
+
+    let matching = select_recommendations(scored, &mut selected_ids, 3, |candidate| {
+        candidate.region == region
+    });
+
+    let mut safeguard_candidates: Vec<_> = scored
+        .iter()
+        .filter(|(candidate, recommendation)| {
+            candidate.region == region
+                && candidate.level <= 2
+                && eligible(recommendation)
+                && !selected_ids.contains(&candidate.id)
+        })
+        .collect();
+    safeguard_candidates.sort_by(|(left_candidate, left), (right_candidate, right)| {
+        left_candidate
+            .level
+            .cmp(&right_candidate.level)
+            .then_with(|| right.scores.topic_scope.cmp(&left.scores.topic_scope))
+            .then_with(|| right.scores.specialty_fit.cmp(&left.scores.specialty_fit))
+            .then_with(|| right.scores.article_type.cmp(&left.scores.article_type))
+            .then_with(|| {
+                right
+                    .scores
+                    .time_feasibility
+                    .cmp(&left.scores.time_feasibility)
+            })
+            .then_with(|| right.overall_fit.cmp(&left.overall_fit))
+            .then_with(|| left.name_en.cmp(&right.name_en))
+    });
+    let mut safeguard: Vec<_> = safeguard_candidates
+        .into_iter()
+        .take(3)
+        .map(|(candidate, recommendation)| {
+            selected_ids.push(candidate.id);
+            recommendation.clone()
+        })
+        .collect();
+    if safeguard.len() < 3 {
+        safeguard.extend(select_recommendations(
+            scored,
+            &mut selected_ids,
+            3 - safeguard.len(),
+            |candidate| candidate.region == region,
+        ));
+    }
+
+    JournalRecommendationPortfolio {
+        sprint,
+        matching,
+        safeguard,
+    }
+}
+
+fn select_recommendations(
+    scored: &[(Candidate, JournalRecommendation)],
+    selected_ids: &mut Vec<&'static str>,
+    count: usize,
+    predicate: impl Fn(Candidate) -> bool,
+) -> Vec<JournalRecommendation> {
+    let mut result = Vec::new();
+    for (candidate, recommendation) in scored {
+        if result.len() == count {
+            break;
+        }
+        if predicate(*candidate)
+            && !recommendation
+                .institution_eligibility
+                .starts_with("blocked_by_verified")
+            && !selected_ids.contains(&candidate.id)
+        {
+            selected_ids.push(candidate.id);
+            result.push(recommendation.clone());
+        }
+    }
+    result
 }
 
 fn infer_topic(report: &StructureReport) -> (ResearchTopic, String) {
@@ -937,7 +1098,11 @@ fn maturity_score(report: &StructureReport) -> u8 {
     score.clamp(0, 100) as u8
 }
 
-fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalRecommendation {
+fn score_candidate(
+    candidate: Candidate,
+    context: &ScoreContext<'_>,
+    directory_evidence: Vec<JournalDirectoryEvidence>,
+) -> JournalRecommendation {
     let ScoreContext {
         topic,
         specialty_topic,
@@ -1033,17 +1198,36 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
     let has_traceable_source = !institution_rules.source_urls.is_empty()
         || (institution_rules.author_attested_official
             && institution_rules.source_text_hash.is_some());
-    let cas_data_ready = institution_rules.minimum_cas_partition.is_none()
-        && !institution_rules.requires_cas_top
-        || institution_rules.cas_partition_data_status.as_deref()
-            == Some("licensed_official_api_verified");
+    let cas_evidence = directory_evidence
+        .iter()
+        .find(|evidence| evidence.scheme == JournalMetricScheme::CasPartition);
+    let requires_cas_data =
+        institution_rules.minimum_cas_partition.is_some() || institution_rules.requires_cas_top;
+    let cas_data_ready = !requires_cas_data
+        || cas_evidence.is_some_and(|evidence| {
+            institution_rules.minimum_cas_partition.is_none() || evidence.partition.is_some()
+        }) && (!institution_rules.requires_cas_top
+            || cas_evidence.is_some_and(|evidence| evidence.top.is_some()));
     let verified_rules = institution_rules.status == InstitutionRuleStatus::Verified
         && institution_rules.author_attested_official
         && has_traceable_source
         && institution_rules.rule_set_version.is_some()
         && cas_data_ready;
-    let (institution_score, institution_eligibility) = if !verified_rules {
+    let cas_partition_blocked = institution_rules
+        .minimum_cas_partition
+        .is_some_and(|minimum| {
+            cas_evidence
+                .and_then(|evidence| evidence.partition)
+                .is_some_and(|partition| partition > minimum)
+        });
+    let cas_top_blocked = institution_rules.requires_cas_top
+        && cas_evidence.is_some_and(|evidence| evidence.top == Some(false));
+    let (institution_score, institution_eligibility) = if !cas_data_ready {
+        (None, "requires_local_cas_directory_data".to_owned())
+    } else if !verified_rules {
         (None, "requires_verified_official_rules".to_owned())
+    } else if cas_partition_blocked || cas_top_blocked {
+        (Some(0), "blocked_by_verified_cas_rule".to_owned())
     } else if institution_rules
         .blocked_rank_tiers
         .iter()
@@ -1056,6 +1240,8 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
         .any(|tier| tier == candidate.tier)
     {
         (Some(100), "recognized_by_verified_rule".to_owned())
+    } else if requires_cas_data {
+        (Some(100), "recognized_by_verified_cas_rule".to_owned())
     } else {
         (Some(40), "not_mapped_by_verified_rule".to_owned())
     };
@@ -1102,6 +1288,37 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
             threshold - *maturity
         )
     };
+    let mut reasons = vec![
+        format!("主题范围适配 {} 分", topic_score),
+        format!("作者专业背景适配 {} 分", specialty),
+        format!("论文用途适配 {} 分", purpose_fit),
+        format!(
+            "投稿准备时间适配 {} 分（内部规划 {} 天）",
+            time_feasibility, estimated_submission_preparation_days
+        ),
+        format!("当前稿件完备度适配 {} 分；{}", readiness, readiness_reason),
+        format!("目标策略适配 {} 分", target),
+    ];
+    for evidence in &directory_evidence {
+        let scheme = match evidence.scheme {
+            JournalMetricScheme::CasPartition => "中科院分区",
+            JournalMetricScheme::ClarivateJcr => "JCR",
+            JournalMetricScheme::EmergingPartition => "新锐分区",
+        };
+        let partition = evidence
+            .partition
+            .map(|value| format!("{value}区"))
+            .unwrap_or_else(|| "分区缺失".to_owned());
+        reasons.push(format!(
+            "本地目录：{scheme} {} · {partition}{}",
+            evidence.release_year,
+            if evidence.top == Some(true) {
+                " · Top"
+            } else {
+                ""
+            }
+        ));
+    }
     JournalRecommendation {
         id: candidate.id.into(),
         name: candidate.name.into(),
@@ -1123,20 +1340,11 @@ fn score_candidate(candidate: Candidate, context: &ScoreContext<'_>) -> JournalR
         },
         institution_eligibility,
         scores,
-        reasons: vec![
-            format!("主题范围适配 {} 分", topic_score),
-            format!("作者专业背景适配 {} 分", specialty),
-            format!("论文用途适配 {} 分", purpose_fit),
-            format!(
-                "投稿准备时间适配 {} 分（内部规划 {} 天）",
-                time_feasibility, estimated_submission_preparation_days
-            ),
-            format!("当前稿件完备度适配 {} 分；{}", readiness, readiness_reason),
-            format!("目标策略适配 {} 分", target),
-        ],
+        reasons,
         ranking_source_url: source.into(),
         homepage_url: candidate.homepage.into(),
         open_access_status: candidate.oa.into(),
+        directory_evidence,
     }
 }
 
@@ -1238,6 +1446,25 @@ mod tests {
         }
     }
 
+    fn portfolio(run: &JournalRecommendationRun) -> Vec<&JournalRecommendation> {
+        run.domestic
+            .sprint
+            .iter()
+            .chain(run.domestic.matching.iter())
+            .chain(run.domestic.safeguard.iter())
+            .chain(run.international.sprint.iter())
+            .chain(run.international.matching.iter())
+            .chain(run.international.safeguard.iter())
+            .collect()
+    }
+
+    fn portfolio_ids(run: &JournalRecommendationRun) -> Vec<&str> {
+        portfolio(run)
+            .into_iter()
+            .map(|item| item.id.as_str())
+            .collect()
+    }
+
     #[test]
     fn traceable_structure_improvement_raises_readiness_but_version_number_alone_does_not() {
         let mut incomplete = report("computer vision");
@@ -1271,6 +1498,7 @@ mod tests {
                     institution_rules: &rules,
                     preferences: &preferences,
                 },
+                Vec::new(),
             )
         };
 
@@ -1291,16 +1519,42 @@ mod tests {
         assert!(complete_score.overall_fit > incomplete_score.overall_fit);
     }
     #[test]
-    fn returns_three_per_region() {
+    fn returns_two_three_three_per_region_without_duplicates() {
         let run = recommend_journals(
             &report("general artificial intelligence"),
             profile(),
             JournalMatchPreferences::default(),
             EVALUATED_AT,
         );
-        assert_eq!(run.domestic.len(), 3);
-        assert_eq!(run.international.len(), 3);
-        assert!(run.domestic.iter().all(|j| j.overall_fit <= 100));
+        assert_eq!(run.domestic.sprint.len(), 2);
+        assert_eq!(run.domestic.matching.len(), 3);
+        assert_eq!(run.domestic.safeguard.len(), 3);
+        assert_eq!(run.international.sprint.len(), 2);
+        assert_eq!(run.international.matching.len(), 3);
+        assert_eq!(run.international.safeguard.len(), 3);
+        let ids = portfolio_ids(&run);
+        assert_eq!(
+            ids.iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            16
+        );
+        assert!(run
+            .domestic
+            .sprint
+            .iter()
+            .chain(run.domestic.matching.iter())
+            .chain(run.domestic.safeguard.iter())
+            .all(|item| item.region == JournalRegion::Domestic));
+        assert!(run
+            .international
+            .sprint
+            .iter()
+            .chain(run.international.matching.iter())
+            .chain(run.international.safeguard.iter())
+            .all(|item| item.region == JournalRegion::International));
+        assert!(portfolio(&run).iter().all(|item| item.overall_fit <= 100));
     }
     #[test]
     fn author_topic_adjustment_changes_recommendations() {
@@ -1322,9 +1576,9 @@ mod tests {
             EVALUATED_AT,
         );
         assert_ne!(cv.run_id, nlp.run_id);
-        assert!(cv.international.iter().any(|j| j.id == "tpami"));
-        assert!(nlp.international.iter().any(|j| j.id == "tacl"));
-        assert!(nlp.domestic.iter().any(|j| j.id == "jcip"));
+        assert!(portfolio(&cv).iter().any(|j| j.id == "tpami"));
+        assert!(portfolio(&nlp).iter().any(|j| j.id == "tacl"));
+        assert!(portfolio(&nlp).iter().any(|j| j.id == "jcip"));
     }
     #[test]
     fn same_inputs_are_deterministic() {
@@ -1362,7 +1616,7 @@ mod tests {
             EVALUATED_AT,
         );
         assert_ne!(first.run_id, second.run_id);
-        assert_eq!(first.domestic, second.domestic);
+        assert_eq!(portfolio_ids(&first), portfolio_ids(&second));
         assert!(second.school_rule_status.contains("excluded_from_score"));
     }
 
@@ -1388,10 +1642,9 @@ mod tests {
             EVALUATED_AT,
         );
         assert_ne!(cv.run_id, nlp.run_id);
-        assert_ne!(cv.domestic, nlp.domestic);
+        assert_ne!(portfolio_ids(&cv), portfolio_ids(&nlp));
         assert!(nlp.deadline_days_remaining < cv.deadline_days_remaining);
-        assert!(nlp
-            .domestic
+        assert!(portfolio(&nlp)
             .iter()
             .any(|item| item.scores.time_feasibility < 100));
     }
@@ -1435,8 +1688,7 @@ mod tests {
         );
 
         assert_eq!(run.school_rule_status, "verified_rule_set_applied");
-        assert!(run
-            .domestic
+        assert!(portfolio(&run)
             .iter()
             .any(|item| item.scores.institution_rules == Some(100)));
         let preferences = JournalMatchPreferences::default();
@@ -1457,9 +1709,38 @@ mod tests {
                 .copied()
                 .unwrap(),
             &context,
+            Vec::new(),
         );
         assert_eq!(blocked.scores.institution_rules, Some(0));
         assert_eq!(blocked.institution_eligibility, "blocked_by_verified_rule");
+    }
+
+    #[test]
+    fn verified_rule_blocked_candidates_never_enter_the_main_portfolio() {
+        let mut constrained = profile();
+        constrained.institution_rule_evidence = InstitutionRuleEvidence {
+            status: InstitutionRuleStatus::Verified,
+            rule_set_id: Some("school-rule-synthetic".into()),
+            rule_set_version: Some("2026.1".into()),
+            source_urls: vec!["https://university.example.edu/rules/2026".into()],
+            verified_at: Some("2026-08-30".into()),
+            blocked_rank_tiers: vec!["T1".into(), "T2".into()],
+            author_attested_official: true,
+            ..InstitutionRuleEvidence::default()
+        };
+        let run = recommend_journals(
+            &report("general artificial intelligence"),
+            constrained,
+            JournalMatchPreferences::default(),
+            EVALUATED_AT,
+        );
+
+        assert_eq!(portfolio(&run).len(), 8);
+        assert!(portfolio(&run).iter().all(|item| {
+            !item
+                .institution_eligibility
+                .starts_with("blocked_by_verified")
+        }));
     }
 
     #[test]
@@ -1490,8 +1771,7 @@ mod tests {
             run.institution_directory_status,
             "licensed_official_api_not_configured"
         );
-        assert!(run
-            .international
+        assert!(portfolio(&run)
             .iter()
             .all(|item| item.scores.institution_rules.is_none()));
         let webview_projection = serde_json::to_string(&run).unwrap();

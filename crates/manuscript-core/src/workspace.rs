@@ -5,11 +5,21 @@ use crate::{
         KnowledgeInquiryTarget, KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
     },
     inspect_manuscript,
+    journal_directory::{
+        JournalDirectoryCatalog, JournalDirectoryImportResult, JournalDirectoryStore,
+        JournalDirectorySummary,
+    },
     journal_match::{
-        deadline_days_remaining, recommend_journals, InstitutionRuleEvidence,
-        InstitutionRuleStatus, JournalMatchPreferences, JournalRecommendationProfile,
-        JournalRecommendationProfileInput, JournalRecommendationRun,
+        deadline_days_remaining, recommend_journals_with_directory, InstitutionRuleEvidence,
+        InstitutionRuleStatus, JournalMatchPreferences, JournalRecommendation,
+        JournalRecommendationProfile, JournalRecommendationProfileInput, JournalRecommendationRun,
         JOURNAL_PROFILE_SCHEMA_VERSION,
+    },
+    journal_requirements::{
+        extract_journal_requirements, JournalRequirementCategory, JournalRequirementObligation,
+        JournalRequirementSnapshot, JournalRequirementSourceDocument, JournalRequirementSourceMode,
+        JournalRequirementStatus, JOURNAL_REQUIREMENT_FRESHNESS_DAYS,
+        JOURNAL_REQUIREMENT_SCHEMA_VERSION,
     },
     knowledge::{
         apply_candidate_decisions, discipline_catalog_item, local_knowledge_body_snapshot,
@@ -24,8 +34,9 @@ use crate::{
         extract_structure, DecompositionManifest, StructureError, DECOMPOSITION_SCHEMA_VERSION,
         STRUCTURE_ANALYSIS_VERSION,
     },
-    ManuscriptSummary, ReadinessOutcome, ReadinessReport, RevisionApplication, RevisionChangeInput,
-    RevisionDraft, RevisionError, RevisionSet, StructureReport,
+    ManuscriptKind, ManuscriptSummary, ReadinessOutcome, ReadinessReport, RevisionApplication,
+    RevisionChangeInput, RevisionDraft, RevisionError, RevisionSet, StructureReport,
+    MAX_MANUSCRIPT_SIZE_BYTES,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -151,16 +162,26 @@ pub struct LocalAttestation {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmissionRecord {
+    #[serde(default = "default_submission_record_schema_version")]
+    pub schema_version: u32,
     pub submission_id: String,
     pub workspace_id: String,
     pub manuscript_version: u32,
     pub attestation_id: String,
+    #[serde(default)]
+    pub target_selection_id: Option<String>,
     pub target: String,
+    #[serde(default)]
+    pub publisher: Option<String>,
     pub receipt: Option<String>,
     pub submitted_unix_ms: u64,
     pub statement: String,
     pub record_hash: String,
     pub external_transmission: String,
+}
+
+fn default_submission_record_schema_version() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -170,6 +191,130 @@ pub struct SubmissionExport {
     pub manuscript_version: u32,
     pub attestation_id: String,
     pub files: Vec<String>,
+    pub exported_unix_ms: u64,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionMaterialKind {
+    SourceProject,
+    Figure,
+    Table,
+    Bibliography,
+    Supplementary,
+    CoverLetter,
+    TitlePage,
+    Declaration,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionMaterial {
+    pub material_id: String,
+    pub kind: SubmissionMaterialKind,
+    pub original_name: String,
+    pub extension: String,
+    pub size_bytes: u64,
+    pub content_hash: String,
+    pub imported_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionMaterialChecklistItem {
+    pub id: String,
+    pub label: String,
+    pub requirement: String,
+    pub status: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionMaterialCatalog {
+    pub schema_version: u32,
+    pub workspace_id: String,
+    pub manuscript_version: u32,
+    pub materials: Vec<SubmissionMaterial>,
+    pub checklist: Vec<SubmissionMaterialChecklistItem>,
+    pub required_complete: bool,
+    pub target_check_ready: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionTargetSelection {
+    pub schema_version: u32,
+    pub selection_id: String,
+    pub workspace_id: String,
+    pub selected_against_manuscript_version: u32,
+    pub recommendation_run_id: String,
+    pub journal_id: String,
+    pub name: String,
+    pub name_en: String,
+    pub publisher: String,
+    pub region: String,
+    pub rank_system: String,
+    pub rank_tier: String,
+    pub homepage_url: String,
+    #[serde(default = "default_primary_target_role")]
+    pub plan_role: String,
+    #[serde(default)]
+    pub priority: u32,
+    pub selected_unix_ms: u64,
+    pub record_hash: String,
+    pub external_transmission: String,
+}
+
+fn default_primary_target_role() -> String {
+    "primary".to_owned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionTargetPlan {
+    pub schema_version: u32,
+    pub workspace_id: String,
+    pub primary: Option<SubmissionTargetSelection>,
+    pub backups: Vec<SubmissionTargetSelection>,
+    pub updated_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmissionTargetTransition {
+    pub schema_version: u32,
+    pub transition_id: String,
+    pub workspace_id: String,
+    pub from_selection_id: Option<String>,
+    pub to_selection_id: String,
+    pub reason: String,
+    pub transitioned_unix_ms: u64,
+    pub record_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetSubmissionExport {
+    pub package_name: String,
+    pub manuscript_version: u32,
+    pub target_selection_id: String,
+    pub target_name: String,
+    pub files: Vec<String>,
+    pub warnings: Vec<String>,
+    pub exported_unix_ms: u64,
+    pub external_transmission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCopyExport {
+    pub folder_name: String,
+    pub workspace_id: String,
+    pub manuscript_version: u32,
+    pub file_count: u32,
     pub exported_unix_ms: u64,
     pub external_transmission: String,
 }
@@ -200,6 +345,10 @@ pub struct WorkspaceLifecycle {
     pub attestation: Option<LocalAttestation>,
     pub submission: Option<SubmissionRecord>,
     pub knowledge_body: Option<KnowledgeBodyRecord>,
+    pub submission_materials: SubmissionMaterialCatalog,
+    pub submission_target: Option<SubmissionTargetSelection>,
+    pub submission_target_plan: SubmissionTargetPlan,
+    pub journal_requirements: Option<JournalRequirementSnapshot>,
 }
 
 #[derive(Debug)]
@@ -220,9 +369,16 @@ pub enum WorkspaceError {
     InvalidJournalProfile,
     InvalidInstitutionRuleEvidence,
     JournalProfileNotFound,
+    JournalDirectory(String),
     MissingCurrentReadiness,
     AuthorConfirmationRequired,
     InvalidSubmissionTarget,
+    SubmissionTargetNotFound,
+    StaleRecommendationRun,
+    InvalidSubmissionTargetPlan,
+    SubmissionBackupLimitReached,
+    InvalidJournalRequirementSource,
+    InvalidSubmissionMaterial(String),
     MissingCurrentAttestation,
     MissingCurrentSubmission,
     InvalidDisciplineClassification,
@@ -260,7 +416,7 @@ impl fmt::Display for WorkspaceError {
             Self::VersionNoteTooLong => write!(formatter, "版本说明不能超过 200 个字符"),
             Self::InvalidJournalProfile => write!(
                 formatter,
-                "请完整填写姓名、学校、专业、论文用途和有效的未来投稿截止日期"
+                "请完整填写学校、专业、论文用途和有效的未来投稿截止日期"
             ),
             Self::InvalidInstitutionRuleEvidence => write!(
                 formatter,
@@ -272,6 +428,7 @@ impl fmt::Display for WorkspaceError {
                     "未找到已保存的投稿背景档案，请先保存后再计算推荐"
                 )
             }
+            Self::JournalDirectory(message) => write!(formatter, "{message}"),
             Self::MissingCurrentReadiness => {
                 write!(formatter, "当前论文版本尚未完成投稿检查，请先重新检查")
             }
@@ -280,6 +437,28 @@ impl fmt::Display for WorkspaceError {
             }
             Self::InvalidSubmissionTarget => {
                 write!(formatter, "投稿目标不能为空，且不能超过 200 个字符")
+            }
+            Self::SubmissionTargetNotFound => {
+                write!(formatter, "请先从推荐结果中选择当前投稿目标")
+            }
+            Self::StaleRecommendationRun => {
+                write!(
+                    formatter,
+                    "该推荐属于较早的稿件版本，请按当前版本重新计算后再选择"
+                )
+            }
+            Self::InvalidSubmissionTargetPlan => {
+                write!(formatter, "投稿主线或备选支线记录无效")
+            }
+            Self::SubmissionBackupLimitReached => {
+                write!(formatter, "最多可保留 8 个备选投稿支线")
+            }
+            Self::InvalidJournalRequirementSource => write!(
+                formatter,
+                "期刊要求必须来自有效的 HTTPS 官方来源，并包含可核对的原文"
+            ),
+            Self::InvalidSubmissionMaterial(message) => {
+                write!(formatter, "投稿材料无效：{message}")
             }
             Self::MissingCurrentAttestation => {
                 write!(formatter, "当前论文版本尚未完成本地存证")
@@ -386,6 +565,22 @@ struct StoredVersion {
     readonly: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSubmissionMaterial {
+    #[serde(flatten)]
+    material: SubmissionMaterial,
+    relative_path: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSubmissionMaterialCatalog {
+    schema_version: u32,
+    #[serde(default)]
+    materials: Vec<StoredSubmissionMaterial>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AuditEvent<'a> {
@@ -414,12 +609,29 @@ struct AttestationPayload<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SubmissionPayload<'a> {
+struct LegacySubmissionPayload<'a> {
     submission_id: &'a str,
     workspace_id: &'a str,
     manuscript_version: u32,
     attestation_id: &'a str,
     target: &'a str,
+    receipt: &'a Option<String>,
+    submitted_unix_ms: u64,
+    statement: &'a str,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionPayload<'a> {
+    schema_version: u32,
+    submission_id: &'a str,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    attestation_id: &'a str,
+    target_selection_id: &'a Option<String>,
+    target: &'a str,
+    publisher: &'a Option<String>,
     receipt: &'a Option<String>,
     submitted_unix_ms: u64,
     statement: &'a str,
@@ -502,6 +714,74 @@ struct SubmissionPackageManifest<'a> {
     attestation_hash: &'a str,
     created_unix_ms: u64,
     files: &'a [String],
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionTargetPayload<'a> {
+    schema_version: u32,
+    selection_id: &'a str,
+    workspace_id: &'a str,
+    selected_against_manuscript_version: u32,
+    recommendation_run_id: &'a str,
+    journal_id: &'a str,
+    name: &'a str,
+    name_en: &'a str,
+    publisher: &'a str,
+    region: &'a str,
+    rank_system: &'a str,
+    rank_tier: &'a str,
+    homepage_url: &'a str,
+    plan_role: &'a str,
+    priority: u32,
+    selected_unix_ms: u64,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JournalRequirementSnapshotPayload<'a> {
+    schema_version: u32,
+    snapshot_id: &'a str,
+    workspace_id: &'a str,
+    target_selection_id: &'a str,
+    journal_id: &'a str,
+    journal_name: &'a str,
+    source_mode: JournalRequirementSourceMode,
+    status: JournalRequirementStatus,
+    sources: &'a [crate::JournalRequirementSource],
+    requirements: &'a [crate::JournalRequirementItem],
+    limitations: &'a [String],
+    captured_unix_ms: u64,
+    fresh_until_unix_ms: u64,
+    external_transmission: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionTargetTransitionPayload<'a> {
+    schema_version: u32,
+    transition_id: &'a str,
+    workspace_id: &'a str,
+    from_selection_id: &'a Option<String>,
+    to_selection_id: &'a str,
+    reason: &'a str,
+    transitioned_unix_ms: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetSubmissionPackageManifest<'a> {
+    schema_version: u32,
+    workspace_id: &'a str,
+    manuscript_version: u32,
+    manuscript_hash: &'a str,
+    target_selection: &'a SubmissionTargetSelection,
+    journal_requirement_snapshot: Option<&'a JournalRequirementSnapshot>,
+    submission_files: &'a [String],
+    warnings: &'a [String],
+    created_unix_ms: u64,
     external_transmission: &'a str,
 }
 
@@ -704,6 +984,63 @@ impl WorkspaceStore {
         let (workspace_root, _) = self.workspace_for_management(workspace_id, archived)?;
         remove_generated_directory(&workspace_root)?;
         self.list()
+    }
+
+    pub fn export_workspace_copy(
+        &self,
+        workspace_id: &str,
+        archived: bool,
+        destination: &Path,
+    ) -> Result<WorkspaceCopyExport, WorkspaceError> {
+        if !destination.is_dir() {
+            return Err(WorkspaceError::InvalidExportDestination);
+        }
+        let (workspace_root, manifest) = self.workspace_for_management(workspace_id, archived)?;
+        let destination = fs::canonicalize(destination)?;
+        let workspace_root = fs::canonicalize(workspace_root)?;
+        if destination.starts_with(&workspace_root) {
+            return Err(WorkspaceError::InvalidExportDestination);
+        }
+        let manuscript_stem = Path::new(&manifest.workspace.manuscript.name)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(safe_export_component)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "manuscript".to_owned());
+        let folder_name = format!(
+            "ManuscriptDock-{manuscript_stem}-v{}-{}",
+            manifest.workspace.snapshot_version,
+            &workspace_id[..8]
+        );
+        let final_root = destination.join(&folder_name);
+        if final_root.exists() {
+            return Err(WorkspaceError::ExportDestinationExists);
+        }
+        let temporary_root = destination.join(format!(".manuscriptdock-{}.tmp", Uuid::new_v4()));
+        let exported_unix_ms = unix_time_ms()?;
+        let result = (|| {
+            let mut file_count = 0;
+            copy_workspace_tree(&workspace_root, &temporary_root, &mut file_count)?;
+            fs::rename(&temporary_root, &final_root)?;
+            append_audit_event(
+                &workspace_root.join("audit.jsonl"),
+                "workspace_copy_exported",
+                &manifest.workspace,
+                exported_unix_ms,
+            )?;
+            Ok(WorkspaceCopyExport {
+                folder_name,
+                workspace_id: workspace_id.to_owned(),
+                manuscript_version: manifest.workspace.snapshot_version,
+                file_count,
+                exported_unix_ms,
+                external_transmission: "not_performed".to_owned(),
+            })
+        })();
+        if temporary_root.exists() {
+            let _ = remove_generated_directory(&temporary_root);
+        }
+        result
     }
 
     pub fn source_snapshot_path(&self, workspace_id: &str) -> Result<PathBuf, WorkspaceError> {
@@ -1087,7 +1424,18 @@ impl WorkspaceStore {
             return Err(WorkspaceError::InvalidJournalProfile);
         }
         let report = self.analyze_structure(workspace_id)?;
-        let run = recommend_journals(&report, profile, preferences, evaluated_unix_ms);
+        let directory_store = self.journal_directory_store();
+        let directory = directory_store
+            .load()
+            .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))?;
+        let directory = directory.summary().available.then_some(directory);
+        let run = recommend_journals_with_directory(
+            &report,
+            profile,
+            preferences,
+            evaluated_unix_ms,
+            directory.as_ref(),
+        );
         let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
         let analysis_root = workspace_root.join("analysis");
         fs::create_dir_all(&analysis_root)?;
@@ -1110,6 +1458,77 @@ impl WorkspaceStore {
             unix_time_ms()?,
         )?;
         Ok(run)
+    }
+
+    pub fn journal_recommendation_runs(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<JournalRecommendationRun>, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let analysis_root = workspace_root.join("analysis");
+        if !analysis_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut runs = Vec::new();
+        for entry in fs::read_dir(analysis_root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if !file_name.starts_with("journal-match-jmr-") || !file_name.ends_with(".json") {
+                continue;
+            }
+            let run = read_journal_recommendation_run(&entry.path())?;
+            if run.workspace_id != workspace_id
+                || file_name != format!("journal-match-{}.json", run.run_id)
+            {
+                return Err(WorkspaceError::InvalidManifest(
+                    "期刊推荐记录与当前论文工作区不一致".to_owned(),
+                ));
+            }
+            runs.push(run);
+        }
+        runs.sort_by(|left, right| {
+            right
+                .evaluated_unix_ms
+                .cmp(&left.evaluated_unix_ms)
+                .then_with(|| right.manuscript_version.cmp(&left.manuscript_version))
+                .then_with(|| left.run_id.cmp(&right.run_id))
+        });
+        Ok(runs)
+    }
+
+    pub fn import_journal_directory(
+        &self,
+        paths: &[PathBuf],
+    ) -> Result<JournalDirectoryImportResult, WorkspaceError> {
+        self.journal_directory_store()
+            .import_workbooks(paths)
+            .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))
+    }
+
+    pub fn journal_directory_summary(&self) -> Result<JournalDirectorySummary, WorkspaceError> {
+        self.journal_directory_store()
+            .summary()
+            .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))
+    }
+
+    pub fn journal_directory_catalog(&self) -> Result<JournalDirectoryCatalog, WorkspaceError> {
+        self.journal_directory_store()
+            .load()
+            .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))
+    }
+
+    fn journal_directory_store(&self) -> JournalDirectoryStore {
+        JournalDirectoryStore::new(self.root.join("journal-directory"))
     }
 
     pub fn save_institution_rule_evidence(
@@ -1339,6 +1758,496 @@ impl WorkspaceStore {
         result
     }
 
+    pub fn submission_materials(
+        &self,
+        workspace_id: &str,
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let stored = read_stored_submission_materials(&workspace_root)?;
+        let structure = read_current_structure_report(&workspace_root, &manifest.workspace)?;
+        let target = read_submission_target(&workspace_root)?;
+        let readiness = read_current_readiness_report(&workspace_root, &manifest.workspace)?
+            .filter(|report| {
+                readiness_matches_target(report, target.as_ref(), &manifest.workspace)
+            });
+        let journal_requirements = target
+            .as_ref()
+            .map(|selection| {
+                read_journal_requirement_snapshot(&workspace_root, &selection.selection_id)
+            })
+            .transpose()?
+            .flatten();
+        Ok(build_submission_material_catalog(
+            &manifest.workspace,
+            stored,
+            structure.as_ref(),
+            readiness.as_ref(),
+            target.as_ref(),
+            journal_requirements.as_ref(),
+            unix_time_ms()?,
+        ))
+    }
+
+    pub fn add_submission_materials(
+        &self,
+        workspace_id: &str,
+        kind: SubmissionMaterialKind,
+        paths: &[PathBuf],
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        if paths.is_empty() {
+            return self.submission_materials(workspace_id);
+        }
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let mut stored = read_stored_submission_materials(&workspace_root)?;
+        let files_root = workspace_root.join("materials").join("files");
+        fs::create_dir_all(&files_root)?;
+        let imported_unix_ms = unix_time_ms()?;
+        let mut added = 0_u32;
+        for path in paths {
+            let metadata = fs::metadata(path).map_err(|_| {
+                WorkspaceError::InvalidSubmissionMaterial("无法读取所选文件".to_owned())
+            })?;
+            if !metadata.is_file()
+                || metadata.len() == 0
+                || metadata.len() > MAX_MANUSCRIPT_SIZE_BYTES
+            {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "文件必须为 250 MB 以内的非空普通文件".to_owned(),
+                ));
+            }
+            let original_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| WorkspaceError::InvalidSubmissionMaterial("文件名无效".to_owned()))?
+                .to_owned();
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+                .ok_or_else(|| {
+                    WorkspaceError::InvalidSubmissionMaterial("文件缺少扩展名".to_owned())
+                })?;
+            if !is_allowed_submission_material_extension(&extension) {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+                    "不支持 .{extension} 文件"
+                )));
+            }
+            let material_id = Uuid::new_v4().to_string();
+            let relative_path = format!("materials/files/{material_id}.{extension}");
+            let destination = workspace_root.join(&relative_path);
+            let (content_hash, copied_size) = copy_and_hash(path, &destination)?;
+            if copied_size != metadata.len() {
+                let _ = fs::remove_file(&destination);
+                return Err(WorkspaceError::SourceChangedDuringImport);
+            }
+            if stored.materials.iter().any(|item| {
+                item.material.content_hash == content_hash && item.material.kind == kind
+            }) {
+                let _ = fs::remove_file(&destination);
+                continue;
+            }
+            set_readonly(&destination)?;
+            stored.materials.push(StoredSubmissionMaterial {
+                material: SubmissionMaterial {
+                    material_id,
+                    kind,
+                    original_name,
+                    extension,
+                    size_bytes: copied_size,
+                    content_hash,
+                    imported_unix_ms,
+                },
+                relative_path,
+            });
+            added += 1;
+        }
+        stored.schema_version = 1;
+        let catalog_path = workspace_root.join("materials").join("catalog.json");
+        write_or_replace_json(&catalog_path, &stored)?;
+        if added > 0 {
+            append_audit_event(
+                &workspace_root.join("audit.jsonl"),
+                "submission_materials_added",
+                &manifest.workspace,
+                imported_unix_ms,
+            )?;
+        }
+        self.submission_materials(workspace_id)
+    }
+
+    pub fn select_recommended_journal(
+        &self,
+        workspace_id: &str,
+        recommendation_run_id: &str,
+        journal_id: &str,
+    ) -> Result<SubmissionTargetSelection, WorkspaceError> {
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let run = self
+            .journal_recommendation_runs(workspace_id)?
+            .into_iter()
+            .find(|run| run.run_id == recommendation_run_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        if run.manuscript_version != manifest.workspace.snapshot_version {
+            return Err(WorkspaceError::StaleRecommendationRun);
+        }
+        let journal =
+            journal_in_run(&run, journal_id).ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let selected_unix_ms = target_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        let selection = build_target_selection(
+            workspace_id,
+            manifest.workspace.snapshot_version,
+            recommendation_run_id,
+            journal,
+            "primary",
+            0,
+            selected_unix_ms,
+        )?;
+        let targets_root = workspace_root.join("targets");
+        write_immutable_record(
+            &targets_root,
+            &selection.selection_id,
+            "target.json",
+            &selection,
+        )?;
+        fs::create_dir_all(&targets_root)?;
+        write_or_replace_json(&targets_root.join("current.json"), &selection)?;
+        let mut plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        plan.primary = Some(selection.clone());
+        plan.backups
+            .retain(|candidate| candidate.journal_id != journal_id);
+        plan.updated_unix_ms = selected_unix_ms;
+        write_or_replace_json(&targets_root.join("plan.json"), &plan)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_target_selected",
+            &manifest.workspace,
+            selected_unix_ms,
+        )?;
+        Ok(selection)
+    }
+
+    pub fn add_backup_recommended_journal(
+        &self,
+        workspace_id: &str,
+        recommendation_run_id: &str,
+        journal_id: &str,
+    ) -> Result<SubmissionTargetPlan, WorkspaceError> {
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let run = self
+            .journal_recommendation_runs(workspace_id)?
+            .into_iter()
+            .find(|run| run.run_id == recommendation_run_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        if run.manuscript_version != manifest.workspace.snapshot_version {
+            return Err(WorkspaceError::StaleRecommendationRun);
+        }
+        let journal =
+            journal_in_run(&run, journal_id).ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let mut plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        if plan
+            .primary
+            .as_ref()
+            .is_some_and(|target| target.journal_id == journal_id)
+            || plan
+                .backups
+                .iter()
+                .any(|target| target.journal_id == journal_id)
+        {
+            return Ok(plan);
+        }
+        if plan.backups.len() >= 8 {
+            return Err(WorkspaceError::SubmissionBackupLimitReached);
+        }
+        let selected_unix_ms = unix_time_ms()?;
+        let selection = build_target_selection(
+            workspace_id,
+            manifest.workspace.snapshot_version,
+            recommendation_run_id,
+            journal,
+            "backup",
+            plan.backups.len() as u32 + 1,
+            selected_unix_ms,
+        )?;
+        let targets_root = workspace_root.join("targets");
+        write_immutable_record(
+            &targets_root,
+            &selection.selection_id,
+            "target.json",
+            &selection,
+        )?;
+        plan.backups.push(selection);
+        plan.updated_unix_ms = selected_unix_ms;
+        write_or_replace_json(&targets_root.join("plan.json"), &plan)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_backup_added",
+            &manifest.workspace,
+            selected_unix_ms,
+        )?;
+        Ok(plan)
+    }
+
+    pub fn promote_backup_target(
+        &self,
+        workspace_id: &str,
+        backup_selection_id: &str,
+        reason: &str,
+    ) -> Result<SubmissionTargetPlan, WorkspaceError> {
+        if !matches!(reason, "not_submitted" | "rejected" | "withdrawn") {
+            return Err(WorkspaceError::InvalidSubmissionTargetPlan);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let mut plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        let index = plan
+            .backups
+            .iter()
+            .position(|target| target.selection_id == backup_selection_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let backup = plan.backups.remove(index);
+        let prepared_requirements =
+            read_journal_requirement_snapshot(&workspace_root, &backup.selection_id)?;
+        let transitioned_unix_ms = target_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        let selection = build_target_selection_from_existing(
+            &backup,
+            manifest.workspace.snapshot_version,
+            "primary",
+            0,
+            transitioned_unix_ms,
+        )?;
+        let targets_root = workspace_root.join("targets");
+        write_immutable_record(
+            &targets_root,
+            &selection.selection_id,
+            "target.json",
+            &selection,
+        )?;
+        write_or_replace_json(&targets_root.join("current.json"), &selection)?;
+        let transition_id = Uuid::new_v4().to_string();
+        let from_selection_id = plan
+            .primary
+            .as_ref()
+            .map(|target| target.selection_id.clone());
+        let payload = SubmissionTargetTransitionPayload {
+            schema_version: 1,
+            transition_id: &transition_id,
+            workspace_id,
+            from_selection_id: &from_selection_id,
+            to_selection_id: &selection.selection_id,
+            reason,
+            transitioned_unix_ms,
+        };
+        let transition_record_hash = hash_serializable(&payload)?;
+        let transition = SubmissionTargetTransition {
+            schema_version: 1,
+            transition_id: transition_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            from_selection_id,
+            to_selection_id: selection.selection_id.clone(),
+            reason: reason.to_owned(),
+            transitioned_unix_ms,
+            record_hash: transition_record_hash,
+        };
+        write_immutable_record(
+            &targets_root.join("transitions"),
+            &transition_id,
+            "transition.json",
+            &transition,
+        )?;
+        plan.primary = Some(selection);
+        plan.updated_unix_ms = transitioned_unix_ms;
+        write_or_replace_json(&targets_root.join("plan.json"), &plan)?;
+        if let (Some(snapshot), Some(primary)) = (prepared_requirements, plan.primary.as_ref()) {
+            rebind_journal_requirement_snapshot(&workspace_root, primary, snapshot)?;
+        }
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_backup_promoted",
+            &manifest.workspace,
+            transitioned_unix_ms,
+        )?;
+        Ok(plan)
+    }
+
+    pub fn submission_target_plan(
+        &self,
+        workspace_id: &str,
+    ) -> Result<SubmissionTargetPlan, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        read_submission_target_plan(&workspace_root, workspace_id)
+    }
+
+    pub fn submission_target(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<SubmissionTargetSelection>, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        read_submission_target(&workspace_root)
+    }
+
+    pub fn save_journal_requirement_snapshot(
+        &self,
+        workspace_id: &str,
+        target_selection_id: &str,
+        documents: &[JournalRequirementSourceDocument],
+        source_mode: JournalRequirementSourceMode,
+        author_attested_official: bool,
+        external_transmission: &str,
+    ) -> Result<JournalRequirementSnapshot, WorkspaceError> {
+        if documents.is_empty()
+            || documents.iter().any(|document| {
+                !document.url.starts_with("https://")
+                    || document.text.trim().chars().count() < 20
+                    || document.text.chars().count() > 1_000_000
+            })
+            || (source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText
+                && !author_attested_official)
+        {
+            return Err(WorkspaceError::InvalidJournalRequirementSource);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        let target = plan
+            .primary
+            .iter()
+            .chain(plan.backups.iter())
+            .find(|target| target.selection_id == target_selection_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let captured_unix_ms = unix_time_ms()?;
+        let (sources, requirements) = extract_journal_requirements(documents, captured_unix_ms);
+        let status = if requirements.is_empty() {
+            JournalRequirementStatus::RequiresManualReview
+        } else if source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText {
+            JournalRequirementStatus::AuthorAttestedOfficial
+        } else {
+            JournalRequirementStatus::OfficialSourcesCaptured
+        };
+        let mut limitations =
+            vec!["自动抽取只建立带来源的准备清单，不替代作者对官网原文的最终核对".to_owned()];
+        if requirements.is_empty() {
+            limitations
+                .push("已保存官方页面指纹，但未识别到明确投稿条目；请粘贴作者指南原文".to_owned());
+        }
+        if documents
+            .iter()
+            .any(|document| !document.official_host_matched)
+        {
+            limitations.push("部分来源由作者确认，域名未与期刊主页自动匹配".to_owned());
+        }
+        let fresh_until_unix_ms = captured_unix_ms
+            .saturating_add(JOURNAL_REQUIREMENT_FRESHNESS_DAYS * 24 * 60 * 60 * 1_000);
+        let snapshot_id = Uuid::new_v4().to_string();
+        let payload = JournalRequirementSnapshotPayload {
+            schema_version: JOURNAL_REQUIREMENT_SCHEMA_VERSION,
+            snapshot_id: &snapshot_id,
+            workspace_id,
+            target_selection_id,
+            journal_id: &target.journal_id,
+            journal_name: &target.name,
+            source_mode,
+            status,
+            sources: &sources,
+            requirements: &requirements,
+            limitations: &limitations,
+            captured_unix_ms,
+            fresh_until_unix_ms,
+            external_transmission,
+        };
+        let requirement_record_hash = hash_serializable(&payload)?;
+        let snapshot = JournalRequirementSnapshot {
+            schema_version: JOURNAL_REQUIREMENT_SCHEMA_VERSION,
+            snapshot_id: snapshot_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+            target_selection_id: target_selection_id.to_owned(),
+            journal_id: target.journal_id.clone(),
+            journal_name: target.name.clone(),
+            source_mode,
+            status,
+            sources,
+            requirements,
+            limitations,
+            captured_unix_ms,
+            fresh_until_unix_ms,
+            record_hash: requirement_record_hash,
+            external_transmission: external_transmission.to_owned(),
+        };
+        let requirements_root = workspace_root
+            .join("targets")
+            .join(target_selection_id)
+            .join("requirements");
+        write_immutable_record(
+            &requirements_root,
+            &snapshot_id,
+            "requirements.json",
+            &snapshot,
+        )?;
+        write_or_replace_json(&requirements_root.join("current.json"), &snapshot)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "journal_requirements_captured",
+            &manifest.workspace,
+            captured_unix_ms,
+        )?;
+        Ok(snapshot)
+    }
+
+    pub fn journal_requirement_snapshot(
+        &self,
+        workspace_id: &str,
+        target_selection_id: &str,
+    ) -> Result<Option<JournalRequirementSnapshot>, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        Uuid::parse_str(target_selection_id)
+            .map_err(|_| WorkspaceError::InvalidSubmissionTargetPlan)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        read_journal_requirement_snapshot(&workspace_root, target_selection_id)
+    }
+
+    pub fn journal_requirement_snapshots(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<JournalRequirementSnapshot>, WorkspaceError> {
+        let plan = self.submission_target_plan(workspace_id)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let mut snapshots = Vec::new();
+        for target in plan.primary.iter().chain(plan.backups.iter()) {
+            if let Some(snapshot) =
+                read_journal_requirement_snapshot(&workspace_root, &target.selection_id)?
+            {
+                snapshots.push(snapshot);
+            }
+        }
+        Ok(snapshots)
+    }
+
     pub fn lifecycle(&self, workspace_id: &str) -> Result<WorkspaceLifecycle, WorkspaceError> {
         Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
         let workspace_root = self.projects_root().join(workspace_id);
@@ -1347,15 +2256,22 @@ impl WorkspaceStore {
             return Err(WorkspaceError::InvalidWorkspaceId);
         }
         let structure_report = read_current_structure_report(&workspace_root, &manifest.workspace)?;
-        let readiness_report = read_current_readiness_report(&workspace_root, &manifest.workspace)?;
+        let submission_target = read_submission_target(&workspace_root)?;
+        let readiness_report = read_current_readiness_report(&workspace_root, &manifest.workspace)?
+            .filter(|report| {
+                readiness_matches_target(report, submission_target.as_ref(), &manifest.workspace)
+            });
         let attestation = match &readiness_report {
             Some(report) => read_current_attestation(&workspace_root, &manifest.workspace, report)?,
             None => None,
         };
         let submission = match &attestation {
-            Some(attestation) => {
-                read_current_submission(&workspace_root, &manifest.workspace, attestation)?
-            }
+            Some(attestation) => read_current_submission(
+                &workspace_root,
+                &manifest.workspace,
+                attestation,
+                submission_target.as_ref(),
+            )?,
             None => None,
         };
         let knowledge_body = match &submission {
@@ -1364,6 +2280,23 @@ impl WorkspaceStore {
             }
             None => None,
         };
+        let submission_target_plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        let journal_requirements = submission_target
+            .as_ref()
+            .map(|selection| {
+                read_journal_requirement_snapshot(&workspace_root, &selection.selection_id)
+            })
+            .transpose()?
+            .flatten();
+        let submission_materials = build_submission_material_catalog(
+            &manifest.workspace,
+            read_stored_submission_materials(&workspace_root)?,
+            structure_report.as_ref(),
+            readiness_report.as_ref(),
+            submission_target.as_ref(),
+            journal_requirements.as_ref(),
+            unix_time_ms()?,
+        );
         Ok(WorkspaceLifecycle {
             workspace_id: workspace_id.to_owned(),
             current_version: manifest.workspace.snapshot_version,
@@ -1372,6 +2305,10 @@ impl WorkspaceStore {
             attestation,
             submission,
             knowledge_body,
+            submission_materials,
+            submission_target,
+            submission_target_plan,
+            journal_requirements,
         })
     }
 
@@ -1542,6 +2479,178 @@ impl WorkspaceStore {
         result
     }
 
+    pub fn export_target_submission_package(
+        &self,
+        workspace_id: &str,
+        destination: &Path,
+    ) -> Result<TargetSubmissionExport, WorkspaceError> {
+        if !destination.is_dir() {
+            return Err(WorkspaceError::InvalidExportDestination);
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let target = read_submission_target(&workspace_root)?
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let journal_requirements =
+            read_journal_requirement_snapshot(&workspace_root, &target.selection_id)?;
+        let material_catalog = self.submission_materials(workspace_id)?;
+        let stored_materials = read_stored_submission_materials(&workspace_root)?;
+        let exported_unix_ms = unix_time_ms()?;
+        if target.selected_against_manuscript_version != manifest.workspace.snapshot_version {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "目标期刊并非基于当前稿件版本选择，请重新确认目标期刊".to_owned(),
+            ));
+        }
+        let requirements_ready = journal_requirements.as_ref().is_some_and(|snapshot| {
+            snapshot.target_selection_id == target.selection_id
+                && snapshot.status != JournalRequirementStatus::RequiresManualReview
+                && !snapshot.requirements.is_empty()
+                && snapshot.fresh_until_unix_ms >= exported_unix_ms
+        });
+        if !requirements_ready {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "尚未完成当前目标期刊的官方投稿要求核验，不能生成投稿包".to_owned(),
+            ));
+        }
+        if !material_catalog.target_check_ready {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "当前目标期刊的必需投稿材料尚未备齐，不能生成投稿包".to_owned(),
+            ));
+        }
+        let readiness_report = read_current_readiness_report(&workspace_root, &manifest.workspace)?
+            .filter(|report| readiness_matches_target(report, Some(&target), &manifest.workspace));
+        let target_component = safe_export_component(if target.name_en.trim().is_empty() {
+            &target.name
+        } else {
+            &target.name_en
+        });
+        let package_name = format!(
+            "ManuscriptDock-{}-v{}",
+            if target_component.is_empty() {
+                "target"
+            } else {
+                &target_component
+            },
+            manifest.workspace.snapshot_version
+        );
+        let final_root = destination.join(&package_name);
+        if final_root.exists() {
+            return Err(WorkspaceError::ExportDestinationExists);
+        }
+        let temporary_root = destination.join(format!(".manuscriptdock-{}.tmp", Uuid::new_v4()));
+        let submission_root = temporary_root.join("submission");
+        let records_root = temporary_root.join("records");
+        fs::create_dir_all(&submission_root)?;
+        fs::create_dir_all(&records_root)?;
+        let mut files = Vec::new();
+        let warnings = material_catalog
+            .checklist
+            .iter()
+            .filter(|item| item.status != "complete")
+            .map(|item| format!("{}：{}", item.label, item.detail))
+            .collect::<Vec<_>>();
+        let result = (|| {
+            let manuscript_name = format!("manuscript.{}", manifest.workspace.manuscript.extension);
+            let manuscript_relative = format!("submission/{manuscript_name}");
+            let snapshot = self.source_snapshot_path(workspace_id)?;
+            verify_snapshot(&snapshot, &manifest.workspace)?;
+            fs::copy(&snapshot, submission_root.join(&manuscript_name))?;
+            files.push(manuscript_relative);
+
+            let mut used_names = BTreeSet::new();
+            for stored in &stored_materials.materials {
+                let source = resolve_snapshot_path(&workspace_root, &stored.relative_path)?;
+                let category = material_kind_folder(stored.material.kind);
+                let category_root = submission_root.join(category);
+                fs::create_dir_all(&category_root)?;
+                let mut exported_name = safe_export_file_name(&stored.material.original_name);
+                if exported_name.is_empty() {
+                    exported_name = format!(
+                        "{}.{}",
+                        &stored.material.material_id[..8],
+                        stored.material.extension
+                    );
+                }
+                let unique_key = format!("{category}/{exported_name}");
+                if !used_names.insert(unique_key) {
+                    exported_name =
+                        format!("{}-{exported_name}", &stored.material.material_id[..8]);
+                }
+                let relative = format!("submission/{category}/{exported_name}");
+                fs::copy(&source, temporary_root.join(&relative))?;
+                files.push(relative);
+            }
+
+            write_json(&records_root.join("target-selection.json"), &target)?;
+            if let Some(snapshot) = journal_requirements.as_ref() {
+                write_json(&records_root.join("journal-requirements.json"), snapshot)?;
+            }
+            if let Some(report) = readiness_report.as_ref() {
+                write_json(&records_root.join("readiness-report.json"), &report)?;
+            }
+            let package_manifest = TargetSubmissionPackageManifest {
+                schema_version: 1,
+                workspace_id,
+                manuscript_version: manifest.workspace.snapshot_version,
+                manuscript_hash: &manifest.workspace.content_hash,
+                target_selection: &target,
+                journal_requirement_snapshot: journal_requirements.as_ref(),
+                submission_files: &files,
+                warnings: &warnings,
+                created_unix_ms: exported_unix_ms,
+                external_transmission: "not_performed",
+            };
+            write_json(
+                &records_root.join("package-manifest.json"),
+                &package_manifest,
+            )?;
+            write_text(
+                &temporary_root.join("README.txt"),
+                &format!(
+                    "ManuscriptDock 目标期刊投稿包\n\n目标：{}\n出版社：{}\n\n请只从 submission 文件夹选择期刊系统要求上传的文件。records 文件夹仅用于本地核验，不要上传。\n{}",
+                    target.name,
+                    target.publisher,
+                    if warnings.is_empty() {
+                        "当前通用必需材料检查已通过；仍须以期刊官网最新作者指南为准。".to_owned()
+                    } else {
+                        format!("尚有 {} 项提示，请在上传前逐项核对。", warnings.len())
+                    }
+                ),
+            )?;
+            let mut exported_files = files.clone();
+            exported_files.push("records/target-selection.json".to_owned());
+            if records_root.join("readiness-report.json").is_file() {
+                exported_files.push("records/readiness-report.json".to_owned());
+            }
+            if records_root.join("journal-requirements.json").is_file() {
+                exported_files.push("records/journal-requirements.json".to_owned());
+            }
+            exported_files.push("records/package-manifest.json".to_owned());
+            exported_files.push("README.txt".to_owned());
+            fs::rename(&temporary_root, &final_root)?;
+            append_audit_event(
+                &workspace_root.join("audit.jsonl"),
+                "target_submission_package_exported",
+                &manifest.workspace,
+                exported_unix_ms,
+            )?;
+            Ok(TargetSubmissionExport {
+                package_name,
+                manuscript_version: manifest.workspace.snapshot_version,
+                target_selection_id: target.selection_id,
+                target_name: target.name,
+                files: exported_files,
+                warnings,
+                exported_unix_ms,
+                external_transmission: "not_performed".to_owned(),
+            })
+        })();
+        if temporary_root.exists() {
+            let _ = remove_generated_directory(&temporary_root);
+        }
+        result
+    }
+
     pub fn record_manual_submission(
         &self,
         workspace_id: &str,
@@ -1552,8 +2661,8 @@ impl WorkspaceStore {
         if !author_confirmed {
             return Err(WorkspaceError::AuthorConfirmationRequired);
         }
-        let target = target.trim();
-        if target.is_empty() || target.chars().count() > 200 {
+        let requested_target = target.trim();
+        if requested_target.is_empty() || requested_target.chars().count() > 200 {
             return Err(WorkspaceError::InvalidSubmissionTarget);
         }
         let receipt = receipt
@@ -1567,9 +2676,23 @@ impl WorkspaceStore {
             return Err(WorkspaceError::InvalidSubmissionTarget);
         }
         let lifecycle = self.lifecycle(workspace_id)?;
-        let attestation = lifecycle
-            .attestation
-            .ok_or(WorkspaceError::MissingCurrentAttestation)?;
+        let selected_target = lifecycle
+            .submission_target
+            .as_ref()
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        if selected_target.selected_against_manuscript_version != lifecycle.current_version {
+            return Err(WorkspaceError::InvalidSubmissionTargetPlan);
+        }
+        if requested_target != selected_target.name && requested_target != selected_target.name_en {
+            return Err(WorkspaceError::InvalidSubmissionTargetPlan);
+        }
+        let target = selected_target.name.as_str();
+        let target_selection_id = Some(selected_target.selection_id.clone());
+        let publisher = Some(selected_target.publisher.clone());
+        let attestation = match lifecycle.attestation {
+            Some(attestation) => attestation,
+            None => self.create_local_attestation(workspace_id, true)?,
+        };
         if let Some(existing) = lifecycle.submission {
             return Ok(existing);
         }
@@ -1582,11 +2705,14 @@ impl WorkspaceStore {
                 .to_owned();
         let external_transmission = "not_performed".to_owned();
         let payload = SubmissionPayload {
+            schema_version: 2,
             submission_id: &submission_id,
             workspace_id,
             manuscript_version: manifest.workspace.snapshot_version,
             attestation_id: &attestation.attestation_id,
+            target_selection_id: &target_selection_id,
             target,
+            publisher: &publisher,
             receipt: &receipt,
             submitted_unix_ms,
             statement: &statement,
@@ -1594,11 +2720,14 @@ impl WorkspaceStore {
         };
         let record_hash = hash_serializable(&payload)?;
         let record = SubmissionRecord {
+            schema_version: 2,
             submission_id: submission_id.clone(),
             workspace_id: workspace_id.to_owned(),
             manuscript_version: manifest.workspace.snapshot_version,
             attestation_id: attestation.attestation_id,
+            target_selection_id,
             target: target.to_owned(),
+            publisher,
             receipt,
             submitted_unix_ms,
             statement,
@@ -2268,6 +3397,28 @@ fn read_current_readiness_report(
     Ok(reports.pop())
 }
 
+fn readiness_matches_target(
+    report: &ReadinessReport,
+    target: Option<&SubmissionTargetSelection>,
+    workspace: &WorkspaceSummary,
+) -> bool {
+    target.is_none_or(|target| {
+        target.selected_against_manuscript_version == workspace.snapshot_version
+            && report.generated_unix_ms >= target.selected_unix_ms
+    })
+}
+
+fn target_change_unix_ms(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+) -> Result<u64, WorkspaceError> {
+    let current = unix_time_ms()?;
+    let after_readiness = read_current_readiness_report(workspace_root, workspace)?
+        .map(|report| report.generated_unix_ms.saturating_add(1))
+        .unwrap_or(0);
+    Ok(current.max(after_readiness))
+}
+
 fn read_current_attestation(
     workspace_root: &Path,
     workspace: &WorkspaceSummary,
@@ -2294,6 +3445,7 @@ fn read_current_submission(
     workspace_root: &Path,
     workspace: &WorkspaceSummary,
     attestation: &LocalAttestation,
+    target: Option<&SubmissionTargetSelection>,
 ) -> Result<Option<SubmissionRecord>, WorkspaceError> {
     let mut records = read_nested_records::<SubmissionRecord>(
         &workspace_root.join("submissions"),
@@ -2306,6 +3458,11 @@ fn read_current_submission(
         record.workspace_id == workspace.id
             && record.manuscript_version == workspace.snapshot_version
             && record.attestation_id == attestation.attestation_id
+            && target.is_none_or(|target| {
+                record.target_selection_id.as_deref() == Some(target.selection_id.as_str())
+                    || (record.target_selection_id.is_none()
+                        && (record.target == target.name || record.target == target.name_en))
+            })
     });
     records.sort_by_key(|record| record.submitted_unix_ms);
     Ok(records.pop())
@@ -2417,18 +3574,35 @@ fn verify_attestation_record(record: &LocalAttestation) -> Result<(), WorkspaceE
 }
 
 fn verify_submission_record(record: &SubmissionRecord) -> Result<(), WorkspaceError> {
-    let payload = SubmissionPayload {
-        submission_id: &record.submission_id,
-        workspace_id: &record.workspace_id,
-        manuscript_version: record.manuscript_version,
-        attestation_id: &record.attestation_id,
-        target: &record.target,
-        receipt: &record.receipt,
-        submitted_unix_ms: record.submitted_unix_ms,
-        statement: &record.statement,
-        external_transmission: &record.external_transmission,
+    let expected = if record.schema_version >= 2 {
+        hash_serializable(&SubmissionPayload {
+            schema_version: record.schema_version,
+            submission_id: &record.submission_id,
+            workspace_id: &record.workspace_id,
+            manuscript_version: record.manuscript_version,
+            attestation_id: &record.attestation_id,
+            target_selection_id: &record.target_selection_id,
+            target: &record.target,
+            publisher: &record.publisher,
+            receipt: &record.receipt,
+            submitted_unix_ms: record.submitted_unix_ms,
+            statement: &record.statement,
+            external_transmission: &record.external_transmission,
+        })?
+    } else {
+        hash_serializable(&LegacySubmissionPayload {
+            submission_id: &record.submission_id,
+            workspace_id: &record.workspace_id,
+            manuscript_version: record.manuscript_version,
+            attestation_id: &record.attestation_id,
+            target: &record.target,
+            receipt: &record.receipt,
+            submitted_unix_ms: record.submitted_unix_ms,
+            statement: &record.statement,
+            external_transmission: &record.external_transmission,
+        })?
     };
-    if hash_serializable(&payload)? != record.record_hash {
+    if expected != record.record_hash {
         return Err(WorkspaceError::InvalidManifest(
             "投稿登记记录完整性验证失败".to_owned(),
         ));
@@ -2577,6 +3751,53 @@ fn copy_and_hash(source_path: &Path, destination: &Path) -> Result<(String, u64)
     Ok((hex::encode(hasher.finalize()), copied_size))
 }
 
+fn copy_workspace_tree(
+    source: &Path,
+    destination: &Path,
+    file_count: &mut u32,
+) -> Result<(), WorkspaceError> {
+    fs::create_dir(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            return Err(WorkspaceError::InvalidManifest(
+                "工作区包含符号链接，已停止另存".to_owned(),
+            ));
+        }
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_workspace_tree(&entry.path(), &target, file_count)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target)?;
+            *file_count = file_count.saturating_add(1);
+        } else {
+            return Err(WorkspaceError::InvalidManifest(
+                "工作区包含不支持的文件类型，已停止另存".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn safe_export_component(value: &str) -> String {
+    value
+        .chars()
+        .filter_map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_') {
+                Some(character)
+            } else if character.is_whitespace() {
+                Some('-')
+            } else {
+                None
+            }
+        })
+        .take(60)
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned()
+}
+
 fn verify_snapshot(
     snapshot_path: &Path,
     workspace: &WorkspaceSummary,
@@ -2634,6 +3855,568 @@ fn set_readonly(path: &Path) -> Result<(), WorkspaceError> {
     Ok(())
 }
 
+fn is_allowed_submission_material_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "doc"
+            | "docx"
+            | "rtf"
+            | "tex"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "bib"
+            | "bbl"
+            | "bst"
+            | "cls"
+            | "sty"
+            | "pdf"
+            | "eps"
+            | "svg"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "tif"
+            | "tiff"
+            | "csv"
+            | "xls"
+            | "xlsx"
+            | "txt"
+    )
+}
+
+fn material_kind_folder(kind: SubmissionMaterialKind) -> &'static str {
+    match kind {
+        SubmissionMaterialKind::SourceProject => "source-project",
+        SubmissionMaterialKind::Figure => "figures",
+        SubmissionMaterialKind::Table => "tables",
+        SubmissionMaterialKind::Bibliography => "bibliography",
+        SubmissionMaterialKind::Supplementary => "supplementary",
+        SubmissionMaterialKind::CoverLetter => "cover-letter",
+        SubmissionMaterialKind::TitlePage => "title-page",
+        SubmissionMaterialKind::Declaration => "declarations",
+        SubmissionMaterialKind::Other => "other",
+    }
+}
+
+fn safe_export_file_name(value: &str) -> String {
+    let path = Path::new(value);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(safe_export_component)
+        .unwrap_or_default();
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| is_allowed_submission_material_extension(value));
+    match (stem.is_empty(), extension) {
+        (false, Some(extension)) => format!("{stem}.{extension}"),
+        (false, None) => stem,
+        _ => String::new(),
+    }
+}
+
+fn read_stored_submission_materials(
+    workspace_root: &Path,
+) -> Result<StoredSubmissionMaterialCatalog, WorkspaceError> {
+    let path = workspace_root.join("materials").join("catalog.json");
+    if !path.exists() {
+        return Ok(StoredSubmissionMaterialCatalog {
+            schema_version: 1,
+            materials: Vec::new(),
+        });
+    }
+    let catalog: StoredSubmissionMaterialCatalog = read_json(&path)?;
+    for item in &catalog.materials {
+        let stored_path = resolve_snapshot_path(workspace_root, &item.relative_path)?;
+        if !stored_path.is_file() {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+                "缺少已登记文件 {}",
+                item.material.original_name
+            )));
+        }
+        verify_file_hash(&stored_path, &item.material.content_hash)?;
+    }
+    Ok(catalog)
+}
+
+fn read_submission_target(
+    workspace_root: &Path,
+) -> Result<Option<SubmissionTargetSelection>, WorkspaceError> {
+    let path = workspace_root.join("targets").join("current.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let target: SubmissionTargetSelection = read_json(&path)?;
+    Ok(Some(target))
+}
+
+fn read_submission_target_plan(
+    workspace_root: &Path,
+    workspace_id: &str,
+) -> Result<SubmissionTargetPlan, WorkspaceError> {
+    let path = workspace_root.join("targets").join("plan.json");
+    if path.exists() {
+        let plan: SubmissionTargetPlan = read_json(&path)?;
+        if plan.workspace_id != workspace_id || plan.schema_version != 1 {
+            return Err(WorkspaceError::InvalidSubmissionTargetPlan);
+        }
+        return Ok(plan);
+    }
+    Ok(SubmissionTargetPlan {
+        schema_version: 1,
+        workspace_id: workspace_id.to_owned(),
+        primary: read_submission_target(workspace_root)?,
+        backups: Vec::new(),
+        updated_unix_ms: 0,
+    })
+}
+
+fn read_journal_requirement_snapshot(
+    workspace_root: &Path,
+    target_selection_id: &str,
+) -> Result<Option<JournalRequirementSnapshot>, WorkspaceError> {
+    let path = workspace_root
+        .join("targets")
+        .join(target_selection_id)
+        .join("requirements")
+        .join("current.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let snapshot: JournalRequirementSnapshot = read_json(&path)?;
+    if snapshot.schema_version != JOURNAL_REQUIREMENT_SCHEMA_VERSION
+        || snapshot.target_selection_id != target_selection_id
+    {
+        return Err(WorkspaceError::InvalidJournalRequirementSource);
+    }
+    let payload = JournalRequirementSnapshotPayload {
+        schema_version: snapshot.schema_version,
+        snapshot_id: &snapshot.snapshot_id,
+        workspace_id: &snapshot.workspace_id,
+        target_selection_id: &snapshot.target_selection_id,
+        journal_id: &snapshot.journal_id,
+        journal_name: &snapshot.journal_name,
+        source_mode: snapshot.source_mode,
+        status: snapshot.status,
+        sources: &snapshot.sources,
+        requirements: &snapshot.requirements,
+        limitations: &snapshot.limitations,
+        captured_unix_ms: snapshot.captured_unix_ms,
+        fresh_until_unix_ms: snapshot.fresh_until_unix_ms,
+        external_transmission: &snapshot.external_transmission,
+    };
+    if hash_serializable(&payload)? != snapshot.record_hash {
+        return Err(WorkspaceError::InvalidJournalRequirementSource);
+    }
+    Ok(Some(snapshot))
+}
+
+fn rebind_journal_requirement_snapshot(
+    workspace_root: &Path,
+    target: &SubmissionTargetSelection,
+    mut snapshot: JournalRequirementSnapshot,
+) -> Result<(), WorkspaceError> {
+    snapshot.snapshot_id = Uuid::new_v4().to_string();
+    snapshot.target_selection_id = target.selection_id.clone();
+    snapshot.journal_id = target.journal_id.clone();
+    snapshot.journal_name = target.name.clone();
+    snapshot
+        .limitations
+        .push("该要求快照由已准备的备选支线继承；正式投稿前仍应检查新鲜度".to_owned());
+    let payload = JournalRequirementSnapshotPayload {
+        schema_version: snapshot.schema_version,
+        snapshot_id: &snapshot.snapshot_id,
+        workspace_id: &snapshot.workspace_id,
+        target_selection_id: &snapshot.target_selection_id,
+        journal_id: &snapshot.journal_id,
+        journal_name: &snapshot.journal_name,
+        source_mode: snapshot.source_mode,
+        status: snapshot.status,
+        sources: &snapshot.sources,
+        requirements: &snapshot.requirements,
+        limitations: &snapshot.limitations,
+        captured_unix_ms: snapshot.captured_unix_ms,
+        fresh_until_unix_ms: snapshot.fresh_until_unix_ms,
+        external_transmission: &snapshot.external_transmission,
+    };
+    snapshot.record_hash = hash_serializable(&payload)?;
+    let requirements_root = workspace_root
+        .join("targets")
+        .join(&target.selection_id)
+        .join("requirements");
+    write_immutable_record(
+        &requirements_root,
+        &snapshot.snapshot_id,
+        "requirements.json",
+        &snapshot,
+    )?;
+    write_or_replace_json(&requirements_root.join("current.json"), &snapshot)
+}
+
+fn build_target_selection(
+    workspace_id: &str,
+    manuscript_version: u32,
+    recommendation_run_id: &str,
+    journal: &JournalRecommendation,
+    plan_role: &str,
+    priority: u32,
+    selected_unix_ms: u64,
+) -> Result<SubmissionTargetSelection, WorkspaceError> {
+    let region = match journal.region {
+        crate::JournalRegion::Domestic => "domestic",
+        crate::JournalRegion::International => "international",
+    }
+    .to_owned();
+    finalize_target_selection(SubmissionTargetSelection {
+        schema_version: 2,
+        selection_id: Uuid::new_v4().to_string(),
+        workspace_id: workspace_id.to_owned(),
+        selected_against_manuscript_version: manuscript_version,
+        recommendation_run_id: recommendation_run_id.to_owned(),
+        journal_id: journal.id.clone(),
+        name: journal.name.clone(),
+        name_en: journal.name_en.clone(),
+        publisher: journal.publisher.clone(),
+        region,
+        rank_system: journal.rank_system.clone(),
+        rank_tier: journal.rank_tier.clone(),
+        homepage_url: journal.homepage_url.clone(),
+        plan_role: plan_role.to_owned(),
+        priority,
+        selected_unix_ms,
+        record_hash: String::new(),
+        external_transmission: "not_performed".to_owned(),
+    })
+}
+
+fn build_target_selection_from_existing(
+    existing: &SubmissionTargetSelection,
+    manuscript_version: u32,
+    plan_role: &str,
+    priority: u32,
+    selected_unix_ms: u64,
+) -> Result<SubmissionTargetSelection, WorkspaceError> {
+    let mut selection = existing.clone();
+    selection.schema_version = 2;
+    selection.selection_id = Uuid::new_v4().to_string();
+    selection.selected_against_manuscript_version = manuscript_version;
+    selection.plan_role = plan_role.to_owned();
+    selection.priority = priority;
+    selection.selected_unix_ms = selected_unix_ms;
+    selection.record_hash.clear();
+    finalize_target_selection(selection)
+}
+
+fn finalize_target_selection(
+    mut selection: SubmissionTargetSelection,
+) -> Result<SubmissionTargetSelection, WorkspaceError> {
+    let payload = SubmissionTargetPayload {
+        schema_version: selection.schema_version,
+        selection_id: &selection.selection_id,
+        workspace_id: &selection.workspace_id,
+        selected_against_manuscript_version: selection.selected_against_manuscript_version,
+        recommendation_run_id: &selection.recommendation_run_id,
+        journal_id: &selection.journal_id,
+        name: &selection.name,
+        name_en: &selection.name_en,
+        publisher: &selection.publisher,
+        region: &selection.region,
+        rank_system: &selection.rank_system,
+        rank_tier: &selection.rank_tier,
+        homepage_url: &selection.homepage_url,
+        plan_role: &selection.plan_role,
+        priority: selection.priority,
+        selected_unix_ms: selection.selected_unix_ms,
+        external_transmission: &selection.external_transmission,
+    };
+    selection.record_hash = hash_serializable(&payload)?;
+    Ok(selection)
+}
+
+fn journal_in_run<'a>(
+    run: &'a JournalRecommendationRun,
+    journal_id: &str,
+) -> Option<&'a JournalRecommendation> {
+    [&run.domestic, &run.international]
+        .into_iter()
+        .flat_map(|portfolio| {
+            portfolio
+                .sprint
+                .iter()
+                .chain(portfolio.matching.iter())
+                .chain(portfolio.safeguard.iter())
+        })
+        .find(|journal| journal.id == journal_id)
+}
+
+fn build_submission_material_catalog(
+    workspace: &WorkspaceSummary,
+    stored: StoredSubmissionMaterialCatalog,
+    structure: Option<&StructureReport>,
+    readiness: Option<&ReadinessReport>,
+    target: Option<&SubmissionTargetSelection>,
+    journal_requirements: Option<&JournalRequirementSnapshot>,
+    now_unix_ms: u64,
+) -> SubmissionMaterialCatalog {
+    let has_kind = |kind| {
+        stored
+            .materials
+            .iter()
+            .any(|item| item.material.kind == kind)
+    };
+    let figures_expected = structure.is_some_and(|report| report.figure_count > 0);
+    let tables_expected = structure.is_some_and(|report| report.table_count > 0);
+    let target_current = target.is_some_and(|selection| {
+        selection.selected_against_manuscript_version == workspace.snapshot_version
+    });
+    let requirements_current =
+        target
+            .zip(journal_requirements)
+            .is_some_and(|(selection, snapshot)| {
+                snapshot.target_selection_id == selection.selection_id
+                    && snapshot.status != JournalRequirementStatus::RequiresManualReview
+                    && !snapshot.requirements.is_empty()
+                    && snapshot.fresh_until_unix_ms >= now_unix_ms
+            });
+    let target_requires = |category| {
+        journal_requirements.is_some_and(|snapshot| {
+            snapshot.requirements.iter().any(|item| {
+                item.category == category
+                    && item.obligation == JournalRequirementObligation::Required
+            })
+        })
+    };
+    let mut checklist = vec![SubmissionMaterialChecklistItem {
+        id: "main-manuscript".to_owned(),
+        label: "当前主稿".to_owned(),
+        requirement: "required".to_owned(),
+        status: "complete".to_owned(),
+        detail: format!("已保存不可变稿件 v{}", workspace.snapshot_version),
+    }];
+    checklist.push(SubmissionMaterialChecklistItem {
+        id: "target-journal".to_owned(),
+        label: "目标期刊".to_owned(),
+        requirement: "required".to_owned(),
+        status: if target_current {
+            "complete"
+        } else {
+            "missing"
+        }
+        .to_owned(),
+        detail: match target {
+            Some(selection) if target_current => format!("已选择 {}", selection.name),
+            Some(selection) => format!("已选择 {}，需按当前稿件版本复核", selection.name),
+            None => "请先选择目标期刊".to_owned(),
+        },
+    });
+    checklist.push(SubmissionMaterialChecklistItem {
+        id: "official-journal-requirements".to_owned(),
+        label: "期刊官方投稿要求".to_owned(),
+        requirement: "required".to_owned(),
+        status: if requirements_current {
+            "complete"
+        } else {
+            "missing"
+        }
+        .to_owned(),
+        detail: match journal_requirements {
+            Some(snapshot) if requirements_current => format!(
+                "已保存 {} 个官方来源、{} 项带证据要求",
+                snapshot.sources.len(),
+                snapshot.requirements.len()
+            ),
+            Some(_) => "已取得页面，但仍需粘贴或核对明确的作者指南原文".to_owned(),
+            None if target.is_some() => "请先获取或录入该刊官方作者指南".to_owned(),
+            None => "选择目标期刊后获取官方作者指南".to_owned(),
+        },
+    });
+    checklist.push(SubmissionMaterialChecklistItem {
+        id: "current-check".to_owned(),
+        label: "当前版本检查".to_owned(),
+        requirement: "required".to_owned(),
+        status: if readiness.is_some() {
+            "complete"
+        } else {
+            "missing"
+        }
+        .to_owned(),
+        detail: if readiness.is_some() {
+            "当前稿件版本已有检查报告".to_owned()
+        } else {
+            "选择目标后运行一次投稿检查".to_owned()
+        },
+    });
+    if workspace.manuscript.kind == ManuscriptKind::Latex {
+        checklist.push(SubmissionMaterialChecklistItem {
+            id: "latex-project".to_owned(),
+            label: "完整 LaTeX 工程".to_owned(),
+            requirement: "required".to_owned(),
+            status: if has_kind(SubmissionMaterialKind::SourceProject) {
+                "complete"
+            } else {
+                "missing"
+            }
+            .to_owned(),
+            detail: "建议提供含图片、参考文献和自定义样式的 ZIP/TAR 工程包".to_owned(),
+        });
+    }
+    if figures_expected {
+        checklist.push(SubmissionMaterialChecklistItem {
+            id: "figure-originals".to_owned(),
+            label: "原始图片".to_owned(),
+            requirement: "required".to_owned(),
+            status: if has_kind(SubmissionMaterialKind::Figure) {
+                "complete"
+            } else {
+                "missing"
+            }
+            .to_owned(),
+            detail: "正文包含图片，请提供独立原图；系统不会用 PDF 截图冒充出版原图".to_owned(),
+        });
+    }
+    if tables_expected {
+        checklist.push(SubmissionMaterialChecklistItem {
+            id: "editable-tables".to_owned(),
+            label: "可编辑表格".to_owned(),
+            requirement: "recommended".to_owned(),
+            status: if has_kind(SubmissionMaterialKind::Table) {
+                "complete"
+            } else {
+                "recommended"
+            }
+            .to_owned(),
+            detail: "正文包含表格；若期刊要求独立上传，请补充可编辑文件".to_owned(),
+        });
+    }
+    let cover_letter_required = target_requires(JournalRequirementCategory::CoverLetter);
+    checklist.push(SubmissionMaterialChecklistItem {
+        id: "cover-letter".to_owned(),
+        label: "投稿附信".to_owned(),
+        requirement: if cover_letter_required {
+            "required"
+        } else {
+            "recommended"
+        }
+        .to_owned(),
+        status: if has_kind(SubmissionMaterialKind::CoverLetter) {
+            "complete"
+        } else if cover_letter_required {
+            "missing"
+        } else {
+            "recommended"
+        }
+        .to_owned(),
+        detail: if cover_letter_required {
+            "期刊官方原文包含明确的 Cover Letter 要求".to_owned()
+        } else {
+            "选定期刊后准备针对该刊的 Cover Letter".to_owned()
+        },
+    });
+    for (id, label, kind, category, detail) in [
+        (
+            "target-title-page",
+            "独立标题页",
+            SubmissionMaterialKind::TitlePage,
+            JournalRequirementCategory::TitlePage,
+            "期刊官方原文要求独立标题页",
+        ),
+        (
+            "target-supplementary",
+            "补充材料",
+            SubmissionMaterialKind::Supplementary,
+            JournalRequirementCategory::SupplementaryFiles,
+            "期刊官方原文包含明确的补充材料要求",
+        ),
+    ] {
+        if target_requires(category) {
+            checklist.push(SubmissionMaterialChecklistItem {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                requirement: "required".to_owned(),
+                status: if has_kind(kind) {
+                    "complete"
+                } else {
+                    "missing"
+                }
+                .to_owned(),
+                detail: detail.to_owned(),
+            });
+        }
+    }
+    let declaration_required = [
+        JournalRequirementCategory::Ethics,
+        JournalRequirementCategory::ConflictOfInterest,
+        JournalRequirementCategory::DataAvailability,
+        JournalRequirementCategory::AuthorContributions,
+    ]
+    .into_iter()
+    .any(target_requires);
+    if declaration_required {
+        checklist.push(SubmissionMaterialChecklistItem {
+            id: "target-declarations".to_owned(),
+            label: "投稿声明文件".to_owned(),
+            requirement: "required".to_owned(),
+            status: if has_kind(SubmissionMaterialKind::Declaration) {
+                "complete"
+            } else {
+                "missing"
+            }
+            .to_owned(),
+            detail: "期刊官方原文要求伦理、利益冲突、数据可用性或作者贡献声明".to_owned(),
+        });
+    }
+    let required_complete = checklist
+        .iter()
+        .filter(|item| item.requirement == "required")
+        .all(|item| item.status == "complete");
+    SubmissionMaterialCatalog {
+        schema_version: 1,
+        workspace_id: workspace.id.clone(),
+        manuscript_version: workspace.snapshot_version,
+        materials: stored
+            .materials
+            .into_iter()
+            .map(|item| item.material)
+            .collect(),
+        checklist,
+        required_complete,
+        target_check_ready: required_complete && target_current && requirements_current,
+    }
+}
+
+fn verify_file_hash(path: &Path, expected_hash: &str) -> Result<(), WorkspaceError> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    if hex::encode(hasher.finalize()) != expected_hash {
+        return Err(WorkspaceError::InvalidSubmissionMaterial(
+            "已保存材料的内容指纹不一致".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_or_replace_json(path: &Path, value: &impl Serialize) -> Result<(), WorkspaceError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        replace_json(path, value)
+    } else {
+        write_json(path, value)
+    }
+}
+
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), WorkspaceError> {
     let mut writer = BufWriter::new(File::create(path)?);
     serde_json::to_writer_pretty(&mut writer, value)
@@ -2647,6 +4430,52 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), WorkspaceError>
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, WorkspaceError> {
     let reader = BufReader::new(File::open(path)?);
     serde_json::from_reader(reader)
+        .map_err(|error| WorkspaceError::InvalidManifest(error.to_string()))
+}
+
+fn read_journal_recommendation_run(
+    path: &Path,
+) -> Result<JournalRecommendationRun, WorkspaceError> {
+    let mut value: serde_json::Value = read_json(path)?;
+    if value.get("domestic").is_none() || value.get("international").is_none() {
+        let object = value.as_object_mut().ok_or_else(|| {
+            WorkspaceError::InvalidManifest("期刊推荐记录不是 JSON 对象".to_owned())
+        })?;
+        let mut domestic = serde_json::Map::new();
+        let mut international = serde_json::Map::new();
+        for group in ["sprint", "matching", "safeguard"] {
+            let entries = object
+                .remove(group)
+                .and_then(|value| value.as_array().cloned())
+                .ok_or_else(|| {
+                    WorkspaceError::InvalidManifest("期刊推荐记录缺少分组".to_owned())
+                })?;
+            let mut domestic_entries = Vec::new();
+            let mut international_entries = Vec::new();
+            for entry in entries {
+                match entry.get("region").and_then(serde_json::Value::as_str) {
+                    Some("domestic") => domestic_entries.push(entry),
+                    Some("international") => international_entries.push(entry),
+                    _ => {
+                        return Err(WorkspaceError::InvalidManifest(
+                            "期刊推荐记录包含未知地区".to_owned(),
+                        ))
+                    }
+                }
+            }
+            domestic.insert(group.to_owned(), serde_json::Value::Array(domestic_entries));
+            international.insert(
+                group.to_owned(),
+                serde_json::Value::Array(international_entries),
+            );
+        }
+        object.insert("domestic".to_owned(), serde_json::Value::Object(domestic));
+        object.insert(
+            "international".to_owned(),
+            serde_json::Value::Object(international),
+        );
+    }
+    serde_json::from_value(value)
         .map_err(|error| WorkspaceError::InvalidManifest(error.to_string()))
 }
 
@@ -2862,14 +4691,15 @@ fn make_file_owner_writable(permissions: &mut fs::Permissions) {
 #[cfg(test)]
 mod tests {
     use super::{
-        make_tree_writable, read_json, DecompositionManifest, VersionCreation, VersionOrigin,
-        WorkspaceError, WorkspaceStore,
+        make_tree_writable, read_json, write_json, DecompositionManifest,
+        SubmissionTargetSelection, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
     };
     use crate::{
         ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
-        JournalRecommendationProfileInput, KnowledgeBodyError, KnowledgeCandidateDecision,
+        JournalRecommendationProfileInput, JournalRequirementSourceDocument,
+        JournalRequirementSourceMode, KnowledgeBodyError, KnowledgeCandidateDecision,
         KnowledgeInquiryStance, KnowledgeInquiryTarget, ManuscriptPurpose, ReadinessOutcome,
-        RevisionApplication, RevisionChangeInput, RevisionFieldKind,
+        RevisionApplication, RevisionChangeInput, RevisionFieldKind, SubmissionMaterialKind,
     };
     use std::{
         fs::{self, File},
@@ -2904,6 +4734,37 @@ mod tests {
             let _ = make_tree_writable(&self.0);
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn select_synthetic_target(
+        store: &WorkspaceStore,
+        workspace_id: &str,
+    ) -> (SubmissionTargetSelection, String, String, String) {
+        let profile = store
+            .save_journal_recommendation_profile(
+                workspace_id,
+                JournalRecommendationProfileInput {
+                    author_name: "Synthetic Author".into(),
+                    institution: "Synthetic University".into(),
+                    specialty: "Computer vision".into(),
+                    manuscript_purpose: ManuscriptPurpose::DegreeRequirement,
+                    submission_deadline: "2099-12-31".into(),
+                },
+            )
+            .unwrap();
+        let run = store
+            .recommend_journals(
+                workspace_id,
+                &profile.profile_id,
+                JournalMatchPreferences::default(),
+            )
+            .unwrap();
+        let journal_id = run.domestic.sprint.first().unwrap().id.clone();
+        let backup_journal_id = run.domestic.matching.first().unwrap().id.clone();
+        let target = store
+            .select_recommended_journal(workspace_id, &run.run_id, &journal_id)
+            .unwrap();
+        (target, run.run_id, journal_id, backup_journal_id)
     }
 
     #[test]
@@ -2973,9 +4834,146 @@ mod tests {
 
         assert_eq!(profile, same_profile);
         assert_eq!(run.recommendation_profile.profile_id, profile.profile_id);
-        assert_eq!(run.domestic.len(), 3);
-        assert_eq!(run.international.len(), 3);
+        assert_eq!(run.domestic.sprint.len(), 2);
+        assert_eq!(run.domestic.matching.len(), 3);
+        assert_eq!(run.domestic.safeguard.len(), 3);
+        assert_eq!(run.international.sprint.len(), 2);
+        assert_eq!(run.international.matching.len(), 3);
+        assert_eq!(run.international.safeguard.len(), 3);
         assert!(run.school_rule_status.contains("search_required"));
+        let recommended = run.domestic.sprint.first().unwrap();
+        let target = store
+            .select_recommended_journal(&workspace.id, &run.run_id, &recommended.id)
+            .unwrap();
+        assert_eq!(target.journal_id, recommended.id);
+        assert_eq!(
+            store.submission_target(&workspace.id).unwrap(),
+            Some(target.clone())
+        );
+        let backup_candidate = run.domestic.matching.first().unwrap();
+        let plan = store
+            .add_backup_recommended_journal(&workspace.id, &run.run_id, &backup_candidate.id)
+            .unwrap();
+        assert_eq!(
+            plan.primary.as_ref().unwrap().selection_id,
+            target.selection_id
+        );
+        assert_eq!(plan.backups.len(), 1);
+        let requirement_snapshot = store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "https://journal.example/guide-for-authors".to_owned(),
+                    title: "Guide for authors".to_owned(),
+                    text: "A separate title page is required. Figures must be supplied at 300 dpi. A cover letter is recommended.".to_owned(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::AuthorProvidedOfficialText,
+                true,
+                "not_performed",
+            )
+            .unwrap();
+        assert_eq!(requirement_snapshot.requirements.len(), 3);
+        assert_eq!(
+            store
+                .journal_requirement_snapshots(&workspace.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        let source_project = temporary.path().join("source-project.zip");
+        fs::write(&source_project, b"synthetic source project").unwrap();
+        let materials = store
+            .add_submission_materials(
+                &workspace.id,
+                SubmissionMaterialKind::SourceProject,
+                std::slice::from_ref(&source_project),
+            )
+            .unwrap();
+        assert!(!materials.required_complete);
+        assert!(!materials.target_check_ready);
+        assert!(materials
+            .checklist
+            .iter()
+            .any(|item| item.id == "latex-project" && item.status == "complete"));
+        assert_eq!(materials.materials.len(), 1);
+        let target_exports = temporary.path().join("target-exports");
+        fs::create_dir(&target_exports).unwrap();
+        assert!(matches!(
+            store.export_target_submission_package(&workspace.id, &target_exports),
+            Err(WorkspaceError::InvalidSubmissionMaterial(_))
+        ));
+        let title_page = temporary.path().join("title-page.docx");
+        fs::write(&title_page, b"synthetic title page").unwrap();
+        store
+            .add_submission_materials(
+                &workspace.id,
+                SubmissionMaterialKind::TitlePage,
+                std::slice::from_ref(&title_page),
+            )
+            .unwrap();
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
+        let materials = store.submission_materials(&workspace.id).unwrap();
+        assert!(materials.required_complete);
+        assert!(materials.target_check_ready);
+        let target_export = store
+            .export_target_submission_package(&workspace.id, &target_exports)
+            .unwrap();
+        let target_root = target_exports.join(&target_export.package_name);
+        assert!(target_root.join("submission/manuscript.tex").is_file());
+        assert!(target_root
+            .join("submission/source-project/source-project.zip")
+            .is_file());
+        assert!(target_root
+            .join("submission/title-page/title-page.docx")
+            .is_file());
+        assert!(target_root.join("records/target-selection.json").is_file());
+        assert!(target_root
+            .join("records/journal-requirements.json")
+            .is_file());
+        assert!(target_root.join("records/package-manifest.json").is_file());
+        assert!(target_root.join("README.txt").is_file());
+        let backup = plan.backups.first().unwrap();
+        store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &backup.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "https://backup.example/author-guidelines".to_owned(),
+                    title: "Backup guide".to_owned(),
+                    text: "A cover letter is required and figures must be supplied separately."
+                        .to_owned(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::AuthorProvidedOfficialText,
+                true,
+                "not_performed",
+            )
+            .unwrap();
+        let promoted = store
+            .promote_backup_target(&workspace.id, &backup.selection_id, "rejected")
+            .unwrap();
+        assert_eq!(
+            promoted.primary.as_ref().unwrap().journal_id,
+            backup.journal_id
+        );
+        assert!(promoted.backups.is_empty());
+        let inherited = store
+            .journal_requirement_snapshot(
+                &workspace.id,
+                &promoted.primary.as_ref().unwrap().selection_id,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            inherited.target_selection_id,
+            promoted.primary.as_ref().unwrap().selection_id
+        );
+        assert!(inherited
+            .limitations
+            .iter()
+            .any(|item| item.contains("备选支线继承")));
         let analysis_root = store_root
             .join("projects")
             .join(&workspace.id)
@@ -2984,6 +4982,49 @@ mod tests {
             .join(format!("journal-profile-{}.json", profile.profile_id))
             .is_file());
         assert!(analysis_root
+            .join(format!("journal-match-{}.json", run.run_id))
+            .is_file());
+        let recovered_runs = WorkspaceStore::new(&store_root)
+            .journal_recommendation_runs(&workspace.id)
+            .unwrap();
+        assert_eq!(recovered_runs, vec![run.clone()]);
+        assert!(recovered_runs[0]
+            .domestic
+            .sprint
+            .iter()
+            .chain(recovered_runs[0].domestic.matching.iter())
+            .chain(recovered_runs[0].domestic.safeguard.iter())
+            .chain(recovered_runs[0].international.sprint.iter())
+            .chain(recovered_runs[0].international.matching.iter())
+            .chain(recovered_runs[0].international.safeguard.iter())
+            .all(|recommendation| !recommendation.publisher.trim().is_empty()));
+        let run_path = analysis_root.join(format!("journal-match-{}.json", run.run_id));
+        let mut legacy_value = serde_json::to_value(&run).unwrap();
+        let legacy_object = legacy_value.as_object_mut().unwrap();
+        let domestic_value = legacy_object.remove("domestic").unwrap();
+        let international_value = legacy_object.remove("international").unwrap();
+        for group in ["sprint", "matching", "safeguard"] {
+            let mut combined = domestic_value[group].as_array().unwrap().clone();
+            combined.extend(international_value[group].as_array().unwrap().clone());
+            legacy_object.insert(group.to_owned(), serde_json::Value::Array(combined));
+        }
+        legacy_object.insert("schemaVersion".to_owned(), serde_json::Value::from(4));
+        write_json(&run_path, &legacy_value).unwrap();
+        let migrated_runs = WorkspaceStore::new(&store_root)
+            .journal_recommendation_runs(&workspace.id)
+            .unwrap();
+        assert_eq!(migrated_runs[0].run_id, run.run_id);
+        assert_eq!(migrated_runs[0].domestic, run.domestic);
+        assert_eq!(migrated_runs[0].international, run.international);
+        let copies_root = temporary.path().join("workspace-copies");
+        fs::create_dir(&copies_root).unwrap();
+        let exported = store
+            .export_workspace_copy(&workspace.id, false, &copies_root)
+            .unwrap();
+        assert!(exported.file_count > 3);
+        assert!(copies_root
+            .join(&exported.folder_name)
+            .join("analysis")
             .join(format!("journal-match-{}.json", run.run_id))
             .is_file());
         let audit = fs::read_to_string(
@@ -2995,6 +5036,7 @@ mod tests {
         .unwrap();
         assert!(audit.contains("journal_recommendation_profile_saved"));
         assert!(audit.contains("journal_recommendations_computed"));
+        assert!(audit.contains("workspace_copy_exported"));
 
         let evidence = InstitutionRuleEvidence {
             status: InstitutionRuleStatus::Verified,
@@ -3021,7 +5063,10 @@ mod tests {
         assert_eq!(evidence_run.school_rule_status, "verified_rule_set_applied");
         assert!(evidence_run
             .international
+            .sprint
             .iter()
+            .chain(evidence_run.international.matching.iter())
+            .chain(evidence_run.international.safeguard.iter())
             .any(|item| item.scores.institution_rules == Some(100)));
     }
 
@@ -3570,6 +5615,14 @@ Synthetic method.",
             Err(WorkspaceError::AuthorConfirmationRequired)
         ));
 
+        let (target, recommendation_run_id, journal_id, backup_journal_id) =
+            select_synthetic_target(&store, &workspace.id);
+        assert!(store
+            .lifecycle(&workspace.id)
+            .unwrap()
+            .readiness_report
+            .is_none());
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
         let attestation = store.create_local_attestation(&workspace.id, true).unwrap();
         let export_root = temporary.path().join("exports");
         fs::create_dir(&export_root).unwrap();
@@ -3585,13 +5638,17 @@ Synthetic method.",
         assert!(package_root.join("submission-manifest.json").is_file());
 
         let submission = store
-            .record_manual_submission(
-                &workspace.id,
-                "Synthetic Journal",
-                Some("SYN-2026-001"),
-                true,
-            )
+            .record_manual_submission(&workspace.id, &target.name, Some("SYN-2026-001"), true)
             .unwrap();
+        assert_eq!(submission.schema_version, 2);
+        assert_eq!(
+            submission.target_selection_id.as_deref(),
+            Some(target.selection_id.as_str())
+        );
+        assert_eq!(
+            submission.publisher.as_deref(),
+            Some(target.publisher.as_str())
+        );
         let candidate_decisions = store
             .knowledge_body_snapshot(&workspace.id)
             .unwrap()
@@ -3786,6 +5843,23 @@ Synthetic method.",
             .to_string()
             .contains("完整性验证失败"));
 
+        let backup_plan = store
+            .add_backup_recommended_journal(
+                &workspace.id,
+                &recommendation_run_id,
+                &backup_journal_id,
+            )
+            .unwrap();
+        let backup_selection_id = backup_plan.backups[0].selection_id.clone();
+        store
+            .promote_backup_target(&workspace.id, &backup_selection_id, "rejected")
+            .unwrap();
+        let rerouted = store.lifecycle(&workspace.id).unwrap();
+        assert!(rerouted.readiness_report.is_none());
+        assert!(rerouted.attestation.is_none());
+        assert!(rerouted.submission.is_none());
+        assert!(rerouted.knowledge_body.is_none());
+
         fs::write(
             &source_path,
             r"\title{Lifecycle Study Revised}
@@ -3798,6 +5872,10 @@ Synthetic method.",
         store
             .create_version_from_source(&workspace.id, &source_path, "new head")
             .unwrap();
+        assert!(matches!(
+            store.select_recommended_journal(&workspace.id, &recommendation_run_id, &journal_id),
+            Err(WorkspaceError::StaleRecommendationRun)
+        ));
         let new_head = store.lifecycle(&workspace.id).unwrap();
         assert_eq!(new_head.current_version, 2);
         assert!(new_head.structure_report.is_none());
@@ -3805,5 +5883,54 @@ Synthetic method.",
         assert!(new_head.attestation.is_none());
         assert!(new_head.submission.is_none());
         assert!(new_head.knowledge_body.is_none());
+    }
+
+    #[test]
+    fn recording_a_real_submission_creates_the_local_attestation_when_needed() {
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("automatic-attestation.tex");
+        fs::write(
+            &source_path,
+            r"\title{Automatic Attestation}
+\author{Synthetic Author}
+\begin{abstract}Traceable evidence.\end{abstract}
+\keywords{workflow}
+\section{Introduction}
+\section{Methods}
+\section{Conflict of Interest}
+\section{Data Availability}
+\bibliography{synthetic}",
+        )
+        .unwrap();
+        let store = WorkspaceStore::new(temporary.path().join("store"));
+        let workspace = store.create_from_source(&source_path).unwrap();
+        store.analyze_structure(&workspace.id).unwrap();
+        let (target, _, _, _) = select_synthetic_target(&store, &workspace.id);
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
+
+        assert!(store
+            .lifecycle(&workspace.id)
+            .unwrap()
+            .attestation
+            .is_none());
+        let submission = store
+            .record_manual_submission(&workspace.id, &target.name, None, true)
+            .unwrap();
+        let lifecycle = store.lifecycle(&workspace.id).unwrap();
+
+        assert_eq!(
+            lifecycle
+                .attestation
+                .as_ref()
+                .map(|record| record.attestation_id.as_str()),
+            Some(submission.attestation_id.as_str())
+        );
+        assert_eq!(
+            lifecycle
+                .submission
+                .as_ref()
+                .map(|record| record.submission_id.as_str()),
+            Some(submission.submission_id.as_str())
+        );
     }
 }

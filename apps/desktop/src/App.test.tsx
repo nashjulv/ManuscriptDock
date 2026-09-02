@@ -9,6 +9,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), isTauri: vi.fn() }));
 const invokeMock = vi.mocked(invoke);
 const isTauriMock = vi.mocked(isTauri);
 
+function makeCurrentTarget(workspace: { id: string; snapshotVersion: number }, selectionId = "target-current") {
+  return { schemaVersion: 2, selectionId, workspaceId: workspace.id, selectedAgainstManuscriptVersion: workspace.snapshotVersion, recommendationRunId: "run-current", journalId: "synthetic-journal", name: "Synthetic Journal", nameEn: "Synthetic Journal", publisher: "Synthetic Publisher", region: "international", rankSystem: "JCR", rankTier: "Q1", homepageUrl: "https://example.test/journal", planRole: "primary", priority: 0, selectedUnixMs: Date.UTC(2026, 7, 24, 2, 30), recordHash: "6".repeat(64), externalTransmission: "not_performed" };
+}
+
+function makeCurrentRequirements(workspace: { id: string }, target: ReturnType<typeof makeCurrentTarget>) {
+  return { schemaVersion: 1, snapshotId: "requirements-current", workspaceId: workspace.id, targetSelectionId: target.selectionId, journalId: target.journalId, journalName: target.name, sourceMode: "author_provided_official_text", status: "author_attested_official", sources: [{ url: "https://example.test/journal/guide-for-authors", title: "Guide for authors", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026, 7, 24, 2, 40), officialHostMatched: true }], requirements: [{ id: "requirement-main", category: "main_manuscript", label: "主稿", labelEn: "Main manuscript", obligation: "required", detail: "Main manuscript required", sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "Main manuscript is required" }], limitations: [], capturedUnixMs: Date.UTC(2026, 7, 24, 2, 40), freshUntilUnixMs: Date.UTC(2099, 0, 1), recordHash: "b".repeat(64), externalTransmission: "not_performed" };
+}
+
 describe("App", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -22,9 +30,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.13")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.13" }));
-    expect(brandStatement.getByText("V0.13")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.22")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.22" }));
+    expect(brandStatement.getByText("V0.22")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -144,14 +152,14 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "synthetic-study.tex" });
     await user.click(screen.getByRole("button", { name: "创建本地工作区" }));
 
-    expect(await screen.findByText("本地工作区已创建")).toBeVisible();
+    expect(await screen.findByText("论文已安全保存在本地工作区")).toBeVisible();
     expect(screen.getByText("不可变；历史不会被覆盖")).toBeVisible();
-    expect(screen.getByRole("button", { name: "我的工作台" })).toBeVisible();
-    expect(invokeMock).toHaveBeenLastCalledWith("create_workspace", {
+    expect(screen.getByRole("button", { name: "所有论文" })).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("create_workspace", {
       selectionId: "one-time-selection",
     });
 
-    await user.click(screen.getByRole("button", { name: "我的工作台" }));
+    await user.click(screen.getByRole("button", { name: "所有论文" }));
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("synthetic-study.tex")).toBeVisible();
@@ -197,6 +205,8 @@ describe("App", () => {
     let catalog = { workspaces: [workspace], archivedWorkspaces: [] as typeof workspace[], warnings: [] as string[] };
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve(catalog);
+      if (command === "get_workspace_storage_summary") return Promise.resolve({ defaultLocation: "~/Library/Application Support/com.manuscriptdock.desktop/workspace", storageMode: "application_managed_local_library", sourcePolicy: "immutable_versioned_copy" });
+      if (command === "export_workspace_copy") return Promise.resolve({ folderName: "ManuscriptDock-managed-study-v2-managed-", workspaceId: workspace.id, manuscriptVersion: 2, fileCount: 12, exportedUnixMs: Date.UTC(2026,7,25), externalTransmission: "not_performed" });
       if (command === "archive_workspace") {
         catalog = { workspaces: [], archivedWorkspaces: [workspace], warnings: [] };
         return Promise.resolve(catalog);
@@ -215,6 +225,13 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     expect(await screen.findByText("managed-study.tex")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "ManuscriptDock 本地资料库" })).toBeVisible();
+    expect(screen.getByText(/Library\/Application Support/)).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
+    await user.click(screen.getByRole("menuitem", { name: "另存完整工作区…" }));
+    expect(await screen.findByText(/已另存完整工作区/)).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("export_workspace_copy", { workspaceId: workspace.id, archived: false });
 
     await user.click(screen.getByRole("button", { name: "管理 managed-study.tex" }));
     await user.click(screen.getByRole("menuitem", { name: "归档工作区" }));
@@ -416,10 +433,13 @@ describe("App", () => {
       externalTransmission: "not_performed",
     };
     const ieeeRule = { id: "md.publisher.ieee", version: "1.0.0", coverage: "B", stage: "initial_submission", region: "global", category: "publisher", sourceLabel: "IEEE 期刊通用稿件结构", sourceLabelEn: "IEEE journal article structure baseline", description: "检查 IEEE 期刊文章的通用结构。", descriptionEn: "Checks common IEEE journal-article structure.", sourceUrls: ["https://journals.ieeeauthorcenter.ieee.org/"], verifiedAt: "2026-08-24", signatureVerified: true };
+    const submissionTarget = makeCurrentTarget(workspace);
+    const journalRequirements = makeCurrentRequirements(workspace, submissionTarget);
     invokeMock.mockReset();
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
-      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null, submissionTarget, journalRequirements });
+      if (command === "get_journal_requirement_snapshots") return Promise.resolve([journalRequirements]);
       if (command === "list_rule_packs") return Promise.resolve({ rulePacks: [ieeeRule] });
       if (command === "analyze_workspace") return Promise.resolve({ status: "completed", report: structureReport });
       if (command === "evaluate_readiness") return Promise.resolve({ status: "completed", report: readinessReport });
@@ -429,14 +449,14 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "打开 structured-study.tex" }));
-    await user.click(screen.getByRole("button", { name: "检查" }));
+    await user.click(screen.getByRole("button", { name: /检查与修订/ }));
     await user.click(screen.getByRole("button", { name: "提取论文结构" }));
 
     expect(await screen.findByRole("heading", { name: "Synthetic Evidence Study" })).toBeVisible();
     expect(screen.getAllByText("Ada Author · Ben Researcher").length).toBeGreaterThan(0);
     expect(screen.getByText("A compact synthetic abstract.")).toBeVisible();
     expect(screen.getByRole("list", { name: "检测到的章节" })).toHaveTextContent("Methods");
-    expect(invokeMock).toHaveBeenLastCalledWith("analyze_workspace", {
+    expect(invokeMock).toHaveBeenCalledWith("analyze_workspace", {
       workspaceId: workspace.id,
     });
 
@@ -447,7 +467,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "仍有事项需要处理" })).toBeVisible();
     expect(screen.getByRole("list", { name: "投稿检查明细" })).toHaveTextContent("补充关键词");
     expect(screen.getByText(/完整性已校验/)).toBeVisible();
-    expect(invokeMock).toHaveBeenLastCalledWith("evaluate_readiness", {
+    expect(invokeMock).toHaveBeenCalledWith("evaluate_readiness", {
       workspaceId: workspace.id,
       rulePackIds: ["md.publisher.ieee"],
     });
@@ -529,10 +549,11 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "打开 study.tex" }));
-    await user.click(screen.getByRole("button", { name: "版本" }));
+    await user.click(screen.getByText("记录与高级功能"));
+    await user.click(screen.getByRole("button", { name: "版本历史" }));
     expect(await screen.findByRole("list", { name: "论文版本时间线" })).toHaveTextContent("v1");
 
-    await user.click(screen.getByRole("button", { name: "选择修改后的稿件" }));
+    await user.click(screen.getByRole("button", { name: "选择修改稿" }));
     expect(await screen.findByText("study-revised.tex")).toBeVisible();
     await user.type(screen.getByRole("textbox", { name: /版本说明/ }), "补充方法与统计分析");
     await user.click(screen.getByRole("button", { name: /保存为 v2/ }));
@@ -569,6 +590,7 @@ describe("App", () => {
       if (command === "apply_manuscript_revision") return Promise.resolve({ status: "created", workspace: revised, version: v2, revisionSet: { revisionId: "revision-set", workspaceId: workspace.id, baseVersion: 1, outputVersion: 2, createdUnixMs: Date.UTC(2026, 7, 24, 6, 30), changes: [{ field: "title", before: "Original title", after: "Revised title", basis: "author_edit", status: "accepted" }], externalTransmission: "not_performed" } });
       if (command === "analyze_workspace") return Promise.resolve({ status: "completed", report: revisedStructure });
       if (command === "evaluate_readiness") return Promise.resolve({ status: "completed", report: revisedReadiness });
+      if (command === "get_submission_materials") return Promise.resolve({ schemaVersion: 1, workspaceId: revised.id, manuscriptVersion: 2, materials: [], checklist: [], requiredComplete: false, targetCheckReady: false });
       if (command === "get_version_history") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, versions: [v1, v2] });
       if (command === "compare_manuscript_versions") return Promise.resolve({ workspaceId: workspace.id, fromVersion: 1, toVersion: 2, identical: false, fromContentHash: workspace.contentHash, toContentHash: revised.contentHash, titleBefore: "Original title", titleAfter: "Revised title", wordCountDelta: 0, figureCountDelta: 0, tableCountDelta: 0, addedSections: [], removedSections: [], addedDeclarations: [], removedDeclarations: [], externalTransmission: "not_performed" });
       return Promise.reject(new Error(`unexpected command ${command}`));
@@ -576,13 +598,13 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 study.tex" }));
+    await user.click(screen.getByRole("button", { name: /检查与修订/ }));
     await user.click(screen.getByRole("button", { name: "修订" }));
     const title = await screen.findByLabelText("论文标题");
     await user.clear(title); await user.type(title, "Revised title");
     expect(screen.getByText("保存前预览")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "保存新版本并复查" }));
-    expect(await screen.findByText(/已保存 v2，并完成当前版本复查/)).toBeVisible();
-    expect(screen.getByRole("heading", { name: "核验当前版本与历史" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "保存新版本并进入投稿包" }));
+    expect(await screen.findByRole("heading", { name: "先选择目标期刊" })).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("apply_manuscript_revision", { workspaceId: workspace.id, baseVersion: 1, changes: [{ field: "title", after: "Revised title" }] });
   });
 
@@ -592,32 +614,37 @@ describe("App", () => {
     const structureReport = { analysisVersion: 4, workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 2, quality: "complete", title: "Lifecycle Study", authors: ["Author"], abstractPresent: true, abstractText: "Abstract", keywordsPresent: true, sections: [], figureCount: 0, tableCount: 0, referencesPresent: true, declarations: [], pageCount: null, wordCount: 100, warnings: [] };
     const readinessReport = { reportVersion: 1, reportId: "report-current", workspaceId: workspace.id, sourceContentHash: workspace.contentHash, sourceSnapshotVersion: 2, outputSnapshotVersion: 2, generatedUnixMs: Date.UTC(2026, 7, 24, 7, 10), outcome: "ready", passedCount: 5, warningCount: 0, blockedCount: 0, confirmationCount: 0, findings: [], rulePacks: [], externalTransmission: "not_performed" };
     const attestation = { attestationId: "attestation-current", workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, readinessReportId: readinessReport.reportId, readinessOutputSnapshotVersion: 2, readinessOutcome: "ready", attestedUnixMs: Date.UTC(2026, 7, 24, 7, 20), statement: "confirmed", recordHash: "7".repeat(64), externalTransmission: "not_performed" };
-    const submission = { submissionId: "submission-current", workspaceId: workspace.id, manuscriptVersion: 2, attestationId: attestation.attestationId, target: "Synthetic Journal", receipt: "SYN-2026", submittedUnixMs: Date.UTC(2026, 7, 24, 7, 30), statement: "recorded", recordHash: "8".repeat(64), externalTransmission: "not_performed" };
+    const submission = { schemaVersion: 2, submissionId: "submission-current", workspaceId: workspace.id, manuscriptVersion: 2, attestationId: attestation.attestationId, targetSelectionId: "target-current", target: "Synthetic Journal", publisher: "Synthetic Publisher", receipt: "SYN-2026", submittedUnixMs: Date.UTC(2026, 7, 24, 7, 30), statement: "recorded", recordHash: "8".repeat(64), externalTransmission: "not_performed" };
+    const submissionMaterials = { schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, materials: [], checklist: [], requiredComplete: true, targetCheckReady: true };
+    const submissionTarget = { schemaVersion: 1, selectionId: "target-current", workspaceId: workspace.id, selectedAgainstManuscriptVersion: 2, recommendationRunId: "run-current", journalId: "synthetic-journal", name: "Synthetic Journal", nameEn: "Synthetic Journal", publisher: "Synthetic Publisher", region: "international", rankSystem: "JCR", rankTier: "Q1", homepageUrl: "https://example.test", selectedUnixMs: Date.UTC(2026, 7, 24, 7, 15), recordHash: "6".repeat(64), externalTransmission: "not_performed" };
+    const journalRequirements = makeCurrentRequirements(workspace, submissionTarget as ReturnType<typeof makeCurrentTarget>);
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
-      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport, readinessReport, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport, readinessReport, attestation: null, submission: null, knowledgeBody: null, submissionMaterials, submissionTarget, journalRequirements });
+      if (command === "get_journal_requirement_snapshots") return Promise.resolve([journalRequirements]);
       if (command === "create_local_attestation") return Promise.resolve(attestation);
-      if (command === "export_submission_package") return Promise.resolve({ packageName: "ManuscriptDock-lifecycl-v2", manuscriptVersion: 2, attestationId: attestation.attestationId, files: ["manuscript.tex", "readiness-report.json", "readiness-preview.html", "local-attestation.json", "submission-manifest.json"], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
+      if (command === "export_target_submission_package") return Promise.resolve({ packageName: "ManuscriptDock-lifecycl-v2", manuscriptVersion: 2, targetSelectionId: submissionTarget.selectionId, targetName: submissionTarget.name, files: ["submission/manuscript.tex", "records/target-selection.json", "records/package-manifest.json", "README.txt"], warnings: [], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
       if (command === "record_manual_submission") return Promise.resolve(submission);
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 lifecycle.tex" }));
-    await user.click(screen.getByRole("button", { name: "存证" }));
+    await user.click(screen.getByText("记录与高级功能"));
+    await user.click(screen.getByRole("button", { name: "本地存证" }));
     await user.click(await screen.findByRole("checkbox", { name: /我已核对当前稿件/ }));
     await user.click(screen.getByRole("button", { name: "创建本地存证" }));
     expect(await screen.findByRole("heading", { name: "v2 已完成存证" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "进入投稿" }));
+    await user.click(screen.getByRole("button", { name: "返回投稿包" }));
     await user.click(screen.getByRole("button", { name: "选择导出文件夹" }));
     expect(await screen.findByText(/已导出 ManuscriptDock-lifecycl-v2/)).toBeVisible();
-    await user.type(screen.getByLabelText("期刊、会议或预印本平台"), "Synthetic Journal");
+    expect(screen.getByLabelText("投稿期刊（来自当前主线）")).toHaveValue("Synthetic Journal");
     await user.type(screen.getByLabelText("稿件号或回执（可选）"), "SYN-2026");
-    await user.click(screen.getByRole("checkbox", { name: /我确认已经在上述外部系统完成投稿/ }));
+    await user.click(screen.getByRole("checkbox", { name: /我确认已经向上述期刊/ }));
     await user.click(screen.getByRole("button", { name: "登记投稿记录" }));
     expect(await screen.findByRole("heading", { name: "Synthetic Journal" })).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("create_local_attestation", { workspaceId: workspace.id, authorConfirmed: true });
-    expect(invokeMock).toHaveBeenCalledWith("export_submission_package", { workspaceId: workspace.id });
+    expect(invokeMock).toHaveBeenCalledWith("export_target_submission_package", { workspaceId: workspace.id });
     expect(invokeMock).toHaveBeenCalledWith("record_manual_submission", { workspaceId: workspace.id, target: "Synthetic Journal", receipt: "SYN-2026", authorConfirmed: true });
   });
 
@@ -661,7 +688,8 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 classified-study.tex" }));
-    await user.click(screen.getByRole("button", { name: "知识体" }));
+    await user.click(screen.getByRole("button", { name: "个人知识体" }));
+    expect(screen.getByRole("button", { name: /概览/ })).not.toHaveAttribute("aria-current");
     const finalize = await screen.findByRole("button", { name: "确认审核并固化知识体" });
     expect(finalize).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "纳入知识体" }));
@@ -755,10 +783,13 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "打开 navigation-study.pdf" }));
-    expect(screen.getByRole("navigation", { name: "论文工作阶段" })).toBeVisible();
-    expect(screen.getByRole("tabpanel", { name: "导入 证据" })).toHaveTextContent("只读");
+    expect(screen.getByRole("navigation", { name: "投稿准备主任务" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "查看依据" }));
+    expect(screen.getByLabelText("概览 证据")).toHaveTextContent("只读");
 
-    await user.click(screen.getByRole("button", { name: "知识体" }));
+    await user.click(screen.getByText("记录与高级功能"));
+    await user.click(screen.getByRole("button", { name: "个人知识体" }));
+    expect(screen.getByRole("button", { name: /概览/ })).not.toHaveAttribute("aria-current");
     expect(await screen.findByRole("heading", { name: "知识体与关联网络" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "知识体哈希与学科索引" })).toBeVisible();
     expect(screen.getByText("计算机与信息科学")).toBeVisible();
@@ -773,9 +804,13 @@ describe("App", () => {
     expect(fiveLayers).toHaveTextContent("交互与执行运行时 · RuntimeProfile v1");
     expect(fiveLayers).toHaveTextContent("验证、权利与信誉 · Reputation v4");
 
-    await user.click(screen.getByRole("tab", { name: "证据" }));
-    expect(screen.getByRole("tab", { name: "证据" })).toHaveAttribute("aria-selected", "true");
-    const spatialMap = screen.getByRole("img", { name: /中心是 Claim v3 十二面体/ });
+    const spatialMap = screen.getByRole("region", { name: "动态知识点云与关联网络" });
+    expect(spatialMap.querySelector(".knowledge-point-cloud")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开模型设置" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "查看依据" }));
+    expect(screen.getByRole("button", { name: "收起依据" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/动态图、节点交互和 AI 问答已放回知识体主界面/)).toBeVisible();
     expect(spatialMap.querySelector(".claim-dodecahedron")).toBeInTheDocument();
     expect(spatialMap.querySelectorAll(".dodeca-edge")).toHaveLength(30);
     expect(spatialMap.querySelector(".claim-core")).toHaveTextContent("Claim · v3作者已确认");
@@ -783,6 +818,8 @@ describe("App", () => {
     expect(spatialMap).toHaveTextContent("身份与版本S72 位作者 · 1 项联系方式 · Artifact v3");
     expect(spatialMap).toHaveTextContent("能力契约v1 · 1输入 · 输出 · 前置 · 拒绝");
     expect(spatialMap).toHaveTextContent("验证、权利与信誉Reputation · v4AIReview v2 · 历史 v1");
+    await user.click(within(spatialMap).getByRole("button", { name: /能力契约/ }));
+    expect(within(spatialMap).getByRole("status")).toHaveTextContent("能力契约 · v1 · 1");
     expect(screen.getByRole("heading", { name: "知识摘要与来源" })).toBeVisible();
     expect(screen.getAllByText("The proposed method improves traceable manuscript analysis under the reported conditions.").length).toBeGreaterThanOrEqual(2);
 
@@ -795,7 +832,6 @@ describe("App", () => {
     expect(document.querySelectorAll(".network-body")).toHaveLength(5);
     expect(document.querySelectorAll(".network-assertion")).toHaveLength(6);
 
-    expect(screen.getByRole("button", { name: "打开模型设置" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "打开模型设置" }));
     expect(screen.getByText("1 个主模型，2 个备选模型")).toBeVisible();
     expect(screen.getByText("主模型")).toBeVisible();
@@ -825,26 +861,36 @@ describe("App", () => {
     expect(screen.getByText("当前版本不接收外部网络请求，也不会虚构外部反馈。")).toBeVisible();
   });
 
-  it("recommends three domestic and three international journals and recalculates after adjustment", async () => {
+  it("recommends a two-three-three portfolio for each region and recalculates after adjustment", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = { id: "journal-workspace", manuscript: { name: "vision-study.tex", extension: "tex", kind: "latex", sizeBytes: 4096, modifiedUnixMs: null }, contentHash: "e".repeat(64), importedUnixMs: Date.UTC(2026, 7, 30), snapshotVersion: 2 };
-    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", overallFit: 90 - index, estimatedSubmissionPreparationDays: 28, deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", scores: { institutionRules: null, topicScope: 100, specialtyFit: 96, articleType: 100, contentReadiness: 88, language: 100, targetLevel: 80, openAccess: 100, purposeFit: 85, timeFeasibility: 100 }, reasons: ["主题范围适配 100 分"], rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open" });
+    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open", directoryEvidence: [] });
     let runCount = 0;
+    let targetPlan: { schemaVersion: number; workspaceId: string; primary: Record<string, unknown> | null; backups: Record<string, unknown>[]; updatedUnixMs: number } = { schemaVersion: 1, workspaceId: workspace.id, primary: null, backups: [], updatedUnixMs: 0 };
+    let requirementSnapshots: Record<string, unknown>[] = [];
+    const makeTarget = (journalId: string, role: "primary" | "backup", priority: number) => ({ schemaVersion: 2, selectionId: `selection-${journalId}-${role}`, workspaceId: workspace.id, selectedAgainstManuscriptVersion: 2, recommendationRunId: `jmr-${runCount}`, journalId, name: journalId.startsWith("i") ? "国际期刊1" : "国内期刊1", nameEn: journalId.startsWith("i") ? "International Journal 1" : "Domestic Journal 1", publisher: "Synthetic Society", region: journalId.startsWith("i") ? "international" : "domestic", rankSystem: "Synthetic CCF", rankTier: journalId.startsWith("i") ? "CCF A" : "T1", homepageUrl: "https://example.test/journal", planRole: role, priority, selectedUnixMs: Date.UTC(2026,7,30), recordHash: "f".repeat(64), externalTransmission: "not_performed" });
     invokeMock.mockImplementation((command, args) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], archivedWorkspaces: [], warnings: [] });
-      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null });
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null, submissionTargetPlan: targetPlan, journalRequirements: null });
+      if (command === "get_submission_target_plan") return Promise.resolve(targetPlan);
+      if (command === "get_journal_requirement_snapshots") return Promise.resolve(requirementSnapshots);
+      if (command === "get_submission_materials") return Promise.resolve({ schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, materials: [], checklist: [], requiredComplete: false, targetCheckReady: false });
+      if (command === "select_recommended_journal") { const journalId = (args as { journalId: string }).journalId; const target = makeTarget(journalId, "primary", 0); targetPlan = { ...targetPlan, primary: target, updatedUnixMs: Date.UTC(2026,7,30) }; return Promise.resolve(target); }
+      if (command === "add_backup_recommended_journal") { const journalId = (args as { journalId: string }).journalId; targetPlan = { ...targetPlan, backups: [...targetPlan.backups, makeTarget(journalId, "backup", targetPlan.backups.length + 1)] }; return Promise.resolve(targetPlan); }
+      if (command === "discover_journal_requirements") { const targetSelectionId = (args as { targetSelectionId: string }).targetSelectionId; const snapshot = { schemaVersion: 1, snapshotId: "requirements-1", workspaceId: workspace.id, targetSelectionId, journalId: "dr1", journalName: "国内期刊1", sourceMode: "official_network_fetch", status: "official_sources_captured", sources: [{ url: "https://example.test/journal/guide-for-authors", title: "Guide for authors", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026,7,30), officialHostMatched: true }], requirements: [{ id: "requirement-title-page", category: "title_page", label: "标题页", labelEn: "Title page", obligation: "required", detail: "官方原文含明确义务词", sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "A separate title page is required" }], limitations: [], capturedUnixMs: Date.UTC(2026,7,30), freshUntilUnixMs: Date.UTC(2026,10,30), recordHash: "b".repeat(64), externalTransmission: "author_confirmed_official_source_fetch" }; requirementSnapshots = [snapshot]; return Promise.resolve(snapshot); }
+      if (command === "list_journal_recommendations") return Promise.resolve([]);
       if (command === "save_journal_recommendation_profile") { const profile = (args as { profile: Record<string, string> }).profile; return Promise.resolve({ ...profile, schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount + 1, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }); }
-      if (command === "recommend_journals") { runCount += 1; const preferences = (args as { preferences: Record<string,string> }).preferences; const recommendationProfile = { authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31", schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }; return Promise.resolve({ schemaVersion: 2, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, manuscriptHash: workspace.contentHash, algorithmVersion: "local-fit-v1.1", catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", inferredTopic: preferences.topic === "auto" ? "computer_vision" : preferences.topic, topicBasis: preferences.topic === "auto" ? "local_keywords_high_confidence" : "author_adjusted", maturityScore: 88, evaluatedUnixMs: Date.UTC(2026,7,30), recommendationProfile, deadlineDaysRemaining: 120, preferences, domestic: [1,2,3].map((index)=>makeItem(`d${index}`,true,index)), international: [1,2,3].map((index)=>makeItem(`i${index}`,false,index)), schoolRuleStatus: "official_source_search_required_excluded_from_score", limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
+      if (command === "recommend_journals") { runCount += 1; const recommendationProfile = { authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31", schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }; const makePortfolio = (prefix: string, domestic: boolean) => ({ sprint: [1,2].map((index)=>makeItem(`${prefix}r${index}`,domestic,index)), matching: [1,2,3].map((index)=>makeItem(`${prefix}m${index}`,domestic,index)), safeguard: [1,2,3].map((index)=>makeItem(`${prefix}s${index}`,domestic,index)) }); return Promise.resolve({ schemaVersion: 5, runId: `jmr-${runCount}`, workspaceId: workspace.id, manuscriptVersion: 2, catalogVersion: "computer-ai-2025.1", catalogVerifiedDate: "2025-04-16", evaluatedUnixMs: Date.UTC(2026,7,30), recommendationProfile, deadlineDaysRemaining: 120, domestic: makePortfolio("d",true), international: makePortfolio("i",false), schoolRuleStatus: "official_source_search_required_excluded_from_score", institutionDirectoryStatus: "local_directory_not_imported", journalDirectoryVersion: null, limitations: ["不是录用概率"], externalTransmission: "not_performed" }); }
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "打开 vision-study.tex" }));
-    await user.click(screen.getByRole("button", { name: "期刊匹配" }));
-    expect(screen.getByText(/学校标准是资格依据，不是声誉分/)).toBeVisible();
+    await user.click(within(screen.getByRole("navigation", { name: "投稿准备主任务" })).getByRole("button", { name: /目标期刊/ }));
+    expect(screen.getByText(/学校规则需要正式来源/)).toBeVisible();
     const calculateButton = screen.getByRole("button", { name: "保存档案并计算推荐" });
     expect(calculateButton).toBeDisabled();
-    await user.type(screen.getByLabelText("投稿人姓名"), "测试作者");
+    await user.type(screen.getByLabelText(/投稿人姓名/), "测试作者");
     await user.type(screen.getByLabelText("学校 / 机构"), "示例大学");
     await user.type(screen.getByLabelText("学院或专业"), "计算机视觉");
     await user.selectOptions(screen.getByLabelText("论文用途"), "graduation");
@@ -857,15 +903,37 @@ describe("App", () => {
     await user.clear(requirementText);
     expect(calculateButton).toBeEnabled();
     await user.click(calculateButton);
-    expect(await screen.findByRole("heading", { name: "国内 3 家" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "国际 3 家" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "已保存推荐 · 1 条" })).toBeVisible();
+    expect(screen.getByText("推荐出版社")).toBeVisible();
+    expect(screen.getByRole("button", { name: /查看推荐记录 jmr-1/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("heading", { name: "国内期刊 · 8 家" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "国外期刊 · 8 家" })).toBeVisible();
+    expect(screen.getAllByRole("heading", { name: "冲刺型 · 2 家" })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "匹配型 · 3 家" })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "保底型 · 3 家" })).toHaveLength(2);
     expect(screen.getByText(/学校规则尚未核验/)).toBeVisible();
-    expect(screen.getByText(/jmr-1/)).toBeVisible();
+    expect(screen.queryByText(/主题范围适配 100 分/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/校规 24/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/LOCAL FIT/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/jmr-1/)).toHaveLength(2);
     await user.selectOptions(screen.getByLabelText("研究方向"), "natural_language_processing");
-    expect(screen.queryByText(/jmr-1/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /查看推荐记录 jmr-1/ })).toBeVisible();
+    expect(screen.queryByText("本地推荐记录")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存档案并计算推荐" }));
-    expect(await screen.findByText(/jmr-2/)).toBeVisible();
+    expect(await screen.findByRole("button", { name: /查看推荐记录 jmr-2/ })).toHaveAttribute("aria-pressed", "true");
     expect(invokeMock).toHaveBeenLastCalledWith("recommend_journals", { workspaceId: workspace.id, profileId: `jmp-${"a".repeat(20)}`, preferences: expect.objectContaining({ topic: "natural_language_processing" }) });
     expect(invokeMock).toHaveBeenCalledWith("save_journal_recommendation_profile", { workspaceId: workspace.id, profile: expect.objectContaining({ authorName: "测试作者", institution: "示例大学", specialty: "计算机视觉", manuscriptPurpose: "graduation", submissionDeadline: "2099-12-31" }) });
+    await user.click(screen.getAllByRole("button", { name: "设为投稿目标" })[0]);
+    const primaryRoute = await screen.findByRole("article", { name: /当前投稿主线/ });
+    expect(within(primaryRoute).getByText("唯一激活")).toBeVisible();
+    await user.click(screen.getAllByRole("button", { name: "加入备选支线" })[0]);
+    expect(await screen.findByRole("article", { name: /备选投稿支线/ })).toBeVisible();
+    const refreshedPrimary = screen.getByRole("article", { name: /当前投稿主线/ });
+    await user.click(within(refreshedPrimary).getByLabelText(/仅本次允许后端访问/));
+    await user.click(within(refreshedPrimary).getByRole("button", { name: "获取官方投稿要求" }));
+    expect(await within(refreshedPrimary).findByText("已建立期刊专属要求快照")).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true });
+    await user.click(screen.getByRole("button", { name: "按要求准备投稿资料" }));
+    expect(await screen.findByRole("heading", { name: "按照已选期刊和出版社要求准备文件" })).toBeVisible();
   });
 });

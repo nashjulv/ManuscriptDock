@@ -1,9 +1,8 @@
-# 投稿舱 ManuscriptDock V0.13 文档
+# 投稿舱 ManuscriptDock V0.22 文档
 
 ## 使用指南
 
-- [产品使用手册](user-manual.md)：面向作者的独立操作说明，覆盖安装、八步投稿流程、期刊推荐、模型设置、隐私边界、工作区管理和常见问题。
-- [产品使用手册 PDF](../output/pdf/manuscriptdock-user-manual.pdf)：适合独立阅读、下载和打印的 A4 版本。
+- [产品使用手册](user-manual.md)：面向作者的独立操作说明，覆盖五个投稿准备主任务、期刊推荐、模型设置、隐私边界、工作区管理和常见问题。
 
 ## 产品设计
 
@@ -12,7 +11,8 @@
 - [投稿规则系统](submission-rule-system.md)：统一论文模型、分层规则包、覆盖等级和维护机制。
 - [内置出版标准目录](publication-standards-catalog.md)：首批中国、国际、出版商和研究报告规则及其真实覆盖边界。
 - [本地论文版本库](local-version-library.md)：面向作者的连续版本、确定性比较、安全恢复和知识体版本锚点。
-- [期刊匹配与投稿目标推荐](journal-matching-and-submission-targeting.md)：投稿背景档案、客户提供学校原文的受控模型抽取、后台评价目录适配、时间可行性及国内外各三家动态推荐。
+- [期刊匹配与投稿目标推荐](journal-matching-and-submission-targeting.md)：投稿背景档案、受控学校规则抽取、国内外分层推荐，以及按论文版本保存的期刊与出版社历史。
+- [投稿资料与目标投稿包](submission-materials-and-target-package.md)：本地资料目录、目标期刊选择、出版社文件与内部记录隔离、导出和投稿登记合同。
 - [最近工作区管理](local-workspace-management.md)：逐篇归档、恢复、永久删除及其数据与知识体边界。
 - [投稿优化修订台](submission-revision-desk.md)：面向投稿问题的结构化修订、差异确认、格式回写边界及版本闭环。
 - [PDF 提取与规整方案](pdf-extraction-and-normalization.md)：Pandoc 与 pdf-inspector 评估、分类优先、原生对象提取、缺失对象识别与可信合并边界。

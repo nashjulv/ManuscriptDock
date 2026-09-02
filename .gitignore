@@ -47,6 +47,9 @@ test-results/
 *.local.sqlite
 *.local.sqlite3
 
+# Confidential product-method archives; never commit or package
+/private/
+
 # Temporary packaging and signing artifacts
 /installers/
 *.dmg

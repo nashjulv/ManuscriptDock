@@ -1,5 +1,7 @@
 mod dialogue;
+mod journal_directory;
 mod journal_match;
+mod journal_requirements;
 mod knowledge;
 mod readiness;
 mod revision;
@@ -11,14 +13,27 @@ pub use dialogue::{
     KnowledgeInquiryRecord, KnowledgeInquiryStance, KnowledgeInquiryTarget,
     KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
 };
+pub use journal_directory::{
+    normalize_journal_name, JournalDirectoryCatalog, JournalDirectoryError,
+    JournalDirectoryEvidence, JournalDirectoryImportResult, JournalDirectoryRecord,
+    JournalDirectorySource, JournalDirectoryStore, JournalDirectorySummary, JournalMetricScheme,
+    JOURNAL_DIRECTORY_SCHEMA_VERSION,
+};
 pub use journal_match::{
-    deadline_days_remaining, recommend_journals, ArticleTypePreference, InstitutionRuleEvidence,
-    InstitutionRuleStatus, JournalFitScores, JournalMatchPreferences, JournalRecommendation,
+    deadline_days_remaining, recommend_journals, recommend_journals_with_directory,
+    ArticleTypePreference, InstitutionRuleEvidence, InstitutionRuleStatus, JournalFitScores,
+    JournalMatchPreferences, JournalRecommendation, JournalRecommendationPortfolio,
     JournalRecommendationProfile, JournalRecommendationProfileInput,
     JournalRecommendationProfileSummary, JournalRecommendationRun, JournalRegion,
     ManuscriptPurpose, OpenAccessPreference, PublicationLanguagePreference, ResearchTopic,
     TargetStrategy, JOURNAL_CATALOG_VERSION, JOURNAL_MATCH_ALGORITHM_VERSION,
     JOURNAL_MATCH_SCHEMA_VERSION, JOURNAL_PROFILE_SCHEMA_VERSION,
+};
+pub use journal_requirements::{
+    extract_journal_requirements, JournalRequirementCategory, JournalRequirementItem,
+    JournalRequirementObligation, JournalRequirementSnapshot, JournalRequirementSource,
+    JournalRequirementSourceDocument, JournalRequirementSourceMode, JournalRequirementStatus,
+    JOURNAL_REQUIREMENT_FRESHNESS_DAYS, JOURNAL_REQUIREMENT_SCHEMA_VERSION,
 };
 pub use knowledge::{
     apply_candidate_decisions, discipline_catalog, local_knowledge_body_snapshot,
@@ -51,9 +66,11 @@ pub use structure::{
 };
 pub use workspace::{
     KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, SubmissionExport,
-    SubmissionRecord, VersionComparison, VersionCreation, VersionHistory, VersionOrigin,
-    WorkspaceCatalog, WorkspaceCreation, WorkspaceError, WorkspaceLifecycle, WorkspaceStore,
-    WorkspaceSummary,
+    SubmissionMaterial, SubmissionMaterialCatalog, SubmissionMaterialChecklistItem,
+    SubmissionMaterialKind, SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection,
+    SubmissionTargetTransition, TargetSubmissionExport, VersionComparison, VersionCreation,
+    VersionHistory, VersionOrigin, WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation,
+    WorkspaceError, WorkspaceLifecycle, WorkspaceStore, WorkspaceSummary,
 };
 
 use serde::{Deserialize, Serialize};

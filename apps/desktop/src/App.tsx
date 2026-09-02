@@ -38,6 +38,21 @@ interface WorkspaceCatalog {
   warnings: string[];
 }
 
+interface WorkspaceStorageSummary {
+  defaultLocation: string;
+  storageMode: "application_managed_local_library";
+  sourcePolicy: "immutable_versioned_copy";
+}
+
+interface WorkspaceCopyExport {
+  folderName: string;
+  workspaceId: string;
+  manuscriptVersion: number;
+  fileCount: number;
+  exportedUnixMs: number;
+  externalTransmission: "not_performed";
+}
+
 type VersionOrigin = "imported" | "revision" | "restored";
 
 interface ManuscriptVersionSummary {
@@ -139,9 +154,13 @@ interface JournalRecommendationProfile extends JournalRecommendationProfileInput
 interface JournalRecommendationProfileSummary { profileId: string; profileVersion: number; institution: string; specialty: string; manuscriptPurpose: ManuscriptPurpose; submissionDeadline: string; }
 interface InstitutionRuleExtractionSummary { profileId: string; profileVersion: number; status: "verified" | "requires_verification" | "search_required" | "no_official_rule_found"; }
 interface JournalMatchPreferences { topic: ResearchTopic; articleType: ArticleTypePreference; language: PublicationLanguagePreference; targetStrategy: TargetStrategy; openAccess: OpenAccessPreference; }
-interface JournalFitScores { institutionRules: number | null; topicScope: number; specialtyFit: number; articleType: number; contentReadiness: number; language: number; targetLevel: number; openAccess: number; purposeFit: number; timeFeasibility: number; }
-interface JournalRecommendation { id: string; name: string; nameEn: string; region: "domestic" | "international"; publisher: string; rankSystem: string; rankTier: string; overallFit: number; estimatedSubmissionPreparationDays: number; deadlineStatus: string; institutionEligibility: string; scores: JournalFitScores; reasons: string[]; rankingSourceUrl: string; homepageUrl: string; openAccessStatus: string; }
-interface JournalRecommendationRun { schemaVersion: number; runId: string; workspaceId: string; manuscriptVersion: number; manuscriptHash: string; algorithmVersion: string; catalogVersion: string; catalogVerifiedDate: string; inferredTopic: ResearchTopic; topicBasis: string; maturityScore: number; evaluatedUnixMs: number; recommendationProfile: JournalRecommendationProfileSummary; deadlineDaysRemaining: number; preferences: JournalMatchPreferences; domestic: JournalRecommendation[]; international: JournalRecommendation[]; schoolRuleStatus: string; institutionDirectoryStatus: string; limitations: string[]; externalTransmission: string; }
+type JournalMetricScheme = "cas_partition" | "clarivate_jcr" | "emerging_partition";
+interface JournalDirectoryEvidence { scheme: JournalMetricScheme; releaseYear: number; metricYear: number | null; partition: number | null; top: boolean | null; openAccess: boolean | null; jifTenths: number | null; category: string | null; }
+interface JournalDirectorySummary { schemaVersion: number; available: boolean; sourceCount: number; recordCount: number; distinctJournalCount: number; latestReleaseYear: number | null; recordsByScheme: Record<string, number>; partitionCounts: Record<string, number>; topCount: number; openAccessCount: number; formulaCellCount: number; catalogFingerprint: string | null; updatedUnixMs: number; sourceFiles: string[]; warnings: string[]; }
+interface JournalDirectoryImportResult { importedSourceCount: number; importedRecordCount: number; unchangedSourceCount: number; summary: JournalDirectorySummary; }
+interface JournalRecommendation { id: string; name: string; nameEn: string; region: "domestic" | "international"; publisher: string; rankSystem: string; rankTier: string; deadlineStatus: string; institutionEligibility: string; rankingSourceUrl: string; homepageUrl: string; openAccessStatus: string; directoryEvidence: JournalDirectoryEvidence[]; }
+interface JournalRecommendationPortfolio { sprint: JournalRecommendation[]; matching: JournalRecommendation[]; safeguard: JournalRecommendation[]; }
+interface JournalRecommendationRun { schemaVersion: number; runId: string; workspaceId: string; manuscriptVersion: number; catalogVersion: string; catalogVerifiedDate: string; evaluatedUnixMs: number; recommendationProfile: JournalRecommendationProfileSummary; deadlineDaysRemaining: number; domestic: JournalRecommendationPortfolio; international: JournalRecommendationPortfolio; schoolRuleStatus: string; institutionDirectoryStatus: string; journalDirectoryVersion: string | null; limitations: string[]; externalTransmission: string; }
 
 type StructureAnalysis =
   | { status: "completed"; report: StructureReport }
@@ -286,11 +305,14 @@ interface LocalAttestation {
 }
 
 interface SubmissionRecord {
+  schemaVersion?: number;
   submissionId: string;
   workspaceId: string;
   manuscriptVersion: number;
   attestationId: string;
+  targetSelectionId?: string | null;
   target: string;
+  publisher?: string | null;
   receipt: string | null;
   submittedUnixMs: number;
   statement: string;
@@ -306,6 +328,19 @@ interface SubmissionExport {
   exportedUnixMs: number;
   externalTransmission: "not_performed";
 }
+
+type SubmissionMaterialKind = "source_project" | "figure" | "table" | "bibliography" | "supplementary" | "cover_letter" | "title_page" | "declaration" | "other";
+interface SubmissionMaterial { materialId: string; kind: SubmissionMaterialKind; originalName: string; extension: string; sizeBytes: number; contentHash: string; importedUnixMs: number; }
+interface SubmissionMaterialChecklistItem { id: string; label: string; requirement: "required" | "recommended"; status: "complete" | "missing" | "recommended"; detail: string; }
+interface SubmissionMaterialCatalog { schemaVersion: number; workspaceId: string; manuscriptVersion: number; materials: SubmissionMaterial[]; checklist: SubmissionMaterialChecklistItem[]; requiredComplete: boolean; targetCheckReady: boolean; }
+interface SubmissionTargetSelection { schemaVersion: number; selectionId: string; workspaceId: string; selectedAgainstManuscriptVersion: number; recommendationRunId: string; journalId: string; name: string; nameEn: string; publisher: string; region: "domestic" | "international"; rankSystem: string; rankTier: string; homepageUrl: string; planRole: "primary" | "backup"; priority: number; selectedUnixMs: number; recordHash: string; externalTransmission: "not_performed"; }
+interface SubmissionTargetPlan { schemaVersion: number; workspaceId: string; primary: SubmissionTargetSelection | null; backups: SubmissionTargetSelection[]; updatedUnixMs: number; }
+type JournalRequirementStatus = "official_sources_captured" | "author_attested_official" | "requires_manual_review";
+type JournalRequirementObligation = "required" | "recommended" | "verify";
+interface JournalRequirementSource { url: string; title: string; contentHash: string; capturedUnixMs: number; officialHostMatched: boolean; }
+interface JournalRequirementItem { id: string; category: string; label: string; labelEn: string; obligation: JournalRequirementObligation; detail: string; sourceUrl: string; evidenceExcerpt: string; }
+interface JournalRequirementSnapshot { schemaVersion: number; snapshotId: string; workspaceId: string; targetSelectionId: string; journalId: string; journalName: string; sourceMode: "official_network_fetch" | "author_provided_official_text"; status: JournalRequirementStatus; sources: JournalRequirementSource[]; requirements: JournalRequirementItem[]; limitations: string[]; capturedUnixMs: number; freshUntilUnixMs: number; recordHash: string; externalTransmission: string; }
+interface TargetSubmissionExport { packageName: string; manuscriptVersion: number; targetSelectionId: string; targetName: string; files: string[]; warnings: string[]; exportedUnixMs: number; externalTransmission: "not_performed"; }
 
 interface DisciplineCatalogItem {
   code: string;
@@ -388,22 +423,35 @@ interface WorkspaceLifecycle {
   attestation: LocalAttestation | null;
   submission: SubmissionRecord | null;
   knowledgeBody: KnowledgeBodyRecord | null;
+  submissionMaterials: SubmissionMaterialCatalog;
+  submissionTarget: SubmissionTargetSelection | null;
+  submissionTargetPlan: SubmissionTargetPlan;
+  journalRequirements: JournalRequirementSnapshot | null;
 }
 
 type SelectionState = "idle" | "selecting" | "selected" | "error";
-type WorkspaceStage = "source" | "check" | "revision" | "versions" | "journals" | "attestation" | "submission" | "knowledge";
-type MobilePane = "operation" | "evidence";
-type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "close" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning" | "more" | "archive" | "trash" | "restore";
+type WorkspaceStage = "source" | "materials" | "check" | "revision" | "versions" | "journals" | "attestation" | "submission" | "knowledge";
+type WorkspaceSection = "overview" | "materials" | "journals" | "prepare" | "submission";
+type IconName = "workspace" | "upload" | "lock" | "file" | "check" | "close" | "versions" | "structure" | "target" | "format" | "review" | "package" | "knowledge" | "arrow" | "warning" | "more" | "archive" | "trash" | "restore" | "folder";
 
 const WORKSPACE_STAGES: Array<{ id: WorkspaceStage; zh: string; en: string; shortZh: string; shortEn: string }> = [
-  { id: "source", zh: "导入", en: "Import", shortZh: "导入", shortEn: "Import" },
+  { id: "source", zh: "概览", en: "Overview", shortZh: "概览", shortEn: "Overview" },
+  { id: "materials", zh: "投稿资料", en: "Materials", shortZh: "资料", shortEn: "Materials" },
   { id: "check", zh: "检查", en: "Check", shortZh: "检查", shortEn: "Check" },
   { id: "revision", zh: "修订", en: "Revise", shortZh: "修订", shortEn: "Revise" },
   { id: "versions", zh: "版本", en: "Version", shortZh: "版本", shortEn: "Version" },
-  { id: "journals", zh: "期刊匹配", en: "Journal Match", shortZh: "期刊", shortEn: "Match" },
+  { id: "journals", zh: "目标期刊", en: "Target Journal", shortZh: "期刊", shortEn: "Target" },
   { id: "attestation", zh: "存证", en: "Attest", shortZh: "存证", shortEn: "Attest" },
-  { id: "submission", zh: "投稿", en: "Submit", shortZh: "投稿", shortEn: "Submit" },
-  { id: "knowledge", zh: "知识体", en: "Knowledge Body", shortZh: "知识", shortEn: "Knowledge" },
+  { id: "submission", zh: "投稿包", en: "Package", shortZh: "投稿包", shortEn: "Package" },
+  { id: "knowledge", zh: "个人知识体", en: "Personal Knowledge Body", shortZh: "知识", shortEn: "Knowledge" },
+];
+
+const WORKSPACE_SECTIONS: Array<{ id: WorkspaceSection; stage: WorkspaceStage; zh: string; en: string; icon: IconName }> = [
+  { id: "overview", stage: "source", zh: "概览", en: "Overview", icon: "workspace" },
+  { id: "journals", stage: "journals", zh: "目标期刊", en: "Target journal", icon: "target" },
+  { id: "materials", stage: "materials", zh: "投稿资料", en: "Materials", icon: "folder" },
+  { id: "prepare", stage: "check", zh: "检查与修订", en: "Check & revise", icon: "review" },
+  { id: "submission", stage: "submission", zh: "投稿包", en: "Package", icon: "package" },
 ];
 
 const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
@@ -445,6 +493,7 @@ function Icon({ name }: { name: IconName }) {
     archive: <><path d="M4 7h16v13H4z" /><path d="M3 3h18v4H3z" /><path d="M9 11h6" /></>,
     trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     restore: <><path d="M4 4v6h6" /><path d="M5.5 15a7 7 0 1 0 .5-7" /><path d="M12 9v4l3 2" /></>,
+    folder: <><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M3 9h18" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
 }
@@ -474,6 +523,7 @@ function normalizeError(error: unknown) {
 
 function getStageIcon(stage: WorkspaceStage): IconName {
   if (stage === "source") return "file";
+  if (stage === "materials") return "folder";
   if (stage === "check") return "review";
   if (stage === "revision") return "format";
   if (stage === "versions") return "versions";
@@ -512,6 +562,7 @@ function ManuscriptDockApp() {
   const [workspaceManagementBusyId, setWorkspaceManagementBusyId] = useState<string | null>(null);
   const [workspaceManagementNotice, setWorkspaceManagementNotice] = useState<string | null>(null);
   const [workspaceManagementError, setWorkspaceManagementError] = useState<string | null>(null);
+  const [workspaceStorage, setWorkspaceStorage] = useState<WorkspaceStorageSummary | null>(null);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -545,20 +596,28 @@ function ManuscriptDockApp() {
   const [attestation, setAttestation] = useState<LocalAttestation | null>(null);
   const [submission, setSubmission] = useState<SubmissionRecord | null>(null);
   const [submissionExport, setSubmissionExport] = useState<SubmissionExport | null>(null);
+  const [submissionMaterials, setSubmissionMaterials] = useState<SubmissionMaterialCatalog | null>(null);
+  const [submissionTargetSelection, setSubmissionTargetSelection] = useState<SubmissionTargetSelection | null>(null);
+  const [submissionTargetPlan, setSubmissionTargetPlan] = useState<SubmissionTargetPlan | null>(null);
+  const [journalRequirementSnapshots, setJournalRequirementSnapshots] = useState<JournalRequirementSnapshot[]>([]);
+  const [targetSubmissionExport, setTargetSubmissionExport] = useState<TargetSubmissionExport | null>(null);
   const [attestationConfirmed, setAttestationConfirmed] = useState(false);
   const [submissionConfirmed, setSubmissionConfirmed] = useState(false);
-  const [submissionTarget, setSubmissionTarget] = useState("");
   const [submissionReceipt, setSubmissionReceipt] = useState("");
   const [isLoadingLifecycle, setIsLoadingLifecycle] = useState(false);
   const [isAttesting, setIsAttesting] = useState(false);
   const [isExportingSubmission, setIsExportingSubmission] = useState(false);
+  const [isAddingMaterials, setIsAddingMaterials] = useState(false);
+  const [isSelectingTarget, setIsSelectingTarget] = useState(false);
+  const [targetPlanBusyId, setTargetPlanBusyId] = useState<string | null>(null);
+  const [requirementBusyId, setRequirementBusyId] = useState<string | null>(null);
   const [isRecordingSubmission, setIsRecordingSubmission] = useState(false);
   const [isFinalizingKnowledge, setIsFinalizingKnowledge] = useState(false);
   const [isLoadingKnowledgeBody, setIsLoadingKnowledgeBody] = useState(false);
   const [knowledgeCandidateDecisions, setKnowledgeCandidateDecisions] = useState<Record<string, KnowledgeCandidateDecision>>({});
   const [knowledgeReviewConfirmed, setKnowledgeReviewConfirmed] = useState(false);
   const [activeStage, setActiveStage] = useState<WorkspaceStage>("source");
-  const [mobilePane, setMobilePane] = useState<MobilePane>("operation");
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -566,6 +625,9 @@ function ManuscriptDockApp() {
     void invoke<WorkspaceCatalog>("list_workspaces")
       .then((catalog) => { setRecentWorkspaces(catalog.workspaces); setArchivedWorkspaces(catalog.archivedWorkspaces ?? []); setCatalogWarnings(catalog.warnings); })
       .catch(() => { setCatalogWarnings([text("最近的本地工作区暂时无法读取", "Recent local workspaces could not be loaded")]); });
+    void invoke<WorkspaceStorageSummary>("get_workspace_storage_summary")
+      .then(setWorkspaceStorage)
+      .catch(() => setWorkspaceStorage(null));
   }, []);
 
   function resetVersionState() {
@@ -587,14 +649,20 @@ function ManuscriptDockApp() {
     setKnowledgeReviewConfirmed(false);
   }
 
-  function resetDownstreamLifecycle() {
+  function resetDownstreamLifecycle(clearSubmissionAssets = false) {
     setAttestation(null);
     setSubmission(null);
     setSubmissionExport(null);
     setAttestationConfirmed(false);
     setSubmissionConfirmed(false);
-    setSubmissionTarget("");
     setSubmissionReceipt("");
+    setTargetSubmissionExport(null);
+    if (clearSubmissionAssets) {
+      setSubmissionMaterials(null);
+      setSubmissionTargetSelection(null);
+      setSubmissionTargetPlan(null);
+      setJournalRequirementSnapshots([]);
+    }
     resetKnowledgeBodyState();
   }
 
@@ -607,7 +675,10 @@ function ManuscriptDockApp() {
         setReadinessReport(lifecycle.readinessReport);
         setAttestation(lifecycle.attestation);
         setSubmission(lifecycle.submission);
-        setSubmissionTarget(lifecycle.submission?.target ?? "");
+        setSubmissionMaterials(lifecycle.submissionMaterials ?? null);
+        setSubmissionTargetSelection(lifecycle.submissionTarget ?? null);
+        setSubmissionTargetPlan(lifecycle.submissionTargetPlan ?? { schemaVersion: 1, workspaceId: workspace.id, primary: lifecycle.submissionTarget ?? null, backups: [], updatedUnixMs: 0 });
+        setJournalRequirementSnapshots(lifecycle.journalRequirements ? [lifecycle.journalRequirements] : []);
         setSubmissionReceipt(lifecycle.submission?.receipt ?? "");
         setKnowledgeBodyRecord(lifecycle.knowledgeBody);
         setKnowledgeBodySnapshot(lifecycle.knowledgeBody?.snapshot ?? null);
@@ -617,6 +688,9 @@ function ManuscriptDockApp() {
             .map((pack) => pack.id)
             .filter((id) => id !== "core-structure-v1" && id !== "initial-submission-v1"));
         }
+        void invoke<JournalRequirementSnapshot[]>("get_journal_requirement_snapshots", { workspaceId: workspace.id })
+          .then(setJournalRequirementSnapshots)
+          .catch(() => undefined);
       })
       .catch((error: unknown) => setErrorMessage(normalizeError(error)))
       .finally(() => setIsLoadingLifecycle(false));
@@ -736,7 +810,7 @@ function ManuscriptDockApp() {
           setSubmissionElementCatalog(null);
           setRevisionDraft(null); setRevisionValues({}); setRevisionResult(null);
           resetVersionState();
-          resetDownstreamLifecycle();
+          resetDownstreamLifecycle(true);
           setActiveStage("source");
           setSelectionState("selected");
         } else if (result.status === "cancelled") {
@@ -763,11 +837,12 @@ function ManuscriptDockApp() {
           setSubmissionElementCatalog(null);
           setRevisionDraft(null); setRevisionValues({}); setRevisionResult(null);
           resetVersionState();
-          resetDownstreamLifecycle();
+          resetDownstreamLifecycle(true);
           setActiveStage("source");
-          setMobilePane("operation");
+          setEvidenceOpen(false);
           setRecentWorkspaces((current) => [result.workspace, ...current.filter((workspace) => workspace.id !== result.workspace.id)]);
           setSelectionId(null);
+          refreshSubmissionMaterials(result.workspace.id);
         } else {
           setErrorMessage(result.message);
           setSelectionState("error");
@@ -787,6 +862,7 @@ function ManuscriptDockApp() {
           setStructureReport(result.report);
           setReadinessReport(null);
           resetDownstreamLifecycle();
+          refreshSubmissionMaterials(activeWorkspace.id);
           setActiveStage("check");
         } else setErrorMessage(result.message);
       })
@@ -803,6 +879,7 @@ function ManuscriptDockApp() {
         if (result.status === "completed") {
           setReadinessReport(result.report);
           resetDownstreamLifecycle();
+          refreshSubmissionMaterials(activeWorkspace.id);
           setActiveStage("check");
         } else setErrorMessage(result.message);
       })
@@ -820,9 +897,9 @@ function ManuscriptDockApp() {
     setSubmissionElementCatalog(null);
     setRevisionDraft(null); setRevisionValues({}); setRevisionResult(null);
     resetVersionState();
-    resetDownstreamLifecycle();
+    resetDownstreamLifecycle(true);
     setActiveStage("source");
-    setMobilePane("operation");
+    setEvidenceOpen(false);
     setErrorMessage(null);
     setSelectionState("idle");
     hydrateLifecycle(workspace);
@@ -855,20 +932,38 @@ function ManuscriptDockApp() {
     }
   }
 
+  async function saveWorkspaceCopy(workspace: WorkspaceSummary, archived: boolean) {
+    if (workspaceManagementBusyId) return false;
+    setWorkspaceManagementBusyId(workspace.id);
+    setWorkspaceManagementNotice(null);
+    setWorkspaceManagementError(null);
+    try {
+      const exported = await invoke<WorkspaceCopyExport | null>("export_workspace_copy", { workspaceId: workspace.id, archived });
+      if (!exported) return false;
+      setWorkspaceManagementNotice(text(`已另存完整工作区：${exported.folderName}（${exported.fileCount} 个文件）`, `Saved workspace copy: ${exported.folderName} (${exported.fileCount} files)`));
+      return true;
+    } catch (error) {
+      setWorkspaceManagementError(localizeBackendText(locale, normalizeError(error)));
+      return false;
+    } finally {
+      setWorkspaceManagementBusyId(null);
+    }
+  }
+
   function openWorkspaceHome() {
     if (!activeWorkspace) return;
     setActiveWorkspace(null);
     setManuscript(null);
     setSelectionId(null);
     setActiveStage("source");
-    setMobilePane("operation");
+    setEvidenceOpen(false);
     setErrorMessage(null);
     setSelectionState("idle");
   }
 
   function openStage(stage: WorkspaceStage) {
     setActiveStage(stage);
-    setMobilePane("operation");
+    setEvidenceOpen(false);
     if (stage === "check" && ruleCatalog.length === 0 && !isLoadingRuleCatalog) {
       setIsLoadingRuleCatalog(true);
       setErrorMessage(null);
@@ -898,12 +993,15 @@ function ManuscriptDockApp() {
       setErrorMessage(null);
       void invoke<AcademicKnowledgeBodySnapshot>("get_knowledge_body_snapshot", { workspaceId: activeWorkspace.id })
         .then((snapshot) => {
+          const sameDecomposition = knowledgeBodySnapshot?.extraction?.decompositionHash === snapshot.extraction?.decompositionHash;
           setKnowledgeBodySnapshot(snapshot);
-          setKnowledgeCandidateDecisions(Object.fromEntries(
-            knowledgeCandidates(snapshot)
-              .filter((candidate) => candidate.authorConfirmed)
-              .map((candidate) => [candidate.candidateId, "included"]),
+          setKnowledgeCandidateDecisions((current) => Object.fromEntries(
+            knowledgeCandidates(snapshot).flatMap((candidate) => {
+              const decision = candidate.authorConfirmed ? "included" : sameDecomposition ? current[candidate.candidateId] : undefined;
+              return decision ? [[candidate.candidateId, decision]] : [];
+            }),
           ));
+          if (!sameDecomposition) setKnowledgeReviewConfirmed(false);
         })
         .catch((error: unknown) => setErrorMessage(normalizeError(error)))
         .finally(() => setIsLoadingKnowledgeBody(false));
@@ -957,7 +1055,8 @@ function ManuscriptDockApp() {
       setRevisionValues(Object.fromEntries(draft.fields.map((field) => [field.field, field.value])));
       setVersionNotice(text(`已保存 v${result.version.version}，并完成当前版本复查`, `Saved v${result.version.version} and rechecked the current version`));
       loadVersionHistory(result.workspace, result.revisionSet.baseVersion);
-      setActiveStage("versions");
+      refreshSubmissionMaterials(result.workspace.id);
+      setActiveStage("submission");
     } catch (error) {
       setErrorMessage(normalizeError(error));
     } finally {
@@ -986,11 +1085,131 @@ function ManuscriptDockApp() {
     finally { setIsExportingSubmission(false); }
   }
 
+  function refreshSubmissionMaterials(workspaceId = activeWorkspace?.id) {
+    if (!workspaceId) return;
+    void invoke<SubmissionMaterialCatalog>("get_submission_materials", { workspaceId })
+      .then(setSubmissionMaterials)
+      .catch((error: unknown) => setErrorMessage(normalizeError(error)));
+  }
+
+  async function addSubmissionMaterials(kind: SubmissionMaterialKind) {
+    if (!activeWorkspace || isAddingMaterials) return;
+    setIsAddingMaterials(true);
+    setErrorMessage(null);
+    try {
+      const catalog = await invoke<SubmissionMaterialCatalog | null>("add_submission_materials", { workspaceId: activeWorkspace.id, kind });
+      if (catalog) setSubmissionMaterials(catalog);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsAddingMaterials(false);
+    }
+  }
+
+  async function selectSubmissionTarget(recommendationRunId: string, journalId: string) {
+    if (!activeWorkspace || isSelectingTarget) return;
+    setIsSelectingTarget(true);
+    setErrorMessage(null);
+    try {
+      const target = await invoke<SubmissionTargetSelection>("select_recommended_journal", { workspaceId: activeWorkspace.id, recommendationRunId, journalId });
+      setReadinessReport(null);
+      resetDownstreamLifecycle();
+      setSubmissionTargetSelection(target);
+      setTargetSubmissionExport(null);
+      const plan = await invoke<SubmissionTargetPlan>("get_submission_target_plan", { workspaceId: activeWorkspace.id });
+      setSubmissionTargetPlan(plan);
+      setJournalRequirementSnapshots(await invoke<JournalRequirementSnapshot[]>("get_journal_requirement_snapshots", { workspaceId: activeWorkspace.id }));
+      refreshSubmissionMaterials(activeWorkspace.id);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsSelectingTarget(false);
+    }
+  }
+
+  async function addBackupSubmissionTarget(recommendationRunId: string, journalId: string) {
+    if (!activeWorkspace || targetPlanBusyId) return;
+    setTargetPlanBusyId(journalId);
+    setErrorMessage(null);
+    try {
+      const plan = await invoke<SubmissionTargetPlan>("add_backup_recommended_journal", { workspaceId: activeWorkspace.id, recommendationRunId, journalId });
+      setSubmissionTargetPlan(plan);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setTargetPlanBusyId(null);
+    }
+  }
+
+  async function promoteBackupSubmissionTarget(selectionId: string, reason: string) {
+    if (!activeWorkspace || targetPlanBusyId) return;
+    setTargetPlanBusyId(selectionId);
+    setErrorMessage(null);
+    try {
+      const plan = await invoke<SubmissionTargetPlan>("promote_backup_target", { workspaceId: activeWorkspace.id, backupSelectionId: selectionId, reason });
+      setReadinessReport(null);
+      resetDownstreamLifecycle();
+      setSubmissionTargetPlan(plan);
+      setSubmissionTargetSelection(plan.primary);
+      setTargetSubmissionExport(null);
+      setJournalRequirementSnapshots(await invoke<JournalRequirementSnapshot[]>("get_journal_requirement_snapshots", { workspaceId: activeWorkspace.id }));
+      refreshSubmissionMaterials(activeWorkspace.id);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setTargetPlanBusyId(null);
+    }
+  }
+
+  async function discoverJournalRequirements(selectionId: string) {
+    if (!activeWorkspace || requirementBusyId) return;
+    setRequirementBusyId(selectionId);
+    setErrorMessage(null);
+    try {
+      const snapshot = await invoke<JournalRequirementSnapshot>("discover_journal_requirements", { workspaceId: activeWorkspace.id, targetSelectionId: selectionId, authorConfirmedExternalTransmission: true });
+      setJournalRequirementSnapshots((current) => [snapshot, ...current.filter((item) => item.targetSelectionId !== selectionId)]);
+      if (submissionTargetSelection?.selectionId === selectionId) refreshSubmissionMaterials(activeWorkspace.id);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setRequirementBusyId(null);
+    }
+  }
+
+  async function saveManualJournalRequirements(selectionId: string, sourceUrl: string, requirementText: string) {
+    if (!activeWorkspace || requirementBusyId) return;
+    setRequirementBusyId(selectionId);
+    setErrorMessage(null);
+    try {
+      const snapshot = await invoke<JournalRequirementSnapshot>("save_manual_journal_requirements", { workspaceId: activeWorkspace.id, targetSelectionId: selectionId, sourceUrl, requirementText, authorAttestedOfficial: true });
+      setJournalRequirementSnapshots((current) => [snapshot, ...current.filter((item) => item.targetSelectionId !== selectionId)]);
+      if (submissionTargetSelection?.selectionId === selectionId) refreshSubmissionMaterials(activeWorkspace.id);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setRequirementBusyId(null);
+    }
+  }
+
+  async function exportTargetSubmission() {
+    if (!activeWorkspace || isExportingSubmission) return;
+    setIsExportingSubmission(true);
+    setErrorMessage(null);
+    try {
+      const result = await invoke<TargetSubmissionExport | null>("export_target_submission_package", { workspaceId: activeWorkspace.id });
+      if (result) setTargetSubmissionExport(result);
+    } catch (error) {
+      setErrorMessage(normalizeError(error));
+    } finally {
+      setIsExportingSubmission(false);
+    }
+  }
+
   async function recordSubmission() {
-    if (!activeWorkspace || !submissionConfirmed || !submissionTarget.trim() || isRecordingSubmission) return;
+    if (!activeWorkspace || !submissionTargetSelection || !submissionConfirmed || isRecordingSubmission) return;
     setIsRecordingSubmission(true); setErrorMessage(null);
     try {
-      const record = await invoke<SubmissionRecord>("record_manual_submission", { workspaceId: activeWorkspace.id, target: submissionTarget, receipt: submissionReceipt.trim() || null, authorConfirmed: true });
+      const record = await invoke<SubmissionRecord>("record_manual_submission", { workspaceId: activeWorkspace.id, target: submissionTargetSelection.name, receipt: submissionReceipt.trim() || null, authorConfirmed: true });
       setSubmission(record);
       setSubmissionConfirmed(false);
     } catch (error) { setErrorMessage(normalizeError(error)); }
@@ -1024,7 +1243,7 @@ function ManuscriptDockApp() {
             <button className="rail-button rail-workspace-button" type="button" aria-current="page" aria-label={text("我的工作台", "My Workspace")} title={text("我的工作台", "My Workspace")} onClick={openWorkspaceHome}><Icon name="workspace" /></button>
             <div className="rail-divider" role="separator" aria-orientation="horizontal" />
             <button className="rail-button" type="button" aria-label={text("导入论文", "Import manuscript")} title={text("导入论文", "Import manuscript")} onClick={selectManuscript}><Icon name="upload" /></button>
-            {(["check", "revision", "versions", "journals", "attestation", "submission", "knowledge"] as WorkspaceStage[]).map((stage) => { const item = WORKSPACE_STAGES.find((candidate) => candidate.id === stage); return <button key={stage} className="rail-button" type="button" aria-label={item ? localize(locale, item.zh, item.en) : undefined} title={text("创建工作区后可用", "Available after creating a workspace")} disabled><Icon name={getStageIcon(stage)} /></button>; })}
+            {WORKSPACE_SECTIONS.filter((section) => section.id !== "overview").map((section) => <button key={section.id} className="rail-button" type="button" aria-label={localize(locale, section.zh, section.en)} title={text("创建工作区后可用", "Available after creating a workspace")} disabled><Icon name={section.icon} /></button>)}
           </nav>
 
           <main id="main-content" className="landing-main">
@@ -1075,11 +1294,13 @@ function ManuscriptDockApp() {
                 {errorMessage ? <ErrorNotice message={localizeBackendText(locale, errorMessage)} onRetry={selectManuscript} /> : null}
               </section>
 
+              <section className="storage-policy-card" aria-labelledby="storage-policy-heading"><div><p className="field-kicker">{text("默认读取与存取位置", "Default read and storage location")}</p><h2 id="storage-policy-heading">{text("ManuscriptDock 本地资料库", "ManuscriptDock local library")}</h2><code>{workspaceStorage?.defaultLocation ?? text("正在定位本地资料库…", "Locating the local library…")}</code></div><p>{text("每篇论文导入后建立独立工作区，自动保存源快照、全部版本、推荐期刊与出版社、检查和存证记录。", "Each imported manuscript gets an independent workspace that automatically stores its source snapshot, versions, recommended journals and publishers, checks, and attestations.")}</p><small>{text("“另存工作区”会复制完整档案到你选择的文件夹；当前资料库和原始稿件都不会被移动。", "Save Workspace As copies the complete record to a folder you choose; neither the current library nor the original manuscript is moved.")}</small></section>
+
               <section className="track-grid" aria-label={text("本地工作原则", "Local workspace principles")}>
                 <article className="track-card"><span>01</span><h2>{text("源稿不变", "Source stays unchanged")}</h2><p>{text("所有处理基于版本化工作副本，原稿始终保持只读。", "All processing uses versioned working copies; the source remains read-only.")}</p></article>
                 <article className="track-card"><span>02</span><h2>{text("传输可见", "Transfers stay visible")}</h2><p>{text("你自主决定是否联网、使用模型和外部投送。", "You decide whether to go online, use models, or send work externally.")}</p></article>
               </section>
-              {recentWorkspaces.length > 0 || archivedWorkspaces.length > 0 || catalogWarnings.length > 0 || workspaceManagementNotice || workspaceManagementError ? <RecentWorkspaces workspaces={recentWorkspaces} archivedWorkspaces={archivedWorkspaces} warnings={catalogWarnings.map((warning) => localizeBackendText(locale, warning))} busyId={workspaceManagementBusyId} notice={workspaceManagementNotice} error={workspaceManagementError} onOpen={openRecentWorkspace} onManage={manageWorkspace} /> : null}
+              {recentWorkspaces.length > 0 || archivedWorkspaces.length > 0 || catalogWarnings.length > 0 || workspaceManagementNotice || workspaceManagementError ? <RecentWorkspaces workspaces={recentWorkspaces} archivedWorkspaces={archivedWorkspaces} warnings={catalogWarnings.map((warning) => localizeBackendText(locale, warning))} busyId={workspaceManagementBusyId} notice={workspaceManagementNotice} error={workspaceManagementError} onOpen={openRecentWorkspace} onManage={manageWorkspace} onSaveCopy={saveWorkspaceCopy} /> : null}
             </div>
           </main>
 
@@ -1092,44 +1313,41 @@ function ManuscriptDockApp() {
 
   const currentStage = WORKSPACE_STAGES.find((stage) => stage.id === activeStage) ?? WORKSPACE_STAGES[0];
   const currentStageLabel = localize(locale, currentStage.zh, currentStage.en);
+  const activeSection: WorkspaceSection | null = activeStage === "source" ? "overview" : activeStage === "materials" ? "materials" : activeStage === "journals" ? "journals" : activeStage === "check" || activeStage === "revision" ? "prepare" : activeStage === "submission" ? "submission" : null;
   return (
     <div className="app-shell workspace-shell">
       <a className="skip-link" href="#main-content">{text("跳到主要内容", "Skip to main content")}</a>
       <ProductBar manuscriptName={activeWorkspace.manuscript.name} onNewManuscript={selectManuscript} isSelecting={isSelecting} />
       <div className="workbench">
-        <nav className="task-rail" aria-label={text("论文工作阶段", "Manuscript workflow stages")}>
-          <button className="rail-button rail-workspace-button" type="button" aria-label={text("我的工作台", "My Workspace")} title={text("我的工作台", "My Workspace")} onClick={openWorkspaceHome}><Icon name="workspace" /></button>
-          <div className="rail-divider" role="separator" aria-orientation="horizontal" />
-          {WORKSPACE_STAGES.map((stage) => {
-            const isCurrent = stage.id === activeStage;
-            const isComplete = stage.id === "source"
-              || (stage.id === "check" && readinessReport !== null)
-              || (stage.id === "revision" && activeWorkspace.snapshotVersion > 1)
-              || stage.id === "versions"
-              || (stage.id === "attestation" && attestation !== null)
-              || (stage.id === "submission" && submission !== null)
-              || (stage.id === "knowledge" && knowledgeBodyRecord !== null);
-            const stageLabel = localize(locale, stage.zh, stage.en);
-            return <button key={stage.id} className="rail-button" type="button" aria-current={isCurrent ? "step" : undefined} aria-label={stageLabel} title={stageLabel} data-complete={isComplete} onClick={() => openStage(stage.id)}><Icon name={getStageIcon(stage.id)} /><span>{localize(locale, stage.shortZh, stage.shortEn)}</span></button>;
-          })}
-        </nav>
+        <aside className="workspace-sidebar">
+          <button className="sidebar-home" type="button" onClick={openWorkspaceHome}><Icon name="workspace" /><span>{text("所有论文", "All manuscripts")}</span></button>
+          <nav className="primary-task-nav" aria-label={text("投稿准备主任务", "Primary submission tasks")}>
+            {WORKSPACE_SECTIONS.map((section) => {
+              const complete = section.id === "overview" || (section.id === "materials" && authorMaterialInputsReady(submissionMaterials)) || (section.id === "journals" && isSubmissionTargetCurrent(activeWorkspace, submissionTargetSelection) && journalRequirementSnapshotReady(currentJournalRequirementSnapshot(submissionTargetSelection, journalRequirementSnapshots))) || (section.id === "prepare" && Boolean(readinessReport && readinessReport.blockedCount === 0)) || (section.id === "submission" && Boolean(submission));
+              return <button key={section.id} type="button" aria-current={activeSection === section.id ? "page" : undefined} data-complete={complete} onClick={() => openStage(section.stage)}><Icon name={section.icon} /><span>{localize(locale, section.zh, section.en)}</span><small>{complete ? text("已完成", "Done") : text("待处理", "Pending")}</small></button>;
+            })}
+          </nav>
+          <details className="advanced-nav" open={["versions", "attestation", "knowledge"].includes(activeStage)}>
+            <summary>{text("记录与高级功能", "Records & advanced")}</summary>
+            <button type="button" aria-current={activeStage === "versions" ? "page" : undefined} onClick={() => openStage("versions")}><Icon name="versions" />{text("版本历史", "Version history")}</button>
+            <button type="button" aria-current={activeStage === "attestation" ? "page" : undefined} onClick={() => openStage("attestation")}><Icon name="lock" />{text("本地存证", "Local attestation")}</button>
+            <button type="button" aria-current={activeStage === "knowledge" ? "page" : undefined} onClick={() => openStage("knowledge")}><Icon name="knowledge" />{text("个人知识体", "Personal knowledge body")}</button>
+          </details>
+        </aside>
 
         <main id="main-content" className="workspace-main">
-          <header className="workflow-header">
-            <div><p className="breadcrumb">{text("工作台", "Workspace")} <span>/</span> {currentStageLabel}</p><h1>{currentStageLabel}</h1><p>{getStageDescription(activeStage, locale)}</p></div>
-            <StageStatus stage={activeStage} structureReport={structureReport} readinessReport={readinessReport} />
+          <header className="workflow-header workflow-summary-header">
+            <div><p className="breadcrumb">{text("论文工作区", "Manuscript workspace")} <span>/</span> {currentStageLabel}</p><h1>{currentStageLabel}</h1><p>{getStageDescription(activeStage, locale)}</p></div>
+            <div className="workflow-header-actions"><div className="workspace-context"><span>v{activeWorkspace.snapshotVersion}</span><span>{submissionTargetSelection ? (locale === "en" ? submissionTargetSelection.nameEn : submissionTargetSelection.name) : text("未选目标期刊", "No target selected")}</span></div><StageStatus stage={activeStage} structureReport={structureReport} readinessReport={readinessReport} /><button className="evidence-toggle" type="button" aria-expanded={evidenceOpen} aria-controls="evidence-pane" onClick={() => setEvidenceOpen((current) => !current)}>{evidenceOpen ? text("收起依据", "Hide evidence") : text("查看依据", "View evidence")}</button></div>
           </header>
-          <div className="pane-switcher" role="tablist" aria-label={text("工作区视图", "Workspace views")}>
-            <button type="button" role="tab" aria-controls="operation-pane" aria-selected={mobilePane === "operation"} onClick={() => setMobilePane("operation")}>{text("操作", "Actions")}</button>
-            <button type="button" role="tab" aria-controls="evidence-pane" aria-selected={mobilePane === "evidence"} onClick={() => setMobilePane("evidence")}>{text("证据", "Evidence")}</button>
-          </div>
-          <div className="workspace-panes" data-mobile-pane={mobilePane}>
-            <section id="operation-pane" className="operation-pane" role="tabpanel" aria-label={`${currentStageLabel} ${text("操作", "Actions")}`}>
-              <OperationPane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} disciplineCatalog={disciplineCatalog} selectedDisciplineCode={selectedDisciplineCode} knowledgeCandidateDecisions={knowledgeCandidateDecisions} knowledgeReviewConfirmed={knowledgeReviewConfirmed} attestation={attestation} submission={submission} submissionExport={submissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionCandidate={versionCandidate} versionNote={versionNote} versionNotice={versionNotice} attestationConfirmed={attestationConfirmed} submissionConfirmed={submissionConfirmed} submissionTarget={submissionTarget} submissionReceipt={submissionReceipt} isLoadingRuleCatalog={isLoadingRuleCatalog} isLoadingSubmissionElements={isLoadingSubmissionElements} isLoadingLifecycle={isLoadingLifecycle} isLoadingKnowledgeBody={isLoadingKnowledgeBody} isLoadingDisciplineCatalog={isLoadingDisciplineCatalog} isApplyingRevision={isApplyingRevision} isAnalyzing={isAnalyzing} isEvaluating={isEvaluating} isSelectingVersion={isSelectingVersion} isSavingVersion={isSavingVersion} isRestoringVersion={isRestoringVersion} isAttesting={isAttesting} isExportingSubmission={isExportingSubmission} isRecordingSubmission={isRecordingSubmission} isFinalizingKnowledge={isFinalizingKnowledge} onAnalyze={analyzeWorkspace} onEvaluate={evaluateReadiness} onToggleRulePack={toggleRulePack} onOpenStage={openStage} onRevisionValueChange={(field, value) => setRevisionValues((current) => ({ ...current, [field]: value }))} onApplyRevision={applyRevision} onSelectVersionCandidate={selectVersionCandidate} onVersionNoteChange={setVersionNote} onSaveVersion={saveVersion} onSelectVersion={(version) => compareVersions(activeWorkspace, version, activeWorkspace.snapshotVersion)} onRestoreVersion={restoreVersion} onAttestationConfirmed={setAttestationConfirmed} onCreateAttestation={createAttestation} onExportSubmission={exportSubmission} onSubmissionConfirmed={setSubmissionConfirmed} onSubmissionTargetChange={setSubmissionTarget} onSubmissionReceiptChange={setSubmissionReceipt} onRecordSubmission={recordSubmission} onDisciplineChange={setSelectedDisciplineCode} onKnowledgeCandidateDecision={(candidateId, decision) => setKnowledgeCandidateDecisions((current) => ({ ...current, [candidateId]: decision }))} onKnowledgeReviewConfirmed={setKnowledgeReviewConfirmed} onFinalizeKnowledge={finalizeKnowledgeBody} />
+          {(activeStage === "check" || activeStage === "revision") ? <nav className="prepare-subnav" aria-label={text("检查与修订", "Check and revise")}><button type="button" aria-current={activeStage === "check" ? "page" : undefined} onClick={() => openStage("check")}>{text("检查", "Check")}</button><button type="button" aria-current={activeStage === "revision" ? "page" : undefined} onClick={() => openStage("revision")}>{text("修订", "Revise")}</button></nav> : null}
+          <div className="workspace-panes" data-evidence-open={evidenceOpen}>
+            <section id="operation-pane" className="operation-pane" aria-label={`${currentStageLabel} ${text("操作", "Actions")}`}>
+              <OperationPane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} disciplineCatalog={disciplineCatalog} selectedDisciplineCode={selectedDisciplineCode} knowledgeCandidateDecisions={knowledgeCandidateDecisions} knowledgeReviewConfirmed={knowledgeReviewConfirmed} attestation={attestation} submission={submission} submissionExport={submissionExport} submissionMaterials={submissionMaterials} submissionTargetSelection={submissionTargetSelection} submissionTargetPlan={submissionTargetPlan} journalRequirementSnapshots={journalRequirementSnapshots} targetSubmissionExport={targetSubmissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionCandidate={versionCandidate} versionNote={versionNote} versionNotice={versionNotice} attestationConfirmed={attestationConfirmed} submissionConfirmed={submissionConfirmed} submissionReceipt={submissionReceipt} isLoadingRuleCatalog={isLoadingRuleCatalog} isLoadingSubmissionElements={isLoadingSubmissionElements} isLoadingLifecycle={isLoadingLifecycle} isLoadingKnowledgeBody={isLoadingKnowledgeBody} isLoadingDisciplineCatalog={isLoadingDisciplineCatalog} isApplyingRevision={isApplyingRevision} isAnalyzing={isAnalyzing} isEvaluating={isEvaluating} isSelectingVersion={isSelectingVersion} isSavingVersion={isSavingVersion} isRestoringVersion={isRestoringVersion} isAttesting={isAttesting} isExportingSubmission={isExportingSubmission} isAddingMaterials={isAddingMaterials} isSelectingTarget={isSelectingTarget} targetPlanBusyId={targetPlanBusyId} requirementBusyId={requirementBusyId} isRecordingSubmission={isRecordingSubmission} isFinalizingKnowledge={isFinalizingKnowledge} onAnalyze={analyzeWorkspace} onEvaluate={evaluateReadiness} onToggleRulePack={toggleRulePack} onOpenStage={openStage} onRevisionValueChange={(field, value) => setRevisionValues((current) => ({ ...current, [field]: value }))} onApplyRevision={applyRevision} onSelectVersionCandidate={selectVersionCandidate} onVersionNoteChange={setVersionNote} onSaveVersion={saveVersion} onSelectVersion={(version) => compareVersions(activeWorkspace, version, activeWorkspace.snapshotVersion)} onRestoreVersion={restoreVersion} onAttestationConfirmed={setAttestationConfirmed} onCreateAttestation={createAttestation} onExportSubmission={exportSubmission} onAddMaterial={(kind) => void addSubmissionMaterials(kind)} onSelectSubmissionTarget={(runId, journalId) => void selectSubmissionTarget(runId, journalId)} onAddBackupTarget={(runId, journalId) => void addBackupSubmissionTarget(runId, journalId)} onPromoteBackupTarget={(selectionId, reason) => void promoteBackupSubmissionTarget(selectionId, reason)} onDiscoverJournalRequirements={(selectionId) => void discoverJournalRequirements(selectionId)} onSaveManualJournalRequirements={(selectionId, sourceUrl, requirementText) => void saveManualJournalRequirements(selectionId, sourceUrl, requirementText)} onExportTargetSubmission={() => void exportTargetSubmission()} onSubmissionConfirmed={setSubmissionConfirmed} onSubmissionReceiptChange={setSubmissionReceipt} onRecordSubmission={recordSubmission} onDisciplineChange={setSelectedDisciplineCode} onKnowledgeCandidateDecision={(candidateId, decision) => setKnowledgeCandidateDecisions((current) => ({ ...current, [candidateId]: decision }))} onKnowledgeReviewConfirmed={setKnowledgeReviewConfirmed} onFinalizeKnowledge={finalizeKnowledgeBody} />
             </section>
-            <aside id="evidence-pane" className="evidence-pane" role="tabpanel" aria-label={`${currentStageLabel} ${text("证据", "Evidence")}`}><EvidencePane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} attestation={attestation} submission={submission} submissionExport={submissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionComparison={versionComparison} isComparingVersions={isComparingVersions} /></aside>
+            <aside id="evidence-pane" className="evidence-pane" aria-label={`${currentStageLabel} ${text("证据", "Evidence")}`}><button className="evidence-close" type="button" onClick={() => setEvidenceOpen(false)} aria-label={text("关闭依据", "Close evidence")}><Icon name="close" /></button><EvidencePane stage={activeStage} workspace={activeWorkspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} knowledgeBodyRecord={knowledgeBodyRecord} attestation={attestation} submission={submission} submissionExport={submissionExport} submissionMaterials={submissionMaterials} submissionTargetSelection={submissionTargetSelection} submissionTargetPlan={submissionTargetPlan} journalRequirementSnapshots={journalRequirementSnapshots} targetSubmissionExport={targetSubmissionExport} ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} submissionElementCatalog={submissionElementCatalog} revisionDraft={revisionDraft} revisionValues={revisionValues} revisionResult={revisionResult} versionHistory={versionHistory} selectedVersion={selectedVersion} versionComparison={versionComparison} isComparingVersions={isComparingVersions} /></aside>
           </div>
-          {errorMessage ? <ErrorNotice message={localizeBackendText(locale, errorMessage)} onRetry={activeStage === "check" ? (structureReport ? evaluateReadiness : analyzeWorkspace) : activeStage === "versions" ? () => loadVersionHistory(activeWorkspace) : activeStage === "knowledge" ? finalizeKnowledgeBody : () => openStage(activeStage)} /> : null}
+          {errorMessage ? <ErrorNotice message={localizeBackendText(locale, errorMessage)} onRetry={activeStage === "check" ? (structureReport ? evaluateReadiness : analyzeWorkspace) : activeStage === "materials" ? () => refreshSubmissionMaterials(activeWorkspace.id) : activeStage === "versions" ? () => loadVersionHistory(activeWorkspace) : () => openStage(activeStage)} /> : null}
         </main>
       </div>
       <LiveStatus selecting={isSelecting} analyzing={isAnalyzing} evaluating={isEvaluating} />
@@ -1145,11 +1363,11 @@ function ProductBar({ manuscriptName, onNewManuscript, isSelecting = false }: { 
 function SubmissionGuide() {
   const { text } = useI18n();
   const items = [
-    ["1", text("导入与检查", "Import and check"), text("建立只读快照，提取结构并按目标规则生成逐条结论", "Create a read-only snapshot, extract structure, and run target-aware checks")],
-    ["2", text("修订与版本", "Revise and version"), text("核对依据、保存新版本并自动复查当前稿件", "Review evidence, save a new version, and recheck the current manuscript")],
-    ["3", text("本地存证", "Local attestation"), text("由作者确认稿件版本和检查报告，形成带指纹的证据记录", "Author-confirm the version and report to create a fingerprinted evidence record")],
-    ["4", text("导出与投稿", "Export and submit"), text("导出交付包；在期刊网站提交后登记目标与回执", "Export a handoff package, then record the target and receipt after journal submission")],
-    ["5", text("固化知识体", "Finalize knowledge body"), text("把本次稿件、证据和投稿链固化为不可变知识体快照", "Finalize the manuscript, evidence, and submission chain as an immutable knowledge-body snapshot")],
+    ["1", text("建立论文工作区", "Create a manuscript workspace"), text("保存不可变源快照，所有处理绑定明确版本", "Save an immutable source snapshot and bind every action to a version")],
+    ["2", text("选择出版社与期刊", "Choose a publisher and journal"), text("生成国内外冲刺、匹配和保底候选，并由作者明确选择", "Build domestic and international portfolios, then explicitly select a target")],
+    ["3", text("按目标组织投稿资料", "Organize target-specific materials"), text("依据所选期刊的官方要求准备原图、表格、投稿信与声明", "Prepare figures, tables, cover letter, and declarations against the selected journal's official requirements")],
+    ["4", text("检查与修订", "Check and revise"), text("运行可追溯检查，安全修订并保存新版本", "Run traceable checks, revise safely, and save a new version")],
+    ["5", text("生成真实投稿包", "Create the actual package"), text("只向出版社上传 submission；records 留在本机", "Upload only submission to the publisher; keep records locally")],
   ];
   return <aside className="submission-guide" aria-labelledby="guide-heading"><header><h2 id="guide-heading">{text("投稿指引", "Submission guide")}</h2></header><div className="guide-list">{items.map(([number, title, copy]) => <article className="guide-card" key={number}><span>{number}</span><div><h3>{title}</h3><p>{copy}</p></div></article>)}</div></aside>;
 }
@@ -1164,7 +1382,7 @@ function LiveStatus({ selecting, analyzing, evaluating }: { selecting: boolean; 
   return <div className="sr-only" role="status" aria-live="polite">{selecting ? text("正在打开系统文件选择器", "Opening the system file picker") : analyzing ? text("正在解析论文结构", "Analyzing manuscript structure") : evaluating ? text("正在检查投稿准备", "Checking submission readiness") : ""}</div>;
 }
 
-function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, notice, error, onOpen, onManage }: { workspaces: WorkspaceSummary[]; archivedWorkspaces: WorkspaceSummary[]; warnings: string[]; busyId: string | null; notice: string | null; error: string | null; onOpen: (workspace: WorkspaceSummary) => void; onManage: (action: "archive" | "restore" | "delete", workspace: WorkspaceSummary, archived: boolean) => Promise<boolean>; }) {
+function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, notice, error, onOpen, onManage, onSaveCopy }: { workspaces: WorkspaceSummary[]; archivedWorkspaces: WorkspaceSummary[]; warnings: string[]; busyId: string | null; notice: string | null; error: string | null; onOpen: (workspace: WorkspaceSummary) => void; onManage: (action: "archive" | "restore" | "delete", workspace: WorkspaceSummary, archived: boolean) => Promise<boolean>; onSaveCopy: (workspace: WorkspaceSummary, archived: boolean) => Promise<boolean>; }) {
   const { locale, text } = useI18n();
   const [view, setView] = useState<"recent" | "archived">("recent");
   const [menuWorkspaceId, setMenuWorkspaceId] = useState<string | null>(null);
@@ -1192,6 +1410,10 @@ function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, no
     }
   };
 
+  const saveCopy = async (workspace: WorkspaceSummary) => {
+    if (await onSaveCopy(workspace, archived)) setMenuWorkspaceId(null);
+  };
+
   return <section className="recent-section" aria-labelledby="recent-heading">
     <div className="section-heading"><div><p className="field-kicker">{text("设备上的记录", "Records on this device")}</p><h2 id="recent-heading">{text("最近工作区", "Recent workspaces")}</h2></div><span>{locale === "zh-CN" ? `${workspaces.length + archivedWorkspaces.length} 个` : workspaces.length + archivedWorkspaces.length}</span></div>
     <div className="workspace-catalog-tabs" role="tablist" aria-label={text("工作区状态", "Workspace status")}><button type="button" role="tab" aria-selected={view === "recent"} onClick={() => { setView("recent"); setMenuWorkspaceId(null); setDeleteWorkspaceId(null); }}>{text("最近工作区", "Recent workspaces")}<span>{workspaces.length}</span></button><button type="button" role="tab" aria-selected={view === "archived"} onClick={() => { setView("archived"); setMenuWorkspaceId(null); setDeleteWorkspaceId(null); }}>{text("已归档", "Archived")}<span>{archivedWorkspaces.length}</span></button></div>
@@ -1205,7 +1427,7 @@ function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, no
         <div className="workspace-row">
           <button className="workspace-open-button" type="button" onClick={() => onOpen(workspace)} disabled={archived || isBusy} aria-label={archived ? text(`${workspace.manuscript.name} 已归档`, `${workspace.manuscript.name} is archived`) : text(`打开 ${workspace.manuscript.name}`, `Open ${workspace.manuscript.name}`)}><span className="recent-file-icon" aria-hidden="true"><Icon name="file" /></span><span className="recent-file-copy"><strong>{workspace.manuscript.name}</strong><span>{archived ? text("已归档 · 恢复后可继续工作", "Archived · Restore to continue") : text("源快照", "Source snapshot")} {archived ? "" : `v${workspace.snapshotVersion} · ${formatModifiedDate(workspace.importedUnixMs, locale)}`}</span></span><code>{workspace.contentHash.slice(0, 8)}</code>{!archived ? <Icon name="arrow" /> : null}</button>
           <button className="workspace-manage-button" type="button" aria-label={text(`管理 ${workspace.manuscript.name}`, `Manage ${workspace.manuscript.name}`)} aria-expanded={menuOpen} aria-controls={`workspace-menu-${workspace.id}`} disabled={isBusy} onClick={() => { setMenuWorkspaceId(menuOpen ? null : workspace.id); setDeleteWorkspaceId(null); }}><Icon name="more" /><span>{isBusy ? text("处理中", "Working") : text("管理", "Manage")}</span></button>
-          {menuOpen ? <div className="workspace-management-menu" id={`workspace-menu-${workspace.id}`} role="menu" aria-label={text(`${workspace.manuscript.name} 管理操作`, `Management actions for ${workspace.manuscript.name}`)}><button type="button" role="menuitem" onClick={() => void perform(archived ? "restore" : "archive", workspace)}><Icon name={archived ? "restore" : "archive"} />{archived ? text("恢复到最近工作区", "Restore to recent") : text("归档工作区", "Archive workspace")}</button><button className="workspace-delete-action" type="button" role="menuitem" onClick={() => { setDeleteWorkspaceId(workspace.id); setMenuWorkspaceId(null); }}><Icon name="trash" />{text("永久删除…", "Delete permanently…")}</button></div> : null}
+          {menuOpen ? <div className="workspace-management-menu" id={`workspace-menu-${workspace.id}`} role="menu" aria-label={text(`${workspace.manuscript.name} 管理操作`, `Management actions for ${workspace.manuscript.name}`)}><button type="button" role="menuitem" onClick={() => void saveCopy(workspace)}><Icon name="package" />{text("另存完整工作区…", "Save Workspace As…")}</button><button type="button" role="menuitem" onClick={() => void perform(archived ? "restore" : "archive", workspace)}><Icon name={archived ? "restore" : "archive"} />{archived ? text("恢复到最近工作区", "Restore to recent") : text("归档工作区", "Archive workspace")}</button><button className="workspace-delete-action" type="button" role="menuitem" onClick={() => { setDeleteWorkspaceId(workspace.id); setMenuWorkspaceId(null); }}><Icon name="trash" />{text("永久删除…", "Delete permanently…")}</button></div> : null}
         </div>
         {confirmingDelete ? <div className="workspace-delete-confirm" role="group" aria-labelledby={`delete-title-${workspace.id}`}><div><strong id={`delete-title-${workspace.id}`}>{text("永久删除这个论文工作区？", "Permanently delete this manuscript workspace?")}</strong><p>{text("将删除全部论文版本、分析、检查、存证、投稿和知识体问答记录。此操作无法撤销。", "All manuscript versions, analyses, checks, attestations, submissions, and knowledge-body dialogue will be deleted. This cannot be undone.")}</p></div><div><button type="button" onClick={() => setDeleteWorkspaceId(null)} disabled={isBusy}>{text("取消", "Cancel")}</button><button className="confirm-delete-button" type="button" onClick={() => void perform("delete", workspace)} disabled={isBusy}><Icon name="trash" />{isBusy ? text("正在删除…", "Deleting…") : text("确认永久删除", "Delete permanently")}</button></div></div> : null}
       </li>;
@@ -1216,16 +1438,40 @@ function RecentWorkspaces({ workspaces, archivedWorkspaces, warnings, busyId, no
 
 function getStageDescription(stage: WorkspaceStage, locale: Locale) {
   const descriptions: Record<WorkspaceStage, string> = {
-    source: localize(locale, "确认本地只读源快照，然后进入检查。", "Confirm the local read-only source snapshot, then begin checks."),
+    source: localize(locale, "确认当前论文、目标与准备进度。", "Review the manuscript, target, and preparation progress."),
+    materials: localize(locale, "集中补全出版社实际需要的主稿、原图、表格和附件。", "Complete the manuscript, original figures, tables, and publisher-facing files."),
     check: localize(locale, "在一个阶段完成结构提取、规则选择和逐条投稿检查。", "Extract structure, choose rules, and run itemized checks in one stage."),
     revision: localize(locale, "依据检查结果修订安全字段，并保存为新的不可变版本。", "Revise safe fields from check evidence and save an immutable new version."),
-    versions: localize(locale, "核验、比较或恢复论文版本；版本变化会使下游记录待更新。", "Verify, compare, or restore versions; a new version makes downstream records stale."),
-    journals: localize(locale, "基于当前版本和公开目录快照，在本机计算国内、国际投稿目标。", "Compute domestic and international submission targets locally from the current version and a public directory snapshot."),
+    versions: localize(locale, "查看、比较或恢复不可变版本；这是可选的高级记录，不会打断投稿主线。", "View, compare, or restore immutable versions; this optional record does not interrupt the submission flow."),
+    journals: localize(locale, "基于当前版本和公开目录快照，在本机生成冲刺、匹配和保底投稿组合。", "Build a local reach, match, and safeguard submission portfolio from the current version and public directory snapshot."),
     attestation: localize(locale, "作者确认当前版本与检查报告，建立本地加密完整性记录。", "Author-confirm the current version and report as a local integrity record."),
     submission: localize(locale, "导出投稿交付包，并在外部提交后登记目标和回执。", "Export the submission handoff, then record the target and receipt after external submission."),
-    knowledge: localize(locale, "固化并查看由稿件、证据与投稿记录组成的知识体快照。", "Finalize and view the knowledge-body snapshot formed by the manuscript, evidence, and submission record."),
+    knowledge: localize(locale, "固化并查看由稿件、证据与投稿记录组成的个人知识体快照。", "Finalize and view the personal knowledge-body snapshot formed by the manuscript, evidence, and submission record."),
   };
   return descriptions[stage];
+}
+
+function isSubmissionTargetCurrent(workspace: WorkspaceSummary, target: SubmissionTargetSelection | null) {
+  return target?.selectedAgainstManuscriptVersion === workspace.snapshotVersion;
+}
+
+function currentJournalRequirementSnapshot(target: SubmissionTargetSelection | null, snapshots: JournalRequirementSnapshot[]) {
+  if (!target) return null;
+  return snapshots.find((snapshot) => snapshot.targetSelectionId === target.selectionId) ?? null;
+}
+
+function journalRequirementSnapshotReady(snapshot: JournalRequirementSnapshot | null) {
+  return Boolean(snapshot
+    && snapshot.status !== "requires_manual_review"
+    && snapshot.requirements.length > 0
+    && snapshot.freshUntilUnixMs >= Date.now());
+}
+
+function authorMaterialInputsReady(catalog: SubmissionMaterialCatalog | null) {
+  if (!catalog) return false;
+  return catalog.checklist
+    .filter((item) => item.requirement === "required" && item.id !== "target-journal" && item.id !== "current-check" && item.id !== "official-journal-requirements")
+    .every((item) => item.status === "complete");
 }
 
 function StageStatus({ stage, structureReport, readinessReport }: { stage: WorkspaceStage; structureReport: StructureReport | null; readinessReport: ReadinessReport | null }) {
@@ -1242,21 +1488,23 @@ function StageStatus({ stage, structureReport, readinessReport }: { stage: Works
   return <span className="stage-status" data-tone={tone}><Icon name={tone === "warning" ? "warning" : "check"} />{label}</span>;
 }
 
-interface PaneProps { stage: WorkspaceStage; workspace: WorkspaceSummary; structureReport: StructureReport | null; readinessReport: ReadinessReport | null; knowledgeBodySnapshot?: AcademicKnowledgeBodySnapshot | null; knowledgeBodyRecord?: KnowledgeBodyRecord | null; disciplineCatalog?: DisciplineCatalogItem[]; selectedDisciplineCode?: string; attestation?: LocalAttestation | null; submission?: SubmissionRecord | null; submissionExport?: SubmissionExport | null; ruleCatalog?: RulePackCatalogItem[]; selectedRulePackIds?: string[]; submissionElementCatalog?: SubmissionElementCatalog | null; revisionDraft?: RevisionDraft | null; revisionValues?: Record<string, string>; revisionResult?: RevisionSet | null; versionHistory?: VersionHistory | null; selectedVersion?: number | null; versionComparison?: VersionComparison | null; isComparingVersions?: boolean; }
+interface PaneProps { stage: WorkspaceStage; workspace: WorkspaceSummary; structureReport: StructureReport | null; readinessReport: ReadinessReport | null; knowledgeBodySnapshot?: AcademicKnowledgeBodySnapshot | null; knowledgeBodyRecord?: KnowledgeBodyRecord | null; disciplineCatalog?: DisciplineCatalogItem[]; selectedDisciplineCode?: string; attestation?: LocalAttestation | null; submission?: SubmissionRecord | null; submissionExport?: SubmissionExport | null; submissionMaterials?: SubmissionMaterialCatalog | null; submissionTargetSelection?: SubmissionTargetSelection | null; submissionTargetPlan?: SubmissionTargetPlan | null; journalRequirementSnapshots?: JournalRequirementSnapshot[]; targetSubmissionExport?: TargetSubmissionExport | null; ruleCatalog?: RulePackCatalogItem[]; selectedRulePackIds?: string[]; submissionElementCatalog?: SubmissionElementCatalog | null; revisionDraft?: RevisionDraft | null; revisionValues?: Record<string, string>; revisionResult?: RevisionSet | null; versionHistory?: VersionHistory | null; selectedVersion?: number | null; versionComparison?: VersionComparison | null; isComparingVersions?: boolean; }
 
 
 type OperationPaneProps = PaneProps & {
   versionCandidate: ManuscriptSummary | null; versionNote: string; versionNotice: string | null;
   knowledgeCandidateDecisions: Record<string, KnowledgeCandidateDecision>; knowledgeReviewConfirmed: boolean;
-  attestationConfirmed: boolean; submissionConfirmed: boolean; submissionTarget: string; submissionReceipt: string;
+  attestationConfirmed: boolean; submissionConfirmed: boolean; submissionReceipt: string;
   isLoadingRuleCatalog: boolean; isLoadingSubmissionElements: boolean; isLoadingLifecycle: boolean; isLoadingKnowledgeBody: boolean; isLoadingDisciplineCatalog: boolean;
   isApplyingRevision: boolean; isAnalyzing: boolean; isEvaluating: boolean; isSelectingVersion: boolean; isSavingVersion: boolean; isRestoringVersion: boolean;
-  isAttesting: boolean; isExportingSubmission: boolean; isRecordingSubmission: boolean; isFinalizingKnowledge: boolean;
+  isAttesting: boolean; isExportingSubmission: boolean; isAddingMaterials: boolean; isSelectingTarget: boolean; targetPlanBusyId: string | null; requirementBusyId: string | null; isRecordingSubmission: boolean; isFinalizingKnowledge: boolean;
   onAnalyze: () => void; onEvaluate: () => void; onToggleRulePack: (rulePackId: string) => void; onOpenStage: (stage: WorkspaceStage) => void;
   onRevisionValueChange: (field: string, value: string) => void; onApplyRevision: () => void;
   onSelectVersionCandidate: () => void; onVersionNoteChange: (note: string) => void; onSaveVersion: () => void; onSelectVersion: (version: number) => void; onRestoreVersion: (version: number) => void;
   onAttestationConfirmed: (confirmed: boolean) => void; onCreateAttestation: () => void; onExportSubmission: () => void;
-  onSubmissionConfirmed: (confirmed: boolean) => void; onSubmissionTargetChange: (target: string) => void; onSubmissionReceiptChange: (receipt: string) => void; onRecordSubmission: () => void;
+  onAddMaterial: (kind: SubmissionMaterialKind) => void; onSelectSubmissionTarget: (recommendationRunId: string, journalId: string) => void; onAddBackupTarget: (recommendationRunId: string, journalId: string) => void; onPromoteBackupTarget: (selectionId: string, reason: string) => void;
+  onDiscoverJournalRequirements: (selectionId: string) => void; onSaveManualJournalRequirements: (selectionId: string, sourceUrl: string, requirementText: string) => void; onExportTargetSubmission: () => void;
+  onSubmissionConfirmed: (confirmed: boolean) => void; onSubmissionReceiptChange: (receipt: string) => void; onRecordSubmission: () => void;
   onDisciplineChange: (code: string) => void;
   onKnowledgeCandidateDecision: (candidateId: string, decision: KnowledgeCandidateDecision) => void;
   onKnowledgeReviewConfirmed: (confirmed: boolean) => void;
@@ -1265,44 +1513,51 @@ type OperationPaneProps = PaneProps & {
 
 function OperationPane(props: OperationPaneProps) {
   const { locale, text } = useI18n();
-  const { stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, disciplineCatalog = [], selectedDisciplineCode = "", knowledgeCandidateDecisions, knowledgeReviewConfirmed, attestation = null, submission = null, submissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory, selectedVersion, versionCandidate, versionNote, versionNotice, attestationConfirmed, submissionConfirmed, submissionTarget, submissionReceipt, isLoadingRuleCatalog, isLoadingSubmissionElements, isLoadingLifecycle, isLoadingKnowledgeBody, isLoadingDisciplineCatalog, isApplyingRevision, isAnalyzing, isEvaluating, isSelectingVersion, isSavingVersion, isRestoringVersion, isAttesting, isExportingSubmission, isRecordingSubmission, isFinalizingKnowledge, onAnalyze, onEvaluate, onToggleRulePack, onOpenStage, onRevisionValueChange, onApplyRevision, onSelectVersionCandidate, onVersionNoteChange, onSaveVersion, onSelectVersion, onRestoreVersion, onAttestationConfirmed, onCreateAttestation, onExportSubmission, onSubmissionConfirmed, onSubmissionTargetChange, onSubmissionReceiptChange, onRecordSubmission, onDisciplineChange, onKnowledgeCandidateDecision, onKnowledgeReviewConfirmed, onFinalizeKnowledge } = props;
+  const { stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, disciplineCatalog = [], selectedDisciplineCode = "", knowledgeCandidateDecisions, knowledgeReviewConfirmed, attestation = null, submission = null, submissionExport = null, submissionMaterials = null, submissionTargetSelection = null, submissionTargetPlan = null, journalRequirementSnapshots = [], targetSubmissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory, selectedVersion, versionCandidate, versionNote, versionNotice, attestationConfirmed, submissionConfirmed, submissionReceipt, isLoadingRuleCatalog, isLoadingSubmissionElements, isLoadingLifecycle, isLoadingKnowledgeBody, isLoadingDisciplineCatalog, isApplyingRevision, isAnalyzing, isEvaluating, isSelectingVersion, isSavingVersion, isRestoringVersion, isAttesting, isExportingSubmission, isAddingMaterials, isSelectingTarget, targetPlanBusyId, requirementBusyId, isRecordingSubmission, isFinalizingKnowledge, onAnalyze, onEvaluate, onToggleRulePack, onOpenStage, onRevisionValueChange, onApplyRevision, onSelectVersionCandidate, onVersionNoteChange, onSaveVersion, onSelectVersion, onRestoreVersion, onAttestationConfirmed, onCreateAttestation, onExportSubmission, onAddMaterial, onSelectSubmissionTarget, onAddBackupTarget, onPromoteBackupTarget, onDiscoverJournalRequirements, onSaveManualJournalRequirements, onExportTargetSubmission, onSubmissionConfirmed, onSubmissionReceiptChange, onRecordSubmission, onDisciplineChange, onKnowledgeCandidateDecision, onKnowledgeReviewConfirmed, onFinalizeKnowledge } = props;
+  const targetCurrent = isSubmissionTargetCurrent(workspace, submissionTargetSelection);
+  const targetRequirements = currentJournalRequirementSnapshot(submissionTargetSelection, journalRequirementSnapshots);
+  const targetRequirementsReady = targetCurrent && journalRequirementSnapshotReady(targetRequirements);
 
   if (isLoadingLifecycle) return <EmptyStage icon="package" kicker={text("恢复流程", "Restore workflow")} title={text("正在恢复当前版本的流程记录", "Restoring lifecycle records for the current version")} copy={text("只读取与当前内容指纹匹配的结构、检查、存证、投稿和知识体记录。", "Only structure, checks, attestation, submission, and knowledge records matching the current fingerprint are restored.")} />;
 
-  if (stage === "source") return <><p className="workspace-created-status"><Icon name="check" />{text("本地工作区已创建", "Local workspace created")}</p><PanelHeading kicker={text("步骤 1 / 8 · 导入", "Step 1 / 8 · Import")} title={text("确认当前稿件", "Confirm current manuscript")} copy={text("已建立不可变副本；后续动作都绑定具体版本，不覆盖历史。", "An immutable copy now exists; every later action binds to an exact version without overwriting history.")} /><dl className="detail-list"><div><dt>{text("文件", "File")}</dt><dd>{workspace.manuscript.name}</dd></div><div><dt>{text("格式与大小", "Format and size")}</dt><dd>{workspace.manuscript.extension.toUpperCase()} · {formatBytes(workspace.manuscript.sizeBytes)}</dd></div><div><dt>{text("当前版本", "Current version")}</dt><dd>v{workspace.snapshotVersion}</dd></div><div><dt>{text("内容指纹", "Fingerprint")}</dt><dd><code>{workspace.contentHash.slice(0, 16)}</code></dd></div></dl><BoundaryNote title={text("当前边界", "Current boundary")} copy={text("未联网、未调用模型、未外发；页面不接收源文件路径。", "No network, model call, or transmission occurred; the page never receives the source path.")} /><PaneAction label={text("下一步", "Next")} title={text("检查当前版本", "Check the current version")} copy={text("先提取结构，再选择适用规则并生成逐条结论。", "Extract structure, choose applicable rules, and generate itemized findings.")} buttonLabel={text("开始检查", "Start checks")} onClick={() => onOpenStage("check")} /></>;
+  if (stage === "source") return <WorkspaceOverview workspace={workspace} readinessReport={readinessReport} materials={submissionMaterials} target={submissionTargetSelection} requirementSnapshots={journalRequirementSnapshots} submission={submission} onOpenStage={onOpenStage} />;
+
+  if (stage === "materials") return <SubmissionMaterialsCenter workspace={workspace} catalog={submissionMaterials} busy={isAddingMaterials} targetReady={targetRequirementsReady} onAdd={onAddMaterial} onContinue={() => onOpenStage(targetRequirementsReady ? "check" : "journals")} />;
 
   if (stage === "check") {
-    if (!structureReport) return <EmptyStage icon="structure" kicker={text("步骤 2 / 8 · 检查", "Step 2 / 8 · Check")} title={text("先建立论文结构", "First establish manuscript structure")} copy={text("标题、作者、摘要、章节和声明只在本机确定性提取。", "Title, authors, abstract, sections, and declarations are extracted deterministically on this device.")} actionLabel={isAnalyzing ? text("正在提取…", "Extracting…") : text("提取论文结构", "Extract structure")} disabled={isAnalyzing} onAction={onAnalyze} />;
+    if (!targetRequirementsReady) return <EmptyStage icon="target" kicker={text("主任务 4 · 检查与修订", "Primary task 4 · Check & revise")} title={!targetCurrent ? text("先确认当前版本的目标期刊", "Confirm a target for the current version first") : text("先取得目标期刊的有效要求", "Capture valid target-journal requirements first")} copy={text("检查必须建立在当前稿件版本、当前出版社目标和带来源的作者指南之上。", "Checks must be based on the current manuscript version, current publisher target, and source-backed author guidance.")} actionLabel={text("返回目标期刊", "Return to target journal")} onAction={() => onOpenStage("journals")} />;
+    if (!structureReport) return <EmptyStage icon="structure" kicker={text("主任务 4 · 检查与修订", "Primary task 4 · Check & revise")} title={text("先建立论文结构", "First establish manuscript structure")} copy={text("标题、作者、摘要、章节和声明只在本机确定性提取。", "Title, authors, abstract, sections, and declarations are extracted deterministically on this device.")} actionLabel={isAnalyzing ? text("正在提取…", "Extracting…") : text("提取论文结构", "Extract structure")} disabled={isAnalyzing} onAction={onAnalyze} />;
     if (!readinessReport) return <><StructureCheckSummary report={structureReport} /><TargetRuleSelector ruleCatalog={ruleCatalog} selectedRulePackIds={selectedRulePackIds} loading={isLoadingRuleCatalog} structureReady onToggle={onToggleRulePack} onContinue={onEvaluate} actionLabel={isEvaluating ? text("正在检查…", "Checking…") : text("运行投稿检查", "Run submission checks")} disabled={isEvaluating} /></>;
-    return <><PanelHeading kicker={`${text("步骤 2 / 8 · 投稿检查", "Step 2 / 8 · Submission check")} · v${readinessReport.reportVersion}`} title={outcomeLabel(readinessReport.outcome, locale)} copy={text("报告与当前稿件版本、内容指纹和规则来源绑定。", "The report is bound to the current manuscript version, fingerprint, and rule sources.")} /><div className="metric-row" aria-label={text("投稿检查统计", "Submission-check metrics")}><Metric label={text("通过", "Passed")} value={readinessReport.passedCount} /><Metric label={text("建议", "Suggestions")} value={readinessReport.warningCount} /><Metric label={text("阻断", "Blocked")} value={readinessReport.blockedCount} /><Metric label={text("待确认", "Confirmations")} value={readinessReport.confirmationCount} /></div><ol className="finding-list" aria-label={text("投稿检查明细", "Submission-check details")}>{readinessReport.findings.map((finding) => <li key={finding.ruleId} data-status={finding.status}><span className="finding-status">{findingLabel(finding.status, locale)}</span><div><strong>{locale === "en" && finding.messageEn ? finding.messageEn : localizeBackendText(locale, finding.message)}</strong><code>{finding.sourceLocation}</code></div></li>)}</ol><div className="secondary-action-row"><button className="text-button" type="button" onClick={onEvaluate} disabled={isEvaluating}>{text("重新检查", "Run again")}</button></div><PaneAction label={text("下一步", "Next")} title={text("根据结论修订", "Revise from findings")} copy={text("进入安全字段修订台；每次保存都会生成新版本并自动复查。", "Open safe-field revision; every save creates a new version and automatically rechecks it.")} buttonLabel={text("进入修订", "Continue to revision")} onClick={() => onOpenStage("revision")} /></>;
+    return <><PanelHeading kicker={`${text("主任务 4 · 投稿检查", "Primary task 4 · Submission check")} · v${readinessReport.reportVersion}`} title={outcomeLabel(readinessReport.outcome, locale)} copy={text("报告与当前稿件版本、目标期刊、内容指纹和规则来源绑定。", "The report is bound to the current manuscript version, target journal, fingerprint, and rule sources.")} /><div className="metric-row" aria-label={text("投稿检查统计", "Submission-check metrics")}><Metric label={text("通过", "Passed")} value={readinessReport.passedCount} /><Metric label={text("建议", "Suggestions")} value={readinessReport.warningCount} /><Metric label={text("阻断", "Blocked")} value={readinessReport.blockedCount} /><Metric label={text("待确认", "Confirmations")} value={readinessReport.confirmationCount} /></div><ol className="finding-list" aria-label={text("投稿检查明细", "Submission-check details")}>{readinessReport.findings.map((finding) => <li key={finding.ruleId} data-status={finding.status}><span className="finding-status">{findingLabel(finding.status, locale)}</span><div><strong>{locale === "en" && finding.messageEn ? finding.messageEn : localizeBackendText(locale, finding.message)}</strong><code>{finding.sourceLocation}</code></div></li>)}</ol><div className="secondary-action-row"><button className="text-button" type="button" onClick={onEvaluate} disabled={isEvaluating}>{text("重新检查", "Run again")}</button></div><PaneAction label={text("下一步", "Next")} title={!authorMaterialInputsReady(submissionMaterials) ? text("补齐检查后发现的投稿资料", "Complete materials identified by the check") : text("根据结论修订", "Revise from findings")} copy={!authorMaterialInputsReady(submissionMaterials) ? text("结构提取发现了新的原图或附件要求；补齐后返回本检查结果。", "Structure extraction identified additional figure or attachment requirements; return to this check after adding them.") : text("进入安全字段修订台；每次保存都会生成新版本并自动复查。", "Open safe-field revision; every save creates a new version and automatically rechecks it.")} buttonLabel={!authorMaterialInputsReady(submissionMaterials) ? text("补齐投稿资料", "Complete materials") : text("进入修订", "Continue to revision")} onClick={() => onOpenStage(authorMaterialInputsReady(submissionMaterials) ? "revision" : "materials")} /></>;
   }
 
   if (stage === "revision") {
-    if (!readinessReport) return <EmptyStage icon="format" kicker={text("步骤 3 / 8 · 修订", "Step 3 / 8 · Revise")} title={text("需要当前版本的检查报告", "A current check report is required")} copy={text("修订必须从可追溯的检查依据开始。", "Revision must start from traceable check evidence.")} actionLabel={text("返回检查", "Return to checks")} onAction={() => onOpenStage("check")} />;
-    return <SubmissionElementsDesk catalog={submissionElementCatalog} draft={revisionDraft} values={revisionValues} result={revisionResult} loading={isLoadingSubmissionElements} saving={isApplyingRevision} selectedPublisherCount={ruleCatalog.filter((item) => item.category === "publisher" && selectedRulePackIds.includes(item.id)).length} onValueChange={onRevisionValueChange} onSave={onApplyRevision} onContinue={() => onOpenStage("versions")} />;
+    if (!readinessReport) return <EmptyStage icon="format" kicker={text("主任务 4 · 修订", "Primary task 4 · Revise")} title={text("需要当前版本的检查报告", "A current check report is required")} copy={text("修订必须从可追溯的检查依据开始。", "Revision must start from traceable check evidence.")} actionLabel={text("返回检查", "Return to checks")} onAction={() => onOpenStage("check")} />;
+    return <SubmissionElementsDesk catalog={submissionElementCatalog} draft={revisionDraft} values={revisionValues} result={revisionResult} loading={isLoadingSubmissionElements} saving={isApplyingRevision} selectedPublisherCount={ruleCatalog.filter((item) => item.category === "publisher" && selectedRulePackIds.includes(item.id)).length} onValueChange={onRevisionValueChange} onSave={onApplyRevision} onContinue={() => onOpenStage(authorMaterialInputsReady(submissionMaterials) ? "submission" : "materials")} />;
   }
 
-  if (stage === "versions") return <VersionManager workspace={workspace} history={versionHistory ?? null} selectedVersion={selectedVersion ?? null} candidate={versionCandidate} note={versionNote} notice={versionNotice} selecting={isSelectingVersion} saving={isSavingVersion} restoring={isRestoringVersion} onSelectCandidate={onSelectVersionCandidate} onNoteChange={onVersionNoteChange} onSave={onSaveVersion} onSelectVersion={onSelectVersion} onRestore={onRestoreVersion} onContinue={() => onOpenStage(readinessReport ? "journals" : "check")} continueReady={readinessReport !== null} />;
+  if (stage === "versions") return <VersionManager workspace={workspace} history={versionHistory ?? null} selectedVersion={selectedVersion ?? null} candidate={versionCandidate} note={versionNote} notice={versionNotice} selecting={isSelectingVersion} saving={isSavingVersion} restoring={isRestoringVersion} onSelectCandidate={onSelectVersionCandidate} onNoteChange={onVersionNoteChange} onSave={onSaveVersion} onSelectVersion={onSelectVersion} onRestore={onRestoreVersion} onContinue={() => onOpenStage(readinessReport ? "submission" : "check")} continueReady={readinessReport !== null} />;
 
-  if (stage === "journals") return <JournalMatchStage workspace={workspace} onContinue={() => onOpenStage("attestation")} />;
+  if (stage === "journals") return <JournalMatchStage workspace={workspace} selectedTarget={submissionTargetSelection} targetPlan={submissionTargetPlan} requirementSnapshots={journalRequirementSnapshots} selectingTarget={isSelectingTarget} targetPlanBusyId={targetPlanBusyId} requirementBusyId={requirementBusyId} onSelectTarget={onSelectSubmissionTarget} onAddBackup={onAddBackupTarget} onPromoteBackup={onPromoteBackupTarget} onDiscoverRequirements={onDiscoverJournalRequirements} onSaveManualRequirements={onSaveManualJournalRequirements} onContinue={() => onOpenStage("materials")} />;
 
   if (stage === "attestation") {
-    if (!readinessReport) return <EmptyStage icon="package" kicker={text("步骤 6 / 8 · 存证", "Step 6 / 8 · Attest")} title={text("当前版本尚未检查", "The current version has not been checked")} copy={text("新版本不会继承旧版本的检查与存证。", "A new version never inherits checks or attestation from an older version.")} actionLabel={text("检查当前版本", "Check current version")} onAction={() => onOpenStage("check")} />;
-    if (attestation) return <><PanelHeading kicker={text("步骤 6 / 8 · 本地存证", "Step 6 / 8 · Local attestation")} title={text(`v${attestation.manuscriptVersion} 已完成存证`, `v${attestation.manuscriptVersion} attested`)} copy={text("记录绑定稿件指纹、检查报告、作者确认和时间；不宣称上链或证明科学结论。", "The record binds the manuscript fingerprint, check report, author confirmation, and time; it does not claim blockchain notarization or scientific truth.")} /><LifecycleRecord label="Attestation" id={attestation.attestationId} hash={attestation.recordHash} timestamp={attestation.attestedUnixMs} /><PaneAction label={text("下一步", "Next")} title={text("准备投稿交付", "Prepare submission handoff")} copy={text("导出可交付文件，并在外部期刊系统提交后登记回执。", "Export the handoff files, then record the receipt after submitting in the journal system.")} buttonLabel={text("进入投稿", "Continue to submission")} onClick={() => onOpenStage("submission")} /></>;
-    return <><PanelHeading kicker={text("步骤 6 / 8 · 本地存证", "Step 6 / 8 · Local attestation")} title={text("确认当前证据边界", "Confirm the current evidence boundary")} copy={text(`将绑定稿件 v${workspace.snapshotVersion}、检查报告 ${readinessReport.reportId.slice(0, 8)} 和输出快照 v${readinessReport.outputSnapshotVersion}。`, `This binds manuscript v${workspace.snapshotVersion}, check report ${readinessReport.reportId.slice(0, 8)}, and output snapshot v${readinessReport.outputSnapshotVersion}.`)} /><label className="confirmation-control"><input type="checkbox" checked={attestationConfirmed} onChange={(event) => onAttestationConfirmed(event.target.checked)} /><span>{text("我已核对当前稿件、检查结论和待作者确认事项；我理解该记录不证明研究结论为真。", "I reviewed the current manuscript, findings, and author confirmations; I understand this record does not prove scientific truth.")}</span></label><BoundaryNote title={text("存证含义", "Meaning of attestation")} copy={text("这是带 SHA-256 的本地作者确认记录，不是区块链确权、公证或第三方时间戳。", "This is a SHA-256 local author-confirmation record, not blockchain ownership, notarization, or a third-party timestamp.")} /><button className="primary-button" type="button" disabled={!attestationConfirmed || isAttesting} onClick={onCreateAttestation}>{isAttesting ? text("正在创建…", "Creating…") : text("创建本地存证", "Create local attestation")}<Icon name="arrow" /></button></>;
+    if (!readinessReport) return <EmptyStage icon="package" kicker={text("高级记录 · 本地存证", "Advanced record · Local attestation")} title={text("当前版本尚未检查", "The current version has not been checked")} copy={text("新版本不会继承旧版本的检查与存证。", "A new version never inherits checks or attestation from an older version.")} actionLabel={text("检查当前版本", "Check current version")} onAction={() => onOpenStage("check")} />;
+    if (attestation) return <><PanelHeading kicker={text("高级记录 · 本地存证", "Advanced record · Local attestation")} title={text(`v${attestation.manuscriptVersion} 已完成存证`, `v${attestation.manuscriptVersion} attested`)} copy={text("记录绑定稿件指纹、检查报告、作者确认和时间；不宣称上链或证明科学结论。", "The record binds the manuscript fingerprint, check report, author confirmation, and time; it does not claim blockchain notarization or scientific truth.")} /><LifecycleRecord label="Attestation" id={attestation.attestationId} hash={attestation.recordHash} timestamp={attestation.attestedUnixMs} /><PaneAction label={text("返回主流程", "Return to primary flow")} title={text("查看投稿包", "View submission package")} copy={text("存证是可选高级记录，不是导出投稿包的前置步骤。", "Attestation is an optional advanced record, not a prerequisite for exporting the submission package.")} buttonLabel={text("返回投稿包", "Return to package")} onClick={() => onOpenStage("submission")} /></>;
+    return <><PanelHeading kicker={text("高级记录 · 本地存证", "Advanced record · Local attestation")} title={text("确认当前证据边界", "Confirm the current evidence boundary")} copy={text(`将绑定稿件 v${workspace.snapshotVersion}、检查报告 ${readinessReport.reportId.slice(0, 8)} 和输出快照 v${readinessReport.outputSnapshotVersion}。`, `This binds manuscript v${workspace.snapshotVersion}, check report ${readinessReport.reportId.slice(0, 8)}, and output snapshot v${readinessReport.outputSnapshotVersion}.`)} /><label className="confirmation-control"><input type="checkbox" checked={attestationConfirmed} onChange={(event) => onAttestationConfirmed(event.target.checked)} /><span>{text("我已核对当前稿件、检查结论和待作者确认事项；我理解该记录不证明研究结论为真。", "I reviewed the current manuscript, findings, and author confirmations; I understand this record does not prove scientific truth.")}</span></label><BoundaryNote title={text("存证含义", "Meaning of attestation")} copy={text("这是带 SHA-256 的本地作者确认记录，不是区块链确权、公证或第三方时间戳。", "This is a SHA-256 local author-confirmation record, not blockchain ownership, notarization, or a third-party timestamp.")} /><button className="primary-button" type="button" disabled={!attestationConfirmed || isAttesting} onClick={onCreateAttestation}>{isAttesting ? text("正在创建…", "Creating…") : text("创建本地存证", "Create local attestation")}<Icon name="arrow" /></button></>;
   }
 
   if (stage === "submission") {
-    if (!attestation) return <EmptyStage icon="package" kicker={text("步骤 7 / 8 · 投稿", "Step 7 / 8 · Submit")} title={text("需要先完成本地存证", "Local attestation is required first")} copy={text("投稿交付包必须绑定明确的作者确认记录。", "The submission handoff must bind to an explicit author-confirmation record.")} actionLabel={text("进入存证", "Go to attestation")} onAction={() => onOpenStage("attestation")} />;
-    if (submission) return <><PanelHeading kicker={text("步骤 7 / 8 · 投稿记录", "Step 7 / 8 · Submission record")} title={submission.target} copy={text("作者已确认在外部投稿系统完成提交；ManuscriptDock 只保存本地登记。", "The author confirmed submission in an external system; ManuscriptDock stores only the local record.")} /><LifecycleRecord label="Submission" id={submission.submissionId} hash={submission.recordHash} timestamp={submission.submittedUnixMs} /><dl className="detail-list"><div><dt>{text("投稿目标", "Target")}</dt><dd>{submission.target}</dd></div><div><dt>{text("回执", "Receipt")}</dt><dd>{submission.receipt ?? text("未填写", "Not provided")}</dd></div></dl><PaneAction label={text("下一步", "Next")} title={text("固化知识体快照", "Finalize the knowledge-body snapshot")} copy={text("把稿件、检查、存证和投稿记录固定在同一不可变研究记忆中。", "Pin the manuscript, checks, attestation, and submission record in one immutable research memory.")} buttonLabel={text("进入知识体", "Continue to knowledge body")} onClick={() => onOpenStage("knowledge")} /></>;
-    return <><PanelHeading kicker={text("步骤 7 / 8 · 作者控制投稿", "Step 7 / 8 · Author-controlled submission")} title={text("先导出，再登记", "Export, then record")} copy={text("ManuscriptDock 不伪装成期刊网站：先生成本地交付包，由你提交后再登记结果。", "ManuscriptDock does not impersonate a journal site: export the local handoff, submit it yourself, then record the result.")} /><section className="submission-action-card"><div><span>01</span><h3>{text("导出投稿交付包", "Export submission handoff")}</h3><p>{text("包含当前稿件、JSON 检查报告、HTML 预览、存证记录和清单。", "Includes the current manuscript, JSON report, HTML preview, attestation, and manifest.")}</p></div><button className="secondary-button" type="button" onClick={onExportSubmission} disabled={isExportingSubmission}>{isExportingSubmission ? text("正在导出…", "Exporting…") : text("选择导出文件夹", "Choose export folder")}</button></section>{submissionExport ? <p className="revision-saved" role="status"><Icon name="check" />{text(`已导出 ${submissionExport.packageName}（${submissionExport.files.length} 个文件）`, `Exported ${submissionExport.packageName} (${submissionExport.files.length} files)`)}</p> : null}<section className="submission-record-form" aria-labelledby="submission-record-heading"><header><span>02</span><h3 id="submission-record-heading">{text("登记已完成的外部投稿", "Record a completed external submission")}</h3></header><label htmlFor="submission-target">{text("期刊、会议或预印本平台", "Journal, conference, or preprint platform")}</label><input id="submission-target" value={submissionTarget} maxLength={200} onChange={(event) => onSubmissionTargetChange(event.target.value)} placeholder={text("例如：Journal of …", "For example: Journal of …")} /><label htmlFor="submission-receipt">{text("稿件号或回执（可选）", "Manuscript ID or receipt (optional)")}</label><input id="submission-receipt" value={submissionReceipt} maxLength={200} onChange={(event) => onSubmissionReceiptChange(event.target.value)} /><label className="confirmation-control"><input type="checkbox" checked={submissionConfirmed} onChange={(event) => onSubmissionConfirmed(event.target.checked)} /><span>{text("我确认已经在上述外部系统完成投稿；此操作只在本机登记，不会发送文件。", "I confirm I completed submission in the external system; this action only records it locally and sends no files.")}</span></label><button className="primary-button" type="button" disabled={!submissionTarget.trim() || !submissionConfirmed || isRecordingSubmission} onClick={onRecordSubmission}>{isRecordingSubmission ? text("正在登记…", "Recording…") : text("登记投稿记录", "Record submission")}<Icon name="arrow" /></button></section></>;
+    if (!submissionTargetSelection) return <EmptyStage icon="target" kicker={text("投稿包", "Submission package")} title={text("先选择目标期刊", "Choose a target journal first")} copy={text("推荐结果需要明确设为本篇论文的投稿目标，之后才能形成面向出版社的资料包。", "Set one recommendation as this manuscript's submission target before creating a publisher-facing package.")} actionLabel={text("选择目标期刊", "Choose target journal")} onAction={() => onOpenStage("journals")} />;
+    if (!targetCurrent) return <EmptyStage icon="target" kicker={text("主任务 5 · 投稿包", "Primary task 5 · Submission package")} title={text("目标期刊属于较早的稿件版本", "The target belongs to an earlier manuscript version")} copy={text("请按当前版本重新计算或重新确认目标，旧选择和要求仍保留在本地历史中。", "Recalculate or reconfirm the target for the current version; the prior selection and requirements remain in local history.")} actionLabel={text("重新确认目标期刊", "Reconfirm target journal")} onAction={() => onOpenStage("journals")} />;
+    if (submission) return <><PanelHeading kicker={text("主任务完成 · 投稿记录", "Primary flow complete · Submission record")} title={submission.target} copy={text("作者已确认在外部投稿系统完成提交；ManuscriptDock 只保存本地登记。", "The author confirmed submission in an external system; ManuscriptDock stores only the local record.")} /><LifecycleRecord label="Submission" id={submission.submissionId} hash={submission.recordHash} timestamp={submission.submittedUnixMs} /><dl className="detail-list"><div><dt>{text("投稿目标", "Target")}</dt><dd>{submission.target}</dd></div><div><dt>{text("回执", "Receipt")}</dt><dd>{submission.receipt ?? text("未填写", "Not provided")}</dd></div></dl><PaneAction label={text("可选高级功能", "Optional advanced feature")} title={text("固化个人知识体快照", "Finalize a personal knowledge-body snapshot")} copy={text("主投稿流程已经完成；如有需要，再把稿件、检查、存证和投稿记录固定为个人研究记忆。", "The primary submission flow is complete. Optionally pin the manuscript, checks, attestation, and submission record as personal research memory.")} buttonLabel={text("查看个人知识体", "View personal knowledge body")} onClick={() => onOpenStage("knowledge")} /></>;
+    return <><PanelHeading kicker={text("主任务 5 · 作者控制外发", "Primary task 5 · Author-controlled handoff")} title={text("生成出版社可用的投稿资料包", "Create a publisher-facing submission package")} copy={text("资料包严格按照已选期刊及出版社要求组织；submission 只放主稿和真实附件，检查记录单独保存在 records。", "The package is organized against the selected journal and publisher requirements; submission contains only the manuscript and genuine attachments, while checks stay in records.")} /><section className="selected-target-card"><span>{text("当前投稿主线", "Current primary target")}</span><h3>{locale === "en" ? submissionTargetSelection.nameEn : submissionTargetSelection.name}</h3><p>{submissionTargetSelection.publisher} · {submissionTargetSelection.rankTier} · v{submissionTargetSelection.selectedAgainstManuscriptVersion} · {targetRequirementsReady ? text(`${targetRequirements?.requirements.length ?? 0} 项官方要求`, `${targetRequirements?.requirements.length ?? 0} official requirements`) : text("官方要求待核验", "Official requirements pending")}</p></section>{!targetRequirementsReady ? <BoundaryNote title={text("尚未建立该刊专属要求", "Journal-specific requirements are not ready")} copy={text("请回到“目标期刊”，逐次授权读取官网，或粘贴并确认官方作者指南原文。", "Return to Target Journal and authorize an official-site fetch or paste confirmed official author-guide text.")} /> : !submissionMaterials?.requiredComplete ? <BoundaryNote title={text("资料或检查尚未齐全", "Required materials or checks are incomplete")} copy={text("请回到“投稿资料”补齐出版社必需文件，或完成当前版本检查。系统不会把评估报告冒充为出版社投稿文件。", "Return to Materials to add publisher-required files, or complete checks for the current version. The app never presents an assessment report as a publisher submission file.")} /> : null}<section className="submission-action-card"><div><span>01</span><h3>{text("导出真正的投稿包", "Export the actual submission package")}</h3><p>{text("submission 文件夹供上传出版社；records 文件夹仅供本地留档，不应上传。", "Upload the submission folder to the publisher; records is local-only and should not be uploaded.")}</p></div><button className="secondary-button" type="button" onClick={onExportTargetSubmission} disabled={isExportingSubmission || !targetRequirementsReady || !submissionMaterials?.requiredComplete}>{isExportingSubmission ? text("正在导出…", "Exporting…") : text("选择导出文件夹", "Choose export folder")}</button></section>{targetSubmissionExport ? <div className="revision-saved" role="status"><Icon name="check" /><span>{text(`已导出 ${targetSubmissionExport.packageName}（${targetSubmissionExport.files.length} 个文件）`, `Exported ${targetSubmissionExport.packageName} (${targetSubmissionExport.files.length} files)`)}</span></div> : null}<section className="submission-record-form" aria-labelledby="submission-record-heading"><header><span>02</span><h3 id="submission-record-heading">{text("投稿后登记回执", "Record the receipt after submission")}</h3></header><label htmlFor="submission-target">{text("投稿期刊（来自当前主线）", "Target journal (from current route)")}</label><input id="submission-target" value={submissionTargetSelection.name} readOnly aria-readonly="true" /><label htmlFor="submission-receipt">{text("稿件号或回执（可选）", "Manuscript ID or receipt (optional)")}</label><input id="submission-receipt" value={submissionReceipt} maxLength={200} onChange={(event) => onSubmissionReceiptChange(event.target.value)} /><label className="confirmation-control"><input type="checkbox" checked={submissionConfirmed} onChange={(event) => onSubmissionConfirmed(event.target.checked)} /><span>{text("我确认已经向上述期刊的外部投稿系统完成提交。确认后系统会自动建立本地存证并保存这条投稿记录。", "I confirm I submitted to the journal above through its external system. The app will automatically create a local attestation and store this submission record.")}</span></label><button className="primary-button" type="button" disabled={!submissionConfirmed || isRecordingSubmission} onClick={onRecordSubmission}>{isRecordingSubmission ? text("正在登记…", "Recording…") : text("登记投稿记录", "Record submission")}<Icon name="arrow" /></button></section>{attestation && !submission ? <details className="advanced-settings"><summary>{text("内部审核档案", "Internal review archive")}</summary><p>{text("此包包含检查报告、预览和存证，只用于内部复核，不是出版社投稿包。", "This archive contains checks, previews, and attestation for internal review; it is not a publisher submission package.")}</p><button className="text-button" type="button" onClick={onExportSubmission} disabled={isExportingSubmission}>{text("导出内部审核档案", "Export internal review archive")}</button>{submissionExport ? <small>{submissionExport.packageName}</small> : null}</details> : null}</>;
   }
 
-  if (isLoadingKnowledgeBody && !knowledgeBodySnapshot) return <EmptyStage icon="package" kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={text("正在读取知识体快照", "Loading the knowledge-body snapshot")} copy={text("正在校验对象版本和生命周期引用。", "Verifying object versions and lifecycle references.")} />;
+  if (isLoadingKnowledgeBody && !knowledgeBodySnapshot) return <EmptyStage icon="package" kicker={text("高级功能 · 个人知识体", "Advanced feature · Personal knowledge body")} title={text("正在读取知识体快照", "Loading the knowledge-body snapshot")} copy={text("正在校验对象版本和生命周期引用。", "Verifying object versions and lifecycle references.")} />;
   if (!structureReport && knowledgeBodyRecord?.disciplineClassification) return <KnowledgeBodyOperation workspace={workspace} snapshot={knowledgeBodyRecord.snapshot} record={knowledgeBodyRecord} />;
-  if (!structureReport) return <EmptyStage icon="package" kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={text("需要先完成结构提取", "Structure extraction is required first")} copy={text("提取论文文本、表格与图片线索后，系统会立即建立可追溯的候选知识体。", "After extracting text, table, and figure signals, the app immediately creates a traceable candidate knowledge body.")} actionLabel={text("返回检查", "Return to check")} onAction={() => onOpenStage("check")} />;
-  if (!knowledgeBodySnapshot) return <EmptyStage icon="package" kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={text("尚未生成候选知识体", "Candidate knowledge body is not available")} copy={text("请重新运行当前版本的结构提取。", "Run structure extraction again for the current version.")} actionLabel={text("重新提取", "Extract again")} onAction={() => onOpenStage("check")} />;
-  if (!submission) return <><PanelHeading kicker={text("结构提取后立即生成", "Generated after structure extraction")} title={text("候选知识体已经建立", "Candidate knowledge body created")} copy={text("系统已保留源稿明示的作者身份、单位、联系方式和版本，并将可识别的 Claim、Scope、Method、Result 与 Evidence 保存为带来源的候选对象。", "The app preserves source-declared authors, affiliations, contact details, and version while storing recognizable Claim, Scope, Method, Result, and Evidence content as source-backed candidates.")} /><SourceIdentityPreview snapshot={knowledgeBodySnapshot} /><KnowledgeCandidatePreview snapshot={knowledgeBodySnapshot} structureReport={structureReport} /><BoundaryNote title={text("候选与固化是两件事", "Extraction and finalization are separate")} copy={text("身份与版本可在本机直接查看；研究语义候选仍须审核。完成存证与投稿登记后，作者选择学科分类并固化不可变快照。", "Identity and version are immediately visible locally, while research-semantic candidates still require review. After attestation and submission registration, the author selects a discipline and finalizes an immutable snapshot.")} /><button className="secondary-action" type="button" onClick={() => onOpenStage("attestation")}>{text("继续完成存证与投稿", "Continue to attestation and submission")}<Icon name="arrow" /></button></>;
+  if (!structureReport) return <EmptyStage icon="package" kicker={text("高级功能 · 个人知识体", "Advanced feature · Personal knowledge body")} title={text("需要先完成结构提取", "Structure extraction is required first")} copy={text("提取论文文本、表格与图片线索后，系统会立即建立可追溯的候选知识体。", "After extracting text, table, and figure signals, the app immediately creates a traceable candidate knowledge body.")} actionLabel={text("返回检查", "Return to check")} onAction={() => onOpenStage("check")} />;
+  if (!knowledgeBodySnapshot) return <EmptyStage icon="package" kicker={text("高级功能 · 个人知识体", "Advanced feature · Personal knowledge body")} title={text("尚未生成候选知识体", "Candidate knowledge body is not available")} copy={text("请重新运行当前版本的结构提取。", "Run structure extraction again for the current version.")} actionLabel={text("重新提取", "Extract again")} onAction={() => onOpenStage("check")} />;
+  if (!submission) return <><PanelHeading kicker={text("高级功能 · 个人知识体候选", "Advanced feature · Personal knowledge-body candidates")} title={text("候选知识体已经建立", "Candidate knowledge body created")} copy={text("系统已保留源稿明示的作者身份、单位、联系方式和版本，并将可识别的 Claim、Scope、Method、Result 与 Evidence 保存为带来源的候选对象。", "The app preserves source-declared authors, affiliations, contact details, and version while storing recognizable Claim, Scope, Method, Result, and Evidence content as source-backed candidates.")} /><KnowledgeSpatialMap workspace={workspace} knowledgeBodySnapshot={knowledgeBodySnapshot} /><KnowledgeDialoguePanel workspace={workspace} knowledgeBodyRecord={null} /><SourceIdentityPreview snapshot={knowledgeBodySnapshot} /><KnowledgeCandidatePreview snapshot={knowledgeBodySnapshot} structureReport={structureReport} /><BoundaryNote title={text("候选与固化是两件事", "Extraction and finalization are separate")} copy={text("身份与版本可在本机直接查看；研究语义候选仍须审核。完成投稿登记后，作者选择学科分类并固化不可变快照。", "Identity and version are immediately visible locally, while research-semantic candidates still require review. After submission registration, the author selects a discipline and finalizes an immutable snapshot.")} /><button className="secondary-action" type="button" onClick={() => onOpenStage("submission")}>{text("返回投稿主流程", "Return to submission flow")}<Icon name="arrow" /></button></>;
   const finalizedDecompositionHash = knowledgeBodyRecord?.snapshot.extraction?.decompositionHash ?? null;
   const currentDecompositionHash = knowledgeBodySnapshot.extraction?.decompositionHash ?? null;
   const requiresUpdatedSnapshot = knowledgeBodyRecord !== null && (knowledgeBodyRecord.snapshot.schemaVersion !== knowledgeBodySnapshot.schemaVersion || finalizedDecompositionHash !== currentDecompositionHash);
@@ -1311,7 +1566,9 @@ function OperationPane(props: OperationPaneProps) {
     const decidedCount = candidates.filter((candidate) => knowledgeCandidateDecisions[candidate.candidateId]).length;
     const reviewComplete = candidates.length > 0 && decidedCount === candidates.length;
     return <>
-      <PanelHeading kicker={text("步骤 8 / 8 · 知识体", "Step 8 / 8 · Knowledge body")} title={requiresUpdatedSnapshot ? text("审核并更新知识体", "Review and update the knowledge body") : text("逐条确认研究知识", "Review the research knowledge item by item")} copy={text("对每条本地提取结果选择“纳入”或“排除”，再确认学科分类；只有纳入项会升级为作者确认的知识。", "Choose Include or Exclude for every locally extracted item, then confirm the discipline. Only included items become author-confirmed knowledge.")} />
+      <PanelHeading kicker={text("高级功能 · 个人知识体", "Advanced feature · Personal knowledge body")} title={requiresUpdatedSnapshot ? text("审核并更新知识体", "Review and update the knowledge body") : text("逐条确认研究知识", "Review the research knowledge item by item")} copy={text("对每条本地提取结果选择“纳入”或“排除”，再确认学科分类；只有纳入项会升级为作者确认的知识。", "Choose Include or Exclude for every locally extracted item, then confirm the discipline. Only included items become author-confirmed knowledge.")} />
+      <KnowledgeSpatialMap workspace={workspace} knowledgeBodySnapshot={knowledgeBodySnapshot} />
+      <KnowledgeDialoguePanel workspace={workspace} knowledgeBodyRecord={null} />
       <SourceIdentityPreview snapshot={knowledgeBodySnapshot} />
       <KnowledgeCandidatePreview snapshot={knowledgeBodySnapshot} structureReport={structureReport} decisions={knowledgeCandidateDecisions} onDecision={onKnowledgeCandidateDecision} reviewable />
       <p className="knowledge-review-progress" role="status">{text(`已审核 ${decidedCount} / ${candidates.length} 条`, `Reviewed ${decidedCount} / ${candidates.length} items`)}</p>
@@ -1327,7 +1584,64 @@ function OperationPane(props: OperationPaneProps) {
   return <KnowledgeBodyOperation workspace={workspace} snapshot={knowledgeBodyRecord.snapshot} record={knowledgeBodyRecord} structureReport={structureReport} />;
 }
 
-function JournalMatchStage({ workspace, onContinue }: { workspace: WorkspaceSummary; onContinue: () => void }) {
+function WorkspaceOverview({ workspace, readinessReport, materials, target, requirementSnapshots, submission, onOpenStage }: { workspace: WorkspaceSummary; readinessReport: ReadinessReport | null; materials: SubmissionMaterialCatalog | null; target: SubmissionTargetSelection | null; requirementSnapshots: JournalRequirementSnapshot[]; submission: SubmissionRecord | null; onOpenStage: (stage: WorkspaceStage) => void }) {
+  const { locale, text } = useI18n();
+  const targetReady = isSubmissionTargetCurrent(workspace, target) && journalRequirementSnapshotReady(currentJournalRequirementSnapshot(target, requirementSnapshots));
+  const nextStage: WorkspaceStage = !targetReady ? "journals" : !authorMaterialInputsReady(materials) ? "materials" : !readinessReport ? "check" : "submission";
+  const nextLabels: Record<WorkspaceStage, [string, string]> = { source: ["查看概览", "View overview"], materials: ["补全投稿资料", "Complete materials"], journals: ["选择目标期刊", "Choose target journal"], check: ["检查当前稿件", "Check manuscript"], revision: ["修订稿件", "Revise manuscript"], versions: ["管理版本", "Manage versions"], attestation: ["查看本地记录", "View local records"], submission: ["生成投稿包", "Create submission package"], knowledge: ["查看知识体", "View knowledge body"] };
+  return <>
+    <p className="workspace-created-status"><Icon name="check" />{text("论文已安全保存在本地工作区", "The manuscript is safely stored in its local workspace")}</p>
+    <PanelHeading kicker={text("论文概览", "Manuscript overview")} title={workspace.manuscript.name} copy={text("从这里确认当前版本、投稿目标和准备进度。高级记录不会打断主流程。", "Review the current version, submission target, and preparation progress here. Advanced records stay out of the main flow.")} />
+    <div className="overview-summary-grid">
+      <article><span>{text("当前版本", "Current version")}</span><strong>v{workspace.snapshotVersion}</strong><small>{workspace.manuscript.extension.toUpperCase()} · {formatBytes(workspace.manuscript.sizeBytes)}</small></article>
+      <article><span>{text("投稿资料", "Materials")}</span><strong>{authorMaterialInputsReady(materials) ? text("作者资料已齐", "Author files ready") : text("待补全", "Needs files")}</strong><small>{text(`${materials?.materials.length ?? 0} 个附加文件`, `${materials?.materials.length ?? 0} additional files`)}</small></article>
+      <article><span>{text("目标期刊", "Target journal")}</span><strong>{targetReady && target ? (locale === "en" ? target.nameEn : target.name) : target ? text("需要按当前版本复核", "Needs current-version review") : text("尚未选择", "Not selected")}</strong><small>{target?.publisher ?? text("先选择出版社与期刊", "Choose a publisher and journal first")}</small></article>
+      <article><span>{text("准备状态", "Readiness")}</span><strong>{submission ? text("已登记投稿", "Submission recorded") : readinessReport ? outcomeLabel(readinessReport.outcome, locale) : text("尚未检查", "Not checked")}</strong><small>{readinessReport ? `v${readinessReport.outputSnapshotVersion}` : text("检查只在本机运行", "Checks run locally")}</small></article>
+    </div>
+    <PaneAction label={text("建议下一步", "Recommended next step")} title={localize(locale, nextLabels[nextStage][0], nextLabels[nextStage][1])} copy={text("系统根据当前论文记录引导下一项主任务，你也可以从左侧直接切换。", "The app suggests the next primary task from the current manuscript record; you can also switch from the sidebar.")} buttonLabel={localize(locale, nextLabels[nextStage][0], nextLabels[nextStage][1])} onClick={() => onOpenStage(nextStage)} />
+  </>;
+}
+
+const MATERIAL_KIND_OPTIONS: Array<{ kind: SubmissionMaterialKind; zh: string; en: string; copyZh: string; copyEn: string }> = [
+  { kind: "source_project", zh: "源文件工程", en: "Source project", copyZh: "LaTeX 工程、样式和相关源文件", copyEn: "LaTeX project, styles, and related sources" },
+  { kind: "figure", zh: "原始图件", en: "Original figures", copyZh: "高精度 TIFF、EPS、SVG、PNG 或 JPEG", copyEn: "High-resolution TIFF, EPS, SVG, PNG, or JPEG" },
+  { kind: "table", zh: "可编辑表格", en: "Editable tables", copyZh: "Excel、CSV 或独立表格文件", copyEn: "Excel, CSV, or separate table files" },
+  { kind: "bibliography", zh: "参考文献", en: "Bibliography", copyZh: "BibTeX、BBL 或其他引用文件", copyEn: "BibTeX, BBL, or other citation files" },
+  { kind: "supplementary", zh: "补充材料", en: "Supplementary files", copyZh: "附录、数据说明和补充方法", copyEn: "Appendices, data notes, and supplementary methods" },
+  { kind: "cover_letter", zh: "投稿信", en: "Cover letter", copyZh: "面向编辑的投稿说明", copyEn: "Letter addressed to the editor" },
+  { kind: "title_page", zh: "标题页", en: "Title page", copyZh: "作者、单位与通讯信息", copyEn: "Authors, affiliations, and correspondence" },
+  { kind: "declaration", zh: "声明文件", en: "Declarations", copyZh: "伦理、利益冲突、数据和作者贡献声明", copyEn: "Ethics, conflicts, data, and contribution statements" },
+  { kind: "other", zh: "其他附件", en: "Other files", copyZh: "期刊作者指南要求的其他投稿文件", copyEn: "Other files required by the journal's author guide" },
+];
+
+function submissionChecklistCopy(item: SubmissionMaterialChecklistItem, locale: Locale) {
+  if (locale === "zh-CN") return { label: item.label, detail: item.detail };
+  const labels: Record<string, string> = { "main-manuscript": "Current manuscript", "target-journal": "Target journal", "current-check": "Current-version check", "latex-project": "Complete LaTeX project", "figure-originals": "Original figures", "editable-tables": "Editable tables", "cover-letter": "Cover letter" };
+  const details: Record<string, string> = {
+    "main-manuscript": "The immutable current manuscript is stored in this workspace.",
+    "target-journal": item.status === "complete" ? "A target journal is selected; verify it again after a manuscript-version change." : "Choose a target journal from the recommendation results.",
+    "current-check": item.status === "complete" ? "A check report exists for the current manuscript version." : "Run submission checks after choosing the target.",
+    "latex-project": "Provide a ZIP or TAR project containing figures, bibliography, and custom styles.",
+    "figure-originals": "The manuscript contains figures; provide original image files rather than PDF screenshots.",
+    "editable-tables": "Editable tables help the publisher process the manuscript.",
+    "cover-letter": "Prepare a target-specific cover letter before submission.",
+  };
+  return { label: labels[item.id] ?? item.label, detail: details[item.id] ?? item.detail };
+}
+
+function SubmissionMaterialsCenter({ workspace, catalog, busy, targetReady, onAdd, onContinue }: { workspace: WorkspaceSummary; catalog: SubmissionMaterialCatalog | null; busy: boolean; targetReady: boolean; onAdd: (kind: SubmissionMaterialKind) => void; onContinue: () => void }) {
+  const { locale, text } = useI18n();
+  return <>
+    <PanelHeading kicker={text("主任务 3 · 按目标组织资料", "Primary task 3 · Organize for the target")} title={text("按照已选期刊和出版社要求准备文件", "Prepare files for the selected journal and publisher")} copy={targetReady ? text("主稿已由工作区保存。下方清单结合当前稿件与官方作者指南，补充的文件只复制到本机资料库。", "The manuscript is stored. The checklist combines the current manuscript with official author guidance, and added files are copied only into the local library.") : text("先完成目标期刊选择和官方要求核验，应用才能生成有依据的材料清单。", "Select a target journal and verify its official requirements before the app can build an evidence-based material checklist.")} />
+    <section className="materials-checklist" aria-labelledby="materials-checklist-heading"><header><div><span>{text("动态投稿清单", "Dynamic submission checklist")}</span><h3 id="materials-checklist-heading">{authorMaterialInputsReady(catalog) ? text("作者可准备的必需文件已齐", "Author-supplied required files are ready") : text("仍有文件待补", "Files still need attention")}</h3></div><strong>v{workspace.snapshotVersion}</strong></header><ul>{(catalog?.checklist ?? []).map((item) => { const copy = submissionChecklistCopy(item, locale); return <li key={item.id} data-status={item.status}><Icon name={item.status === "complete" ? "check" : "warning"} /><div><strong>{copy.label}</strong><p>{copy.detail}</p></div><span>{item.requirement === "required" ? text("必需", "Required") : text("建议", "Recommended")}</span></li>; })}</ul></section>
+    <div className="material-type-grid">{MATERIAL_KIND_OPTIONS.map((option) => { const count = catalog?.materials.filter((material) => material.kind === option.kind).length ?? 0; return <article key={option.kind}><div><Icon name={option.kind === "figure" ? "file" : "folder"} /><span>{count}</span></div><h3>{localize(locale, option.zh, option.en)}</h3><p>{localize(locale, option.copyZh, option.copyEn)}</p><button className="secondary-button" type="button" disabled={busy} onClick={() => onAdd(option.kind)}>{busy ? text("正在添加…", "Adding…") : text("添加文件", "Add files")}</button></article>; })}</div>
+    {catalog && catalog.materials.length > 0 ? <section className="material-file-list"><h3>{text("已保存的附加文件", "Stored supporting files")}</h3><ul>{catalog.materials.map((material) => <li key={material.materialId}><Icon name="file" /><div><strong>{material.originalName}</strong><span>{formatBytes(material.sizeBytes)} · {material.contentHash.slice(0, 10)}</span></div></li>)}</ul></section> : null}
+    <BoundaryNote title={text("不要用评估报告代替投稿资料", "Assessment reports are not submission materials")} copy={text("检查报告和推荐依据属于本地 records；出版社收到的 submission 文件夹只包含论文及作者提供的真实附件。", "Checks and recommendation evidence stay in local records; the publisher-facing submission folder contains only the manuscript and genuine author-supplied attachments.")} />
+    <button className="primary-button" type="button" onClick={onContinue}>{targetReady ? text("继续检查与修订", "Continue to checks & revision") : text("先选择目标期刊", "Choose target journal first")}<Icon name="arrow" /></button>
+  </>;
+}
+
+function JournalMatchStage({ workspace, selectedTarget, targetPlan, requirementSnapshots, selectingTarget, targetPlanBusyId, requirementBusyId, onSelectTarget, onAddBackup, onPromoteBackup, onDiscoverRequirements, onSaveManualRequirements, onContinue }: { workspace: WorkspaceSummary; selectedTarget: SubmissionTargetSelection | null; targetPlan: SubmissionTargetPlan | null; requirementSnapshots: JournalRequirementSnapshot[]; selectingTarget: boolean; targetPlanBusyId: string | null; requirementBusyId: string | null; onSelectTarget: (recommendationRunId: string, journalId: string) => void; onAddBackup: (recommendationRunId: string, journalId: string) => void; onPromoteBackup: (selectionId: string, reason: string) => void; onDiscoverRequirements: (selectionId: string) => void; onSaveManualRequirements: (selectionId: string, sourceUrl: string, requirementText: string) => void; onContinue: () => void }) {
   const { locale, text } = useI18n();
   const [profile, setProfile] = useState<JournalRecommendationProfileInput>({ authorName: "", institution: "", specialty: "", manuscriptPurpose: "academic_communication", submissionDeadline: "" });
   const [institutionRequirementText, setInstitutionRequirementText] = useState("");
@@ -1336,30 +1650,66 @@ function JournalMatchStage({ workspace, onContinue }: { workspace: WorkspaceSumm
   const [ruleTransmissionConfirmed, setRuleTransmissionConfirmed] = useState(false);
   const [preferences, setPreferences] = useState<JournalMatchPreferences>({ topic: "auto", articleType: "auto", language: "auto", targetStrategy: "balanced", openAccess: "no_preference" });
   const [run, setRun] = useState<JournalRecommendationRun | null>(null);
+  const [history, setHistory] = useState<JournalRecommendationRun[]>([]);
   const [busy, setBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [directoryBusy, setDirectoryBusy] = useState(false);
+  const [directorySummary, setDirectorySummary] = useState<JournalDirectorySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const minimumDeadline = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const profileComplete = profile.authorName.trim().length > 0 && profile.institution.trim().length > 0 && profile.specialty.trim().length > 0 && profile.submissionDeadline >= minimumDeadline;
+  const profileComplete = profile.institution.trim().length > 0 && profile.specialty.trim().length > 0 && profile.submissionDeadline >= minimumDeadline;
   const hasInstitutionText = institutionRequirementText.trim().length > 0;
   const institutionTextReady = !hasInstitutionText || (institutionRequirementText.trim().length >= 40 && ruleTransmissionConfirmed);
   const update = <K extends keyof JournalMatchPreferences>(key: K, value: JournalMatchPreferences[K]) => { setPreferences((current) => ({ ...current, [key]: value })); setRun(null); };
   const updateProfile = <K extends keyof JournalRecommendationProfileInput>(key: K, value: JournalRecommendationProfileInput[K]) => { setProfile((current) => ({ ...current, [key]: value })); setRun(null); };
+  useEffect(() => {
+    if (!isTauri()) return;
+    void invoke<JournalDirectorySummary>("get_journal_directory_summary")
+      .then(setDirectorySummary)
+      .catch(() => setDirectorySummary(null));
+    setHistoryBusy(true);
+    void invoke<JournalRecommendationRun[]>("list_journal_recommendations", { workspaceId: workspace.id })
+      .then((records) => {
+        setHistory(records);
+        setRun((current) => current ?? records[0] ?? null);
+      })
+      .catch((reason: unknown) => setError(localizeBackendText(locale, normalizeError(reason))))
+      .finally(() => setHistoryBusy(false));
+  }, [workspace.id]);
+  async function importDirectory() {
+    setDirectoryBusy(true); setError(null);
+    try {
+      const result = await invoke<JournalDirectoryImportResult | null>("import_journal_directory");
+      if (result) { setDirectorySummary(result.summary); setRun(null); }
+    }
+    catch (reason) { setError(localizeBackendText(locale, normalizeError(reason))); }
+    finally { setDirectoryBusy(false); }
+  }
   async function calculate() {
     setBusy(true); setError(null);
     try {
       const savedProfile = await invoke<JournalRecommendationProfile>("save_journal_recommendation_profile", { workspaceId: workspace.id, profile });
       const effectiveProfileId = hasInstitutionText ? (await invoke<InstitutionRuleExtractionSummary>("extract_institution_requirements", { workspaceId: workspace.id, profileId: savedProfile.profileId, requirementText: institutionRequirementText, sourceUrl: institutionSourceUrl.trim() || null, authorAttestedOfficial: officialSourceConfirmed, authorConfirmedExternalTransmission: ruleTransmissionConfirmed })).profileId : savedProfile.profileId;
-      setRun(await invoke<JournalRecommendationRun>("recommend_journals", { workspaceId: workspace.id, profileId: effectiveProfileId, preferences }));
+      const nextRun = await invoke<JournalRecommendationRun>("recommend_journals", { workspaceId: workspace.id, profileId: effectiveProfileId, preferences });
+      setRun(nextRun);
+      setHistory((current) => [nextRun, ...current.filter((record) => record.runId !== nextRun.runId)]);
     }
     catch (reason) { setError(localizeBackendText(locale, normalizeError(reason))); }
     finally { setBusy(false); }
   }
   const topicOptions: Array<[ResearchTopic, string, string]> = [["auto","自动识别","Auto detect"],["general_ai","通用人工智能","General AI"],["machine_learning","机器学习","Machine learning"],["computer_vision","计算机视觉","Computer vision"],["natural_language_processing","自然语言处理","Natural language processing"],["data_mining","数据挖掘","Data mining"],["software_systems","软件与系统","Software & systems"],["robotics_control","机器人与控制","Robotics & control"]];
+  const backupJournalIds = new Set((targetPlan?.backups ?? []).map((target) => target.journalId));
+  const selectedTargetCurrent = isSubmissionTargetCurrent(workspace, selectedTarget);
+  const currentRequirements = currentJournalRequirementSnapshot(selectedTarget, requirementSnapshots);
+  const currentRequirementsReady = selectedTargetCurrent && journalRequirementSnapshotReady(currentRequirements);
+  const currentRunReady = run?.manuscriptVersion === workspace.snapshotVersion;
   return <>
-    <PanelHeading kicker={text("步骤 5 / 8 · 期刊匹配", "Step 5 / 8 · Journal match")} title={text("计算当前最适合的投稿组合", "Calculate the best current-fit submission set")} copy={text("每个论文新版本都会按同一维度重新计算；版本号本身不加分，只有可追溯的品质改善才会提升分数并解锁更好的匹配与冲刺期刊。", "Every manuscript revision is recalculated on the same dimensions. A higher version number earns no points by itself; only traceable quality improvements can raise scores and unlock stronger match and reach journals.")} />
-    <BoundaryNote title={text("学校标准是资格依据，不是声誉分", "Institution rules are eligibility evidence, not prestige scores")} copy={text("正式规则只限定认可范围、用途和时间；学校排名、导师名气不会直接换算为期刊档次。系统结合论文适配度与当前条件给出冲刺、匹配和务实候选，保留更高目标的投稿机会。联网检索必须另行获得你的授权。", "Formal rules constrain recognition, purpose, and timing only. Institution rank and adviser fame are never converted directly into journal tiers. The system combines manuscript fit with current conditions to preserve reach, match, and pragmatic options. Online discovery requires separate authorization.")} />
+    <PanelHeading kicker={text("主任务 2 · 选择出版社与期刊", "Primary task 2 · Choose publisher and journal")} title={text("生成并确认当前投稿目标", "Generate and confirm the current submission target")} copy={text("先选定期刊及出版社，再取得带来源的官方要求；后续材料清单和投稿包都以这条主线为准。", "Choose the journal and publisher first, then capture source-backed official requirements. The materials checklist and package follow this primary route.")} />
+    <BoundaryNote title={text("学校规则需要正式来源", "Institution rules require an official source")} copy={text("应用显示规则是否已核验及候选是否满足要求；未核验时明确标记为候选初筛。联网检索必须另行获得你的授权。", "The app shows whether rules are verified and whether a candidate meets them. Unverified results are clearly marked as provisional. Online discovery requires separate authorization.")} />
+    <JournalRecommendationArchive records={history} selectedRunId={run?.runId ?? null} loading={historyBusy} locale={locale} onSelect={setRun} />
+    <details className="advanced-settings journal-directory-settings"><summary>{text("期刊数据设置", "Journal data settings")} · {directorySummary?.available ? text("离线目录已同步", "Offline directory synced") : text("可选", "Optional")}</summary><section className="journal-profile" aria-labelledby="journal-directory-heading"><header><div><span>{text("本地优先 · 不执行公式或外部链接", "Local-first · formulas and external links are not executed")}</span><h3 id="journal-directory-heading">{text("离线期刊目录", "Offline journal directory")}</h3></div><strong>{directorySummary?.available ? text("已同步", "Synced") : text("未导入", "Not imported")}</strong></header>{directorySummary?.available ? <><div className="metric-row"><Metric label={text("数据记录", "Records")} value={directorySummary.recordCount} /><Metric label={text("不同期刊", "Distinct journals")} value={directorySummary.distinctJournalCount} /><Metric label={text("最新年份", "Latest year")} value={directorySummary.latestReleaseYear ?? "—"} /><Metric label={text("来源文件", "Sources")} value={directorySummary.sourceCount} /></div><p>{text("中科院、JCR 与新锐分区分别保存；推荐结果会显示匹配到的本地证据及年份。", "CAS, JCR, and Emerging partitions remain separate; recommendations display matched local evidence and its year.")}</p></> : <p>{text("导入本地 .xlsx 分区资料后，推荐阶段可离线核对候选期刊，不需要每次联网查询。", "Import local .xlsx partition data to verify candidates offline without a fresh web lookup each time.")}</p>}<button className="secondary-button" type="button" onClick={() => void importDirectory()} disabled={directoryBusy}>{directoryBusy ? text("正在导入…", "Importing…") : text("选择并同步 Excel", "Select and sync Excel")}</button></section></details>
     <section className="journal-profile" aria-labelledby="journal-profile-heading"><header><div><span>{text("仅保存在当前论文工作区", "Stored only in this manuscript workspace")}</span><h3 id="journal-profile-heading">{text("投稿背景档案", "Submission context profile")}</h3></div><strong>{text("必填", "Required")}</strong></header><div>
-      <label htmlFor="journal-author-name">{text("投稿人姓名", "Author name")}<input id="journal-author-name" autoComplete="name" maxLength={120} value={profile.authorName} onChange={(event) => updateProfile("authorName", event.target.value)} /></label>
+      <label htmlFor="journal-author-name">{text("投稿人姓名（可选，不参与排序）", "Author name (optional; not ranked)")}<input id="journal-author-name" autoComplete="name" maxLength={120} value={profile.authorName} onChange={(event) => updateProfile("authorName", event.target.value)} /></label>
       <label htmlFor="journal-institution">{text("学校 / 机构", "Institution")}<input id="journal-institution" autoComplete="organization" maxLength={200} value={profile.institution} onChange={(event) => updateProfile("institution", event.target.value)} /></label>
       <label htmlFor="journal-specialty">{text("学院或专业", "Faculty or specialty")}<input id="journal-specialty" maxLength={160} value={profile.specialty} onChange={(event) => updateProfile("specialty", event.target.value)} placeholder={text("例如：计算机科学与技术", "For example: Computer Science")} /></label>
       <label htmlFor="journal-purpose">{text("论文用途", "Manuscript purpose")}<select id="journal-purpose" value={profile.manuscriptPurpose} onChange={(event) => updateProfile("manuscriptPurpose", event.target.value as ManuscriptPurpose)}><option value="academic_communication">{text("一般学术发表", "Academic communication")}</option><option value="degree_requirement">{text("学位成果要求", "Degree requirement")}</option><option value="graduation">{text("毕业要求", "Graduation")}</option><option value="professional_title">{text("职称或考核", "Professional evaluation")}</option><option value="project_completion">{text("项目结题", "Project completion")}</option></select></label>
@@ -1372,15 +1722,97 @@ function JournalMatchStage({ workspace, onContinue }: { workspace: WorkspaceSumm
       <label>{text("投稿语言", "Language")}<select value={preferences.language} onChange={(event) => update("language", event.target.value as PublicationLanguagePreference)}><option value="auto">{text("自动", "Auto")}</option><option value="chinese">{text("中文", "Chinese")}</option><option value="english">{text("英文", "English")}</option></select></label>
       <label>{text("目标策略", "Target strategy")}<select value={preferences.targetStrategy} onChange={(event) => update("targetStrategy", event.target.value as TargetStrategy)}><option value="reach">{text("冲刺", "Reach")}</option><option value="balanced">{text("均衡", "Balanced")}</option><option value="pragmatic">{text("务实", "Pragmatic")}</option></select></label>
       <label>{text("开放获取", "Open access")}<select value={preferences.openAccess} onChange={(event) => update("openAccess", event.target.value as OpenAccessPreference)}><option value="no_preference">{text("无偏好", "No preference")}</option><option value="prefer">{text("优先", "Prefer")}</option><option value="require">{text("必须", "Require")}</option></select></label>
-    </div><button className="primary-button" type="button" disabled={busy || !profileComplete || !institutionTextReady} onClick={() => void calculate()}>{busy ? text("正在保存并计算…", "Saving and calculating…") : hasInstitutionText ? text("提取校规并计算推荐", "Extract rules and calculate") : text("保存档案并计算推荐", "Save profile and calculate")}<Icon name="arrow" /></button>{!profileComplete ? <p className="journal-profile-hint">{text("请完整填写五项背景信息，并选择未来的截止日期。", "Complete all five profile fields and choose a future deadline.")}</p> : hasInstitutionText && institutionRequirementText.trim().length < 40 ? <p className="journal-profile-hint">{text("学校要求原文至少需要 40 个字符。", "Institution requirement text must contain at least 40 characters.")}</p> : hasInstitutionText && !ruleTransmissionConfirmed ? <p className="journal-profile-hint">{text("模型抽取前需要确认本次发送范围。", "Confirm the transmission scope before model extraction.")}</p> : null}</section>
+    </div><button className="primary-button" type="button" disabled={busy || !profileComplete || !institutionTextReady} onClick={() => void calculate()}>{busy ? text("正在保存并计算…", "Saving and calculating…") : hasInstitutionText ? text("提取校规并计算推荐", "Extract rules and calculate") : text("保存档案并计算推荐", "Save profile and calculate")}<Icon name="arrow" /></button>{!profileComplete ? <p className="journal-profile-hint">{text("请填写学校或机构、学院或专业，并选择未来的截止日期。", "Provide institution, faculty or specialty, and a future deadline.")}</p> : hasInstitutionText && institutionRequirementText.trim().length < 40 ? <p className="journal-profile-hint">{text("学校要求原文至少需要 40 个字符。", "Institution requirement text must contain at least 40 characters.")}</p> : hasInstitutionText && !ruleTransmissionConfirmed ? <p className="journal-profile-hint">{text("模型抽取前需要确认本次发送范围。", "Confirm the transmission scope before model extraction.")}</p> : null}</section>
     {error ? <p className="inline-warning"><Icon name="warning" />{error}</p> : null}
-    {run ? <><div className="institution-rule-status" role="status" data-verified={run.schoolRuleStatus === "verified_rule_set_applied"}><strong>{run.schoolRuleStatus === "verified_rule_set_applied" ? text("学校规则已核验并计入", "Verified institution rules applied") : run.schoolRuleStatus === "verified_rule_waiting_for_institution_directory_data" ? text("学校规则已提取 · 评价目录数据待核验", "Institution rules extracted · evaluation directory pending") : text("学校规则尚未核验 · 当前为候选初筛", "Institution rules unverified · provisional shortlist")}</strong><span>{text(`档案 v${run.recommendationProfile.profileVersion} · ${run.recommendationProfile.institution} · 剩余 ${run.deadlineDaysRemaining} 天`, `Profile v${run.recommendationProfile.profileVersion} · ${run.recommendationProfile.institution} · ${run.deadlineDaysRemaining} days remaining`)}</span></div><div className="journal-run-meta"><span>{text("本地推荐记录", "Local recommendation run")} {run.runId}</span><span>{text("稿件完备度", "Manuscript readiness")} {run.maturityScore}/100</span><span>{run.catalogVersion} · {run.catalogVerifiedDate}</span></div><div className="journal-columns"><JournalRecommendationList title={text("国内 3 家", "3 domestic journals")} items={run.domestic} locale={locale} /><JournalRecommendationList title={text("国际 3 家", "3 international journals")} items={run.international} locale={locale} /></div><PaneAction label={text("下一步", "Next")} title={text("确认版本与推荐依据", "Confirm version and recommendation basis")} copy={text("推荐记录已绑定投稿背景档案、当前稿件哈希和评分版本；机构评价目录只参与后台资格计算，不向界面公开原始目录。", "The run binds the context profile, manuscript hash, and scoring version. Institution evaluation directories are used only for backend eligibility checks; raw directory data is not exposed in the interface.")} buttonLabel={text("进入存证", "Continue to attestation")} onClick={onContinue} /></> : null}
+    {run ? <>
+      {!currentRunReady ? <BoundaryNote title={text("这是较早稿件版本的推荐记录", "This recommendation belongs to an earlier manuscript version")} copy={text("历史候选仅供查阅，不能直接设为当前投稿目标。请按当前版本重新计算推荐。", "Historical candidates are read-only and cannot become the current target. Recalculate recommendations for the current manuscript version.")} /> : null}
+      {selectedTarget && !selectedTargetCurrent ? <BoundaryNote title={text("当前主线需要按新版本重新确认", "The primary route needs confirmation for the new version")} copy={text("可以在当前版本的新推荐中重新选择同一期刊，或按已记录原因提升一条备选支线。", "Select the same journal from a current-version recommendation, or promote a backup route with a recorded reason.")} /> : null}
+      <div className="institution-rule-status" role="status" data-verified={run.schoolRuleStatus === "verified_rule_set_applied" || run.schoolRuleStatus === "verified_rule_set_applied_with_local_directory"}><strong>{run.schoolRuleStatus === "verified_rule_set_applied" || run.schoolRuleStatus === "verified_rule_set_applied_with_local_directory" ? text("学校规则已核验", "Institution rules verified") : run.schoolRuleStatus === "verified_rule_waiting_for_institution_directory_data" ? text("学校规则已提取 · 评价目录数据待核验", "Institution rules extracted · evaluation directory pending") : text("学校规则尚未核验 · 当前为候选初筛", "Institution rules unverified · provisional shortlist")}</strong><span>{text(`档案 v${run.recommendationProfile.profileVersion} · ${run.recommendationProfile.institution} · 剩余 ${run.deadlineDaysRemaining} 天`, `Profile v${run.recommendationProfile.profileVersion} · ${run.recommendationProfile.institution} · ${run.deadlineDaysRemaining} days remaining`)}</span></div>
+      <div className="journal-run-meta"><span>{text("本地推荐记录", "Local recommendation run")} {run.runId}</span><span>{text("稿件版本", "Manuscript version")} v{run.manuscriptVersion}</span><span>{run.catalogVersion} · {run.catalogVerifiedDate}</span>{run.journalDirectoryVersion ? <span>{text("离线目录", "Offline directory")} {run.journalDirectoryVersion}</span> : null}</div>
+      <div className="journal-region-sections"><JournalRegionPortfolio title={text("国内期刊", "Domestic journals")} portfolio={run.domestic} locale={locale} runId={run.runId} workspaceVersion={workspace.snapshotVersion} selectionDisabled={!currentRunReady} selectedTarget={selectedTarget} backupJournalIds={backupJournalIds} selectingTarget={selectingTarget} targetPlanBusyId={targetPlanBusyId} onSelectTarget={onSelectTarget} onAddBackup={onAddBackup} /><JournalRegionPortfolio title={text("国外期刊", "International journals")} portfolio={run.international} locale={locale} runId={run.runId} workspaceVersion={workspace.snapshotVersion} selectionDisabled={!currentRunReady} selectedTarget={selectedTarget} backupJournalIds={backupJournalIds} selectingTarget={selectingTarget} targetPlanBusyId={targetPlanBusyId} onSelectTarget={onSelectTarget} onAddBackup={onAddBackup} /></div>
+      {selectedTarget ? <SubmissionRoutePlan primary={selectedTarget} backups={targetPlan?.backups ?? []} snapshots={requirementSnapshots} busyTargetId={targetPlanBusyId} busyRequirementId={requirementBusyId} onPromote={onPromoteBackup} onDiscover={onDiscoverRequirements} onSaveManual={onSaveManualRequirements} /> : null}
+      <PaneAction label={text("下一步", "Next")} title={!selectedTargetCurrent ? text("为当前版本确认一个投稿目标", "Confirm a target for the current version") : currentRequirementsReady ? text("按该刊要求组织投稿资料", "Organize materials for this journal") : text("先取得该刊官方投稿要求", "Capture this journal's official requirements first")} copy={!selectedTargetCurrent ? text("推荐不会自动成为投稿计划，且较早版本的目标不能沿用。", "A recommendation does not automatically become a submission plan, and a target from an earlier version cannot be reused without confirmation.") : currentRequirementsReady ? text("主线要求快照已保存在本机；下一步将据此生成资料清单。", "The primary requirement snapshot is stored locally; the next task builds the materials checklist from it.") : text("只有建立带来源且仍在有效期内的要求快照后，才会生成期刊专属清单。", "A source-backed requirement snapshot within its validity period is required before a journal-specific checklist is created.")} buttonLabel={text("按要求准备投稿资料", "Prepare required materials")} disabled={!selectedTargetCurrent || !currentRequirementsReady} onClick={onContinue} />
+    </> : null}
   </>;
 }
 
-function JournalRecommendationList({ title, items, locale }: { title: string; items: JournalRecommendation[]; locale: Locale }) {
+function SubmissionRoutePlan({ primary, backups, snapshots, busyTargetId, busyRequirementId, onPromote, onDiscover, onSaveManual }: { primary: SubmissionTargetSelection; backups: SubmissionTargetSelection[]; snapshots: JournalRequirementSnapshot[]; busyTargetId: string | null; busyRequirementId: string | null; onPromote: (selectionId: string, reason: string) => void; onDiscover: (selectionId: string) => void; onSaveManual: (selectionId: string, sourceUrl: string, requirementText: string) => void }) {
+  const { locale, text } = useI18n();
+  const snapshotFor = (target: SubmissionTargetSelection) => snapshots.find((snapshot) => snapshot.targetSelectionId === target.selectionId) ?? null;
+  return <section className="submission-route-plan" aria-labelledby="submission-route-heading">
+    <header><div><span>{text("一条主线 · 有序备选", "One primary · ordered backups")}</span><h2 id="submission-route-heading">{text("投稿路线", "Submission routes")}</h2></div><strong>{text(`1 条主线 · ${backups.length} 条支线`, `1 primary · ${backups.length} backup${backups.length === 1 ? "" : "s"}`)}</strong></header>
+    <article className="submission-route-card primary-route" aria-label={text(`当前投稿主线：${primary.name}`, `Current primary route: ${primary.nameEn}`)}><div className="route-rail"><span>01</span><i /></div><div className="route-content"><div className="route-heading"><div><span>{text("当前投稿主线", "Current primary route")}</span><h3>{locale === "en" ? primary.nameEn : primary.name}</h3><p>{primary.publisher} · {primary.rankTier}</p></div><strong>{text("唯一激活", "Only active")}</strong></div><JournalRequirementCapture target={primary} snapshot={snapshotFor(primary)} busy={busyRequirementId === primary.selectionId} onDiscover={onDiscover} onSaveManual={onSaveManual} /></div></article>
+    {backups.length > 0 ? <div className="backup-route-list" aria-label={text("备选投稿支线", "Backup submission routes")}>{backups.map((backup, index) => <BackupRouteCard key={backup.selectionId} target={backup} order={index + 2} snapshot={snapshotFor(backup)} busy={busyTargetId === backup.selectionId} requirementBusy={busyRequirementId === backup.selectionId} onPromote={onPromote} onDiscover={onDiscover} onSaveManual={onSaveManual} />)}</div> : <div className="route-empty"><Icon name="target" /><div><strong>{text("还没有备选支线", "No backup branch yet")}</strong><p>{text("在推荐卡片中点击“加入备选支线”。支线可提前准备，但不会登记为并行投稿。", "Use “Add backup branch” on a recommendation. A branch can be prepared early but is never recorded as a parallel submission.")}</p></div></div>}
+    <small className="route-policy">{text("只有主线结束、撤稿或未投稿时，才能把备选支线提升为新的主线；每次切换都会保留原因和本地历史。", "A backup can become primary only after the current route is rejected, withdrawn, or not submitted. Every transition keeps its reason and local history.")}</small>
+  </section>;
+}
+
+function BackupRouteCard({ target, order, snapshot, busy, requirementBusy, onPromote, onDiscover, onSaveManual }: { target: SubmissionTargetSelection; order: number; snapshot: JournalRequirementSnapshot | null; busy: boolean; requirementBusy: boolean; onPromote: (selectionId: string, reason: string) => void; onDiscover: (selectionId: string) => void; onSaveManual: (selectionId: string, sourceUrl: string, requirementText: string) => void }) {
+  const { locale, text } = useI18n();
+  const [reason, setReason] = useState("");
+  return <article className="submission-route-card backup-route" aria-label={text(`备选投稿支线：${target.name}`, `Backup route: ${target.nameEn}`)}><div className="route-rail"><span>{String(order).padStart(2,"0")}</span><i /></div><div className="route-content"><div className="route-heading"><div><span>{text("备选投稿支线", "Backup route")}</span><h3>{locale === "en" ? target.nameEn : target.name}</h3><p>{target.publisher} · {target.rankTier}</p></div><strong>{text("未投稿", "Not submitted")}</strong></div><JournalRequirementCapture target={target} snapshot={snapshot} busy={requirementBusy} onDiscover={onDiscover} onSaveManual={onSaveManual} compact /><div className="route-promote"><label htmlFor={`route-reason-${target.selectionId}`}>{text("提升为主线前，记录上一主线状态", "Before promotion, record the prior route status")}<select id={`route-reason-${target.selectionId}`} value={reason} onChange={(event) => setReason(event.target.value)}><option value="">{text("请选择", "Select")}</option><option value="not_submitted">{text("尚未投稿，调整目标", "Not submitted; changing target")}</option><option value="rejected">{text("已收到拒稿结果", "Rejected")}</option><option value="withdrawn">{text("已完成撤稿", "Withdrawn")}</option></select></label><button className="text-button" type="button" disabled={!reason || busy} onClick={() => onPromote(target.selectionId, reason)}>{busy ? text("正在切换…", "Switching…") : text("提升为当前主线", "Promote to primary")}</button></div></div></article>;
+}
+
+function JournalRequirementCapture({ target, snapshot, busy, onDiscover, onSaveManual, compact = false }: { target: SubmissionTargetSelection; snapshot: JournalRequirementSnapshot | null; busy: boolean; onDiscover: (selectionId: string) => void; onSaveManual: (selectionId: string, sourceUrl: string, requirementText: string) => void; compact?: boolean }) {
+  const { locale, text } = useI18n();
+  const [networkConfirmed, setNetworkConfirmed] = useState(false);
+  const [manualUrl, setManualUrl] = useState(target.homepageUrl);
+  const [manualText, setManualText] = useState("");
+  const [manualConfirmed, setManualConfirmed] = useState(false);
+  const ready = Boolean(snapshot && snapshot.status !== "requires_manual_review" && snapshot.requirements.length > 0);
+  const stale = Boolean(snapshot && Date.now() > snapshot.freshUntilUnixMs);
+  const submitManual = () => {
+    onSaveManual(target.selectionId, manualUrl.trim(), manualText.trim());
+    setManualConfirmed(false);
+  };
+  return <section className="journal-requirement-capture" data-ready={ready}>
+    <div className="requirement-status"><div><Icon name={ready ? "check" : "warning"} /><div><strong>{ready ? text("已建立期刊专属要求快照", "Journal-specific snapshot ready") : snapshot ? text("已取得页面 · 仍需人工补充", "Page captured · manual input needed") : text("尚未取得官方投稿要求", "Official requirements not captured")}</strong><span>{snapshot ? text(`${snapshot.sources.length} 个来源 · ${snapshot.requirements.length} 项要求${stale ? " · · 已超过 90 天" : ""}`, `${snapshot.sources.length} source(s) · ${snapshot.requirements.length} requirement(s)${stale ? " · older than 90 days" : ""}`) : text("不会发送论文、作者身份或本地资料", "No manuscript, author identity, or local files are sent")}</span></div></div><b>{ready ? text("可用于清单", "Checklist ready") : text("待核验", "Pending")}</b></div>
+    {snapshot && snapshot.requirements.length > 0 ? <details className="requirement-evidence" open={!compact}><summary>{text("查看带来源的要求", "View source-backed requirements")}</summary><ol>{snapshot.requirements.map((item) => <li key={item.id}><div><strong>{locale === "en" ? item.labelEn : item.label}</strong><span>{requirementObligationLabel(item.obligation, locale)}</span></div><p>{item.evidenceExcerpt}</p><code title={item.sourceUrl}>{item.sourceUrl}</code></li>)}</ol></details> : null}
+    <div className="network-consent"><label><input type="checkbox" checked={networkConfirmed} onChange={(event) => setNetworkConfirmed(event.target.checked)} />{text("仅本次允许后端访问该期刊官网及其站内作者指南链接", "Allow the backend to access this journal site and linked author guides for this request only")}</label><button className="secondary-button" type="button" disabled={!networkConfirmed || busy} onClick={() => { onDiscover(target.selectionId); setNetworkConfirmed(false); }}>{busy ? text("正在读取官方页面…", "Reading official pages…") : snapshot ? text("重新获取官方要求", "Refresh official requirements") : text("获取官方投稿要求", "Capture official requirements")}</button><small>{text("最多读取 4 个同站 HTTPS 页面，每页不超过 2 MB；外部访问会写入本地审计记录。", "At most four same-site HTTPS pages are read, up to 2 MB each; the external access is recorded locally.")}</small></div>
+    <details className="manual-requirement-input"><summary>{text("网页无法读取？粘贴官方原文", "Page unavailable? Paste official text")}</summary><label>{text("官方来源网址", "Official source URL")}<input type="url" inputMode="url" value={manualUrl} onChange={(event) => setManualUrl(event.target.value)} /></label><label>{text("作者指南原文", "Author-guide text")}<textarea value={manualText} maxLength={100000} onChange={(event) => setManualText(event.target.value)} placeholder={text("粘贴与格式、匿名审稿、图表、声明、费用等有关的官方原文……", "Paste official text covering format, anonymous review, figures, declarations, fees, and related requirements…")} /></label><label className="confirmation-control"><input type="checkbox" checked={manualConfirmed} onChange={(event) => setManualConfirmed(event.target.checked)} /><span>{text("我确认这段原文来自该期刊或出版社的官方作者指南", "I confirm this text is from the journal or publisher's official author guide")}</span></label><button className="text-button" type="button" disabled={busy || !manualConfirmed || !manualUrl.trim().startsWith("https://") || manualText.trim().length < 20} onClick={submitManual}>{text("保存并生成本地快照", "Save local snapshot")}</button></details>
+  </section>;
+}
+
+function requirementObligationLabel(obligation: JournalRequirementObligation, locale: Locale) {
+  if (obligation === "required") return localize(locale, "明确要求", "Required");
+  if (obligation === "recommended") return localize(locale, "建议或可选", "Recommended or optional");
+  return localize(locale, "需作者确认", "Author verification needed");
+}
+
+function JournalRecommendationArchive({ records, selectedRunId, loading, locale, onSelect }: { records: JournalRecommendationRun[]; selectedRunId: string | null; loading: boolean; locale: Locale; onSelect: (record: JournalRecommendationRun) => void }) {
   const { text } = useI18n();
-  return <section className="journal-result-group"><h3>{title}</h3><ol>{items.map((item,index)=><li key={item.id}><header><span>{String(index+1).padStart(2,"0")}</span><div><strong>{locale === "en" ? item.nameEn : item.name}</strong><p>{item.publisher}</p></div><em>{item.overallFit}</em></header><div className="journal-tags"><span>{item.rankTier}</span><span>{text("专业", "Specialty")} {item.scores.specialtyFit}</span><span>{text("用途", "Purpose")} {item.scores.purposeFit}</span><span>{text("时间", "Timing")} {item.scores.timeFeasibility}</span><span>{text(`规划 ${item.estimatedSubmissionPreparationDays} 天`, `${item.estimatedSubmissionPreparationDays}-day plan`)}</span><span>{item.scores.institutionRules === null ? text("校规待核验", "Institution rules pending") : text(`校规 ${item.scores.institutionRules}`, `Institution ${item.scores.institutionRules}`)}</span></div><p>{localizeBackendText(locale,item.reasons[0])}</p></li>)}</ol></section>;
+  return <section className="journal-history" aria-labelledby="journal-history-heading"><header><div><span>{text("随论文工作区保存在本机", "Stored locally with this manuscript workspace")}</span><h3 id="journal-history-heading">{text("已保存推荐", "Saved recommendations")} · {records.length}{locale === "zh-CN" ? " 条" : ""}</h3></div><strong>{loading ? text("读取中", "Loading") : text("自动保存", "Auto-saved")}</strong></header>{records.length > 0 ? <ol>{records.map((record) => { const publishers = journalRecommendationPublishers(record); return <li key={record.runId}><button type="button" aria-pressed={record.runId === selectedRunId} aria-label={text(`查看推荐记录 ${record.runId}`, `View recommendation ${record.runId}`)} onClick={() => onSelect(record)}><span><strong>{text(`论文 v${record.manuscriptVersion}`, `Manuscript v${record.manuscriptVersion}`)}</strong><small>{formatModifiedDate(record.evaluatedUnixMs, locale)} · {record.runId}</small></span><span className="journal-history-publishers"><b>{text("推荐出版社", "Recommended publishers")}</b>{publishers.join(" · ") || "—"}</span><Icon name="arrow" /></button></li>; })}</ol> : <p>{loading ? text("正在读取这篇论文的推荐档案…", "Loading recommendation records for this manuscript…") : text("首次生成后，期刊、出版社、分组和来源状态会自动保存在这里。", "After the first run, journals, publishers, groups, and source status are saved here automatically.")}</p>}</section>;
+}
+
+function journalRecommendationPublishers(run: JournalRecommendationRun) {
+  const recommendations = [run.domestic, run.international].flatMap((portfolio) => [portfolio.sprint, portfolio.matching, portfolio.safeguard].flat());
+  return [...new Set(recommendations.map((recommendation) => recommendation.publisher.trim()).filter(Boolean))];
+}
+
+function JournalRegionPortfolio({ title, portfolio, locale, runId, workspaceVersion, selectionDisabled, selectedTarget, backupJournalIds, selectingTarget, targetPlanBusyId, onSelectTarget, onAddBackup }: { title: string; portfolio: JournalRecommendationPortfolio; locale: Locale; runId: string; workspaceVersion: number; selectionDisabled: boolean; selectedTarget: SubmissionTargetSelection | null; backupJournalIds: Set<string>; selectingTarget: boolean; targetPlanBusyId: string | null; onSelectTarget: (runId: string, journalId: string) => void; onAddBackup: (runId: string, journalId: string) => void }) {
+  const { text } = useI18n();
+  const total = portfolio.sprint.length + portfolio.matching.length + portfolio.safeguard.length;
+  const shared = { locale, runId, workspaceVersion, selectionDisabled, selectedTarget, backupJournalIds, selectingTarget, targetPlanBusyId, onSelectTarget, onAddBackup };
+  return <section className="journal-region-block"><h2>{title} · {total}{locale === "zh-CN" ? " 家" : ""}</h2><div className="journal-columns"><JournalRecommendationList title={text(`冲刺型 · ${portfolio.sprint.length} 家`, `Reach · ${portfolio.sprint.length} journals`)} description={text("目标标准较高，竞争通常更激烈。", "Higher target standards with typically stronger competition.")} items={portfolio.sprint} {...shared} /><JournalRecommendationList title={text(`匹配型 · ${portfolio.matching.length} 家`, `Match · ${portfolio.matching.length} journals`)} description={text("与论文内容、专业方向、用途和可核验要求契合度较高。", "Higher fit with the manuscript, specialty, purpose, and verified requirements.")} items={portfolio.matching} {...shared} /><JournalRecommendationList title={text(`保底型 · ${portfolio.safeguard.length} 家`, `Safeguard · ${portfolio.safeguard.length} journals`)} description={text("门槛与投稿准备条件相对可行；周期和录用情况仍需核验。", "Relatively feasible thresholds and preparation conditions; timelines and acceptance still require verification.")} items={portfolio.safeguard} {...shared} /></div></section>;
+}
+
+function JournalRecommendationList({ title, description, items, locale, runId, workspaceVersion, selectionDisabled, selectedTarget, backupJournalIds, selectingTarget, targetPlanBusyId, onSelectTarget, onAddBackup }: { title: string; description: string; items: JournalRecommendation[]; locale: Locale; runId: string; workspaceVersion: number; selectionDisabled: boolean; selectedTarget: SubmissionTargetSelection | null; backupJournalIds: Set<string>; selectingTarget: boolean; targetPlanBusyId: string | null; onSelectTarget: (runId: string, journalId: string) => void; onAddBackup: (runId: string, journalId: string) => void }) {
+  const { text } = useI18n();
+  const hasCurrentPrimary = selectedTarget?.selectedAgainstManuscriptVersion === workspaceVersion;
+  return <section className="journal-result-group"><h3>{title}</h3><p className="journal-group-description">{description}</p><ol>{items.map((item,index)=>{ const selected = hasCurrentPrimary && selectedTarget?.journalId === item.id; const staleSameTarget = !hasCurrentPrimary && selectedTarget?.journalId === item.id; const backup = backupJournalIds.has(item.id); const busy = selectingTarget || targetPlanBusyId === item.id; return <li key={item.id} data-selected={selected} data-backup={backup}><header><span>{String(index+1).padStart(2,"0")}</span><div><strong>{locale === "en" ? item.nameEn : item.name}</strong><p>{item.publisher}</p></div></header><div className="journal-tags"><span>{item.rankTier}</span><span>{item.region === "domestic" ? text("国内", "Domestic") : text("国际", "International")}</span>{(item.directoryEvidence ?? []).map((evidence)=><span key={`${evidence.scheme}-${evidence.releaseYear}`}>{directoryEvidenceLabel(evidence, locale)}</span>)}<span>{item.deadlineStatus === "planning_window_sufficient" ? text("准备时间可安排", "Preparation window available") : text("准备时间较紧", "Tight preparation window")}</span><span>{institutionEligibilityLabel(item.institutionEligibility, locale)}</span></div><p>{text("投稿前请在期刊官网核对最新范围、费用、周期和作者指南。", "Verify the latest scope, fees, timelines, and author guidelines on the journal website before submission.")}</p><button className={selected ? "selected-target-button" : "secondary-button"} type="button" disabled={selectionDisabled || selected || backup || busy} onClick={() => hasCurrentPrimary ? onAddBackup(runId, item.id) : onSelectTarget(runId, item.id)}>{selectionDisabled ? text("历史推荐仅供查看", "Historical recommendation") : selected ? <><Icon name="check" />{text("当前投稿主线", "Current primary")}</> : backup ? <><Icon name="check" />{text("已加入备选", "Added to backups")}</> : busy ? text("正在保存…", "Saving…") : staleSameTarget ? text("按当前版本重新确认", "Reconfirm for this version") : hasCurrentPrimary ? text("加入备选支线", "Add backup branch") : text("设为投稿目标", "Set as target")}</button></li>;})}</ol></section>;
+}
+
+function institutionEligibilityLabel(status: string, locale: Locale) {
+  if (status.startsWith("blocked_by_verified")) return localize(locale, "不满足已核验要求", "Does not meet verified requirements");
+  if (status.startsWith("recognized_by_verified")) return localize(locale, "满足已核验要求", "Meets verified requirements");
+  if (status === "requires_local_cas_directory_data") return localize(locale, "评价目录待同步", "Evaluation directory pending");
+  return localize(locale, "学校要求待核验", "Institution requirements pending");
+}
+
+function directoryEvidenceLabel(evidence: JournalDirectoryEvidence, locale: Locale) {
+  const scheme = evidence.scheme === "cas_partition" ? localize(locale, "中科院", "CAS") : evidence.scheme === "clarivate_jcr" ? "JCR" : localize(locale, "新锐", "Emerging");
+  const partition = evidence.partition ? `${evidence.partition}${localize(locale, "区", "")}` : localize(locale, "分区缺失", "No partition");
+  return `${scheme} ${evidence.releaseYear} · ${partition}${evidence.top ? " · Top" : ""}`;
 }
 
 function StructureCheckSummary({ report }: { report: StructureReport }) {
@@ -1463,7 +1895,7 @@ function KnowledgeBodyOperation({ workspace, snapshot, record, structureReport }
   const reputationVersion = architecture?.validationRightsAndReputation.reputationRecord.version ?? 0;
   const classification = record.disciplineClassification;
   if (!classification) return null;
-  return <><p className="workspace-created-status"><Icon name="check" />{text("知识体快照已固化", "Knowledge-body snapshot finalized")}</p><PanelHeading kicker={`${text("步骤 8 / 8 · 知识体快照", "Step 8 / 8 · Knowledge-body snapshot")} · S${snapshot.snapshotVersion}`} title={text("知识体与关联网络", "Knowledge body and relationship network")} copy={text("快照已绑定身份与版本、语义知识、存证、投稿记录和作者确认的学科分类；当前仍只保存在本机。", "The snapshot binds identity and version, semantic knowledge, attestation, submission, and author-confirmed discipline and remains local.")} /><SourceIdentityPreview snapshot={snapshot} /><KnowledgeCandidatePreview snapshot={snapshot} structureReport={structureReport} compact /><section className="knowledge-identity-card" aria-labelledby="knowledge-identity-heading"><header><div><span>{text("稳定身份 · 不可变快照", "Stable identity · Immutable snapshot")}</span><h3 id="knowledge-identity-heading">{text("知识体哈希与学科索引", "Knowledge-body hash and discipline index")}</h3></div><strong>SHA-256</strong></header><dl><div><dt>{text("知识体哈希编码", "Knowledge-body hash")}</dt><dd><code>{record.recordHash}</code></dd></div><div><dt>{text("学科索引分类", "Discipline classification")}</dt><dd><strong>{locale === "en" ? classification.labelEn : classification.label}</strong><span>{classification.code}</span></dd></div><div><dt>{text("分类协议", "Classification protocol")}</dt><dd>ClassificationAssignment · v{classification.version}</dd></div><div><dt>{text("索引体系", "Index scheme")}</dt><dd>{classification.scheme} · v{classification.schemeVersion}</dd></div><div><dt>{text("确认状态", "Confirmation status")}</dt><dd>{text("身份与版本已保留；学科分类和纳入的语义候选已确认", "Identity and version preserved; discipline and included semantic candidates confirmed")}</dd></div><div><dt>KnowledgeBody ID</dt><dd>{snapshot.knowledgeBodyId}</dd></div><div><dt>{text("固化时间", "Finalized")}</dt><dd>{formatModifiedDate(record.finalizedUnixMs, locale)}</dd></div></dl><p>{text("该哈希覆盖源稿明示身份、知识体快照、学科分类、存证与投稿引用；身份长期稳定，内容更新形成新快照。信誉状态可独立变化，不会改写历史内容。", "This hash covers source-declared identity, the knowledge snapshot, discipline classification, attestation, and submission references. Identity remains stable while content updates create new snapshots. Reputation may evolve independently without rewriting historical content.")}</p></section><ul className="knowledge-layers" aria-label={text("知识体五部分架构", "Five-part knowledge-body architecture")}><KnowledgeLayer title={text(`身份与版本 · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`, `Identity & version · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`)} copy={text("稳定 KnowledgeBody 身份、源稿作者与联系方式、不可变版本和替代/撤回状态", "Stable KnowledgeBody identity, source-declared authors and contacts, immutable versions, and supersession or withdrawal state")} complete /><KnowledgeLayer title={text(`知识、边界与证据 · Claim v${objects.claim.version}`, `Knowledge, boundary & evidence · Claim v${objects.claim.version}`)} copy={text(`Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`, `Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`)} complete={objects.scope.version > 0 && objects.method.version > 0 && objects.result.version > 0} /><KnowledgeLayer title={text(`能力契约 · ${capabilityCount} 项`, `Capability contracts · ${capabilityCount}`)} copy={text(`${availableCapabilities} 项可用或需要运行时；明确输入、输出、前置条件、拒绝条件与证据追溯`, `${availableCapabilities} available or runtime-dependent; inputs, outputs, preconditions, refusal conditions, and evidence traceability are explicit`)} complete={capabilityCount > 0} /><KnowledgeLayer title={text("交互与执行运行时 · RuntimeProfile v1", "Interaction & execution runtime · RuntimeProfile v1")} copy={text("作者配置的模型只作为可替换协调层；每次外发单独授权", "Author-configured models are replaceable coordinators; every transmission requires per-call authorization")} complete={architecture !== undefined} /><KnowledgeLayer title={text(`验证、权利与信誉 · Reputation v${reputationVersion}`, `Validation, rights & reputation · Reputation v${reputationVersion}`)} copy={text(`AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1；信誉独立于固定内容持续更新`, `AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1; reputation evolves independently of fixed content`)} complete={architecture !== undefined} /></ul></>;
+  return <><p className="workspace-created-status"><Icon name="check" />{text("个人知识体快照已固化", "Personal knowledge-body snapshot finalized")}</p><PanelHeading kicker={`${text("高级功能 · 个人知识体快照", "Advanced feature · Personal knowledge-body snapshot")} · S${snapshot.snapshotVersion}`} title={text("知识体与关联网络", "Knowledge body and relationship network")} copy={text("快照已绑定身份与版本、语义知识、存证、投稿记录和作者确认的学科分类；当前仍只保存在本机。", "The snapshot binds identity and version, semantic knowledge, attestation, submission, and author-confirmed discipline and remains local.")} /><KnowledgeSpatialMap workspace={workspace} knowledgeBodySnapshot={snapshot} /><KnowledgeDialoguePanel workspace={workspace} knowledgeBodyRecord={record} /><SourceIdentityPreview snapshot={snapshot} /><KnowledgeCandidatePreview snapshot={snapshot} structureReport={structureReport} compact /><section className="knowledge-identity-card" aria-labelledby="knowledge-identity-heading"><header><div><span>{text("稳定身份 · 不可变快照", "Stable identity · Immutable snapshot")}</span><h3 id="knowledge-identity-heading">{text("知识体哈希与学科索引", "Knowledge-body hash and discipline index")}</h3></div><strong>SHA-256</strong></header><dl><div><dt>{text("知识体哈希编码", "Knowledge-body hash")}</dt><dd><code>{record.recordHash}</code></dd></div><div><dt>{text("学科索引分类", "Discipline classification")}</dt><dd><strong>{locale === "en" ? classification.labelEn : classification.label}</strong><span>{classification.code}</span></dd></div><div><dt>{text("分类协议", "Classification protocol")}</dt><dd>ClassificationAssignment · v{classification.version}</dd></div><div><dt>{text("索引体系", "Index scheme")}</dt><dd>{classification.scheme} · v{classification.schemeVersion}</dd></div><div><dt>{text("确认状态", "Confirmation status")}</dt><dd>{text("身份与版本已保留；学科分类和纳入的语义候选已确认", "Identity and version preserved; discipline and included semantic candidates confirmed")}</dd></div><div><dt>KnowledgeBody ID</dt><dd>{snapshot.knowledgeBodyId}</dd></div><div><dt>{text("固化时间", "Finalized")}</dt><dd>{formatModifiedDate(record.finalizedUnixMs, locale)}</dd></div></dl><p>{text("该哈希覆盖源稿明示身份、知识体快照、学科分类、存证与投稿引用；身份长期稳定，内容更新形成新快照。信誉状态可独立变化，不会改写历史内容。", "This hash covers source-declared identity, the knowledge snapshot, discipline classification, attestation, and submission references. Identity remains stable while content updates create new snapshots. Reputation may evolve independently without rewriting historical content.")}</p></section><ul className="knowledge-layers" aria-label={text("知识体五部分架构", "Five-part knowledge-body architecture")}><KnowledgeLayer title={text(`身份与版本 · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`, `Identity & version · Artifact v${objects.artifactVersion.version} · Snapshot S${objects.knowledgeBodySnapshot.version}`)} copy={text("稳定 KnowledgeBody 身份、源稿作者与联系方式、不可变版本和替代/撤回状态", "Stable KnowledgeBody identity, source-declared authors and contacts, immutable versions, and supersession or withdrawal state")} complete /><KnowledgeLayer title={text(`知识、边界与证据 · Claim v${objects.claim.version}`, `Knowledge, boundary & evidence · Claim v${objects.claim.version}`)} copy={text(`Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`, `Scope v${objects.scope.version} · Method v${objects.method.version} · Result v${objects.result.version} · EvidenceRelation v${objects.evidenceRelation.version} · SourceAnchor v${objects.sourceAnchor.version}`)} complete={objects.scope.version > 0 && objects.method.version > 0 && objects.result.version > 0} /><KnowledgeLayer title={text(`能力契约 · ${capabilityCount} 项`, `Capability contracts · ${capabilityCount}`)} copy={text(`${availableCapabilities} 项可用或需要运行时；明确输入、输出、前置条件、拒绝条件与证据追溯`, `${availableCapabilities} available or runtime-dependent; inputs, outputs, preconditions, refusal conditions, and evidence traceability are explicit`)} complete={capabilityCount > 0} /><KnowledgeLayer title={text("交互与执行运行时 · RuntimeProfile v1", "Interaction & execution runtime · RuntimeProfile v1")} copy={text("作者配置的模型只作为可替换协调层；每次外发单独授权", "Author-configured models are replaceable coordinators; every transmission requires per-call authorization")} complete={architecture !== undefined} /><KnowledgeLayer title={text(`验证、权利与信誉 · Reputation v${reputationVersion}`, `Validation, rights & reputation · Reputation v${reputationVersion}`)} copy={text(`AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1；信誉独立于固定内容持续更新`, `AIReviewReport ${aiReview ? `v${aiReview.version}` : "v0"} · RightsPolicy v1; reputation evolves independently without rewriting historical content`)} complete={architecture !== undefined} /></ul></>;
 }
 
 function VersionManager({ workspace, history, selectedVersion, candidate, note, notice, selecting, saving, restoring, onSelectCandidate, onNoteChange, onSave, onSelectVersion, onRestore, onContinue, continueReady }: { workspace: WorkspaceSummary; history: VersionHistory | null; selectedVersion: number | null; candidate: ManuscriptSummary | null; note: string; notice: string | null; selecting: boolean; saving: boolean; restoring: boolean; onSelectCandidate: () => void; onNoteChange: (note: string) => void; onSave: () => void; onSelectVersion: (version: number) => void; onRestore: (version: number) => void; onContinue: () => void; continueReady: boolean }) {
@@ -1473,12 +1905,10 @@ function VersionManager({ workspace, history, selectedVersion, candidate, note, 
   const formatMatches = !candidate || candidate.kind === workspace.manuscript.kind;
   const versions = history ? [...history.versions].reverse() : [];
   return <>
-    <PanelHeading kicker={text("步骤 4 / 8 · 本地版本库", "Step 4 / 8 · Local version library")} title={text("核验当前版本与历史", "Verify the current version and history")} copy={text("修订已保存为不可变版本。也可导入外部修改稿或安全恢复旧版；版本变化后必须重新检查。", "The revision is stored immutably. You can also import an external revision or safely restore an older version; any version change requires a new check.")} />
-    <section className="version-save-card" aria-labelledby="version-save-heading">
-      <div className="version-save-heading"><div><span>{text("新的修改稿", "New revision")}</span><h3 id="version-save-heading">{candidate ? candidate.name : text("尚未选择文件", "No file selected")}</h3>{candidate ? <p>{candidate.extension.toUpperCase()} · {formatBytes(candidate.sizeBytes)}</p> : <p>{text(`请选择与当前稿件相同类型的 ${workspace.manuscript.extension.toUpperCase()} 文件。`, `Choose a ${workspace.manuscript.extension.toUpperCase()} file matching the current manuscript type.`)}</p>}</div><button className="text-button" type="button" onClick={onSelectCandidate} disabled={selecting || saving}>{selecting ? text("正在打开…", "Opening…") : candidate ? text("重新选择", "Choose another") : text("选择修改稿", "Choose revision")}</button></div>
-      {candidate ? <div className="version-note-field"><label htmlFor="version-note">{text("版本说明", "Version note")} <span>{text("可选", "Optional")}</span></label><input id="version-note" value={note} maxLength={200} onChange={(event) => onNoteChange(event.target.value)} placeholder={text("例如：补充方法与统计分析", "For example: expanded methods and statistical analysis")} /><small>{note.length} / 200</small></div> : null}
-      {!formatMatches ? <p className="inline-warning" role="alert"><Icon name="warning" />{text("修改稿必须与当前稿件保持相同文件类型；格式转换应留在投稿输出中。", "The revision must use the same file type as the current manuscript; format conversion belongs in submission outputs.")}</p> : null}
-      <button className="primary-button version-primary" type="button" onClick={candidate ? onSave : onSelectCandidate} disabled={selecting || saving || !formatMatches}>{saving ? text("正在保存…", "Saving…") : candidate ? text(`保存为 v${currentVersion + 1}`, `Save as v${currentVersion + 1}`) : text("选择修改后的稿件", "Choose revised manuscript")}<Icon name={candidate ? "check" : "upload"} /></button>
+    <PanelHeading kicker={text("高级记录 · 版本历史", "Advanced record · Version history")} title={text("查看和管理不可变论文版本", "View and manage immutable manuscript versions")} copy={text("主投稿流程不会经过本页。只有需要比较、导入修改稿或安全恢复旧稿时才在这里操作。", "The primary submission flow does not pass through this page. Use it only to compare, import, or safely restore revisions.")} />
+    <section className="version-confirm-card" aria-labelledby="version-confirm-heading">
+      <div><span>{text("当前待投稿版本", "Current submission version")}</span><h3 id="version-confirm-heading">v{currentVersion} · {workspace.manuscript.name}</h3><p>{workspace.manuscript.extension.toUpperCase()} · {formatBytes(workspace.manuscript.sizeBytes)} · {continueReady ? text("当前检查结果有效", "Current check is valid") : text("需要重新检查", "A new check is required")}</p></div>
+      <button className="primary-button" type="button" onClick={onContinue}>{continueReady ? text("返回投稿包", "Return to package") : text("检查当前版本", "Check this version")}<Icon name="arrow" /></button>
     </section>
     {notice ? <p className="version-notice" role="status"><Icon name="check" />{notice}</p> : null}
     <section className="version-history" aria-labelledby="version-history-heading"><header><div><span>{text("不可变时间线", "Immutable timeline")}</span><h3 id="version-history-heading">{text("论文版本", "Manuscript versions")}</h3></div><strong>{history ? text(`${history.versions.length} 个版本`, `${history.versions.length} versions`) : text("读取中…", "Loading…")}</strong></header>
@@ -1489,7 +1919,16 @@ function VersionManager({ workspace, history, selectedVersion, candidate, note, 
       })}</ol> : <p className="version-loading">{text("正在读取本地版本记录…", "Loading local version records…")}</p>}
     </section>
     <BoundaryNote title={text("安全恢复", "Safe restoration")} copy={text("恢复旧版不会删除或覆盖任何内容，而是以当前版本为父节点创建一个新的版本。所有稿件只保存在本机。", "Restoring an older version never deletes or overwrites content. It creates a new version from the current head, and every manuscript stays on this device.")} />
-    <button className="secondary-action" type="button" onClick={onContinue}>{continueReady ? text("继续创建本地存证", "Continue to local attestation") : text("重新检查当前版本", "Check the current version again")}<Icon name="arrow" /></button>
+    <details className="version-revision-option" open={candidate !== null}>
+      <summary>{text("需要改用另一份修改稿？", "Need to use another revision?")}</summary>
+      <p>{text(`仅在当前 v${currentVersion} 不是最终稿时使用。新文件必须保持 ${workspace.manuscript.extension.toUpperCase()} 格式，保存后系统会重新检查。`, `Use this only if v${currentVersion} is not final. The new file must remain ${workspace.manuscript.extension.toUpperCase()}, and the app will recheck it after saving.`)}</p>
+      <section className="version-save-card" aria-labelledby="version-save-heading">
+        <div className="version-save-heading"><div><span>{text("可选修改稿", "Optional revision")}</span><h3 id="version-save-heading">{candidate ? candidate.name : text("尚未选择文件", "No file selected")}</h3>{candidate ? <p>{candidate.extension.toUpperCase()} · {formatBytes(candidate.sizeBytes)}</p> : null}</div><button className="text-button" type="button" onClick={onSelectCandidate} disabled={selecting || saving}>{selecting ? text("正在打开…", "Opening…") : candidate ? text("重新选择", "Choose another") : text("选择修改稿", "Choose revision")}</button></div>
+        {candidate ? <div className="version-note-field"><label htmlFor="version-note">{text("版本说明", "Version note")} <span>{text("可选", "Optional")}</span></label><input id="version-note" value={note} maxLength={200} onChange={(event) => onNoteChange(event.target.value)} placeholder={text("例如：补充方法与统计分析", "For example: expanded methods and statistical analysis")} /><small>{note.length} / 200</small></div> : null}
+        {!formatMatches ? <p className="inline-warning" role="alert"><Icon name="warning" />{text("修改稿必须与当前稿件保持相同文件类型；格式转换应留在投稿输出中。", "The revision must use the same file type as the current manuscript; format conversion belongs in submission outputs.")}</p> : null}
+        {candidate ? <button className="secondary-button version-primary" type="button" onClick={onSave} disabled={selecting || saving || !formatMatches}>{saving ? text("正在保存并复查…", "Saving and rechecking…") : text(`保存为 v${currentVersion + 1} 并复查`, `Save as v${currentVersion + 1} and recheck`)}<Icon name="check" /></button> : null}
+      </section>
+    </details>
   </>;
 }
 
@@ -1509,7 +1948,7 @@ function TargetRuleSelector({ ruleCatalog, selectedRulePackIds, loading, structu
     ["reporting_guideline", text("研究报告指南", "Research reporting guidelines")],
   ] as const;
   return <>
-    <PanelHeading kicker={text("步骤 2 / 8 · 检查规则", "Step 2 / 8 · Check rules")} title={text("选择适用于这篇论文的标准", "Choose standards applicable to this manuscript")} copy={text("通用初投稿规则始终启用。只选择真实适用的国家标准、出版商和研究类型；具体期刊作者指南仍具有最高优先级。", "General initial-submission rules are always active. Select only applicable national, publisher, and study-type standards; the journal's own author instructions still take precedence.")} />
+    <PanelHeading kicker={text("主任务 4 · 检查规则", "Primary task 4 · Check rules")} title={text("选择适用于这篇论文的标准", "Choose standards applicable to this manuscript")} copy={text("通用初投稿规则始终启用。只选择真实适用的国家标准、出版商和研究类型；具体期刊作者指南仍具有最高优先级。", "General initial-submission rules are always active. Select only applicable national, publisher, and study-type standards; the journal's own author instructions still take precedence.")} />
     {loading ? <p className="rule-catalog-loading">{text("正在校验并读取内置规则…", "Verifying and loading built-in rules…")}</p> : null}
     {!loading && ruleCatalog.length === 0 ? <BoundaryNote title={text("规则目录暂不可用", "Rule catalog unavailable")} copy={text("仍可使用通用初投稿检查；重新进入本页可再次读取内置目录。", "General initial-submission checks remain available; reopen this page to retry the built-in catalog.")} /> : null}
     <div className="rule-catalog" aria-label={text("可选出版标准", "Optional publication standards")}>
@@ -1532,12 +1971,12 @@ function TargetRuleSelector({ ruleCatalog, selectedRulePackIds, loading, structu
 
 function SubmissionElementsDesk({ catalog, draft, values, result, loading, saving, selectedPublisherCount, onValueChange, onSave, onContinue }: { catalog: SubmissionElementCatalog | null; draft: RevisionDraft | null; values: Record<string, string>; result: RevisionSet | null; loading: boolean; saving: boolean; selectedPublisherCount: number; onValueChange: (field: string, value: string) => void; onSave: () => void; onContinue: () => void }) {
   const { locale, text } = useI18n();
-  if (loading || !catalog) return <EmptyStage icon="format" kicker={text("步骤 3 / 8 · 投稿优化修订台", "Step 3 / 8 · Submission Revision Desk")} title={text("正在整理投稿要素", "Preparing submission elements")} copy={text("正在本机组合已签名的出版社要求，不会调用 AI 或发送论文。", "Combining signed publisher requirements locally without AI calls or manuscript transmission.")} />;
+  if (loading || !catalog) return <EmptyStage icon="format" kicker={text("主任务 4 · 投稿优化修订台", "Primary task 4 · Submission Revision Desk")} title={text("正在整理投稿要素", "Preparing submission elements")} copy={text("正在本机组合已签名的出版社要求，不会调用 AI 或发送论文。", "Combining signed publisher requirements locally without AI calls or manuscript transmission.")} />;
   const groups = ["identity", "manuscript", "declarations", "files"];
   const editableCount = catalog.elements.filter((element) => element.editableField).length;
   const changedCount = draft?.fields.filter((field) => (values[field.field] ?? field.value).trim() !== field.value).length ?? 0;
   return <>
-    <PanelHeading kicker={text("步骤 3 / 8 · 投稿优化修订台", "Step 3 / 8 · Submission Revision Desk")} title={selectedPublisherCount > 0 ? text("依据检查结果修订", "Revise from check findings") : text("通用投稿修订", "General submission revision")} copy={selectedPublisherCount > 0 ? text("出版社要素已合并；保存后会形成新版本并自动重做当前规则检查。", "Publisher elements are merged; saving creates a new version and automatically reruns the current checks.") : text("当前使用通用规则；可安全回写的字段仍可修订，具体期刊要求需作者继续核对。", "General rules are active; safe fields remain editable while journal-specific requirements still require author review.")} />
+    <PanelHeading kicker={text("主任务 4 · 投稿优化修订台", "Primary task 4 · Submission Revision Desk")} title={selectedPublisherCount > 0 ? text("依据检查结果修订", "Revise from check findings") : text("通用投稿修订", "General submission revision")} copy={selectedPublisherCount > 0 ? text("出版社要素已合并；保存后会形成新版本并自动重做当前规则检查。", "Publisher elements are merged; saving creates a new version and automatically reruns the current checks.") : text("当前使用通用规则；可安全回写的字段仍可修订，具体期刊要求需作者继续核对。", "General rules are active; safe fields remain editable while journal-specific requirements still require author review.")} />
     {result ? <p className="revision-saved" role="status"><Icon name="check" />{text(`已保存为 v${result.outputVersion}，${result.changes.length} 项修改已记录来源`, `Saved as v${result.outputVersion}; provenance recorded for ${result.changes.length} change(s)`)}</p> : null}
     {draft && draft.fields.length > 0 ? <section className="revision-fields" aria-labelledby="revision-fields-heading"><header><div><span>{text(`基础版本 v${draft.baseVersion}`, `Base version v${draft.baseVersion}`)}</span><h3 id="revision-fields-heading">{text("可安全回写的字段", "Fields safe to write back")}</h3></div><strong>{draft.format.toUpperCase()}</strong></header>{draft.fields.map((field) => <div className="revision-field" key={field.field}><label htmlFor={`revision-${field.field}`}>{locale === "en" ? field.labelEn : field.label}</label>{field.field === "title" ? <input id={`revision-${field.field}`} value={values[field.field] ?? field.value} onChange={(event) => onValueChange(field.field, event.target.value)} disabled={!field.editable || saving} /> : <textarea id={`revision-${field.field}`} rows={field.field === "abstract" ? 5 : 2} value={values[field.field] ?? field.value} onChange={(event) => onValueChange(field.field, event.target.value)} disabled={!field.editable || saving} />}<small>{field.limitation ? (locale === "en" ? field.limitationEn : field.limitation) : text("作者修改 · 本机处理 · 保存前可在右侧核对差异", "Author edit · Local processing · Review the difference on the right before saving")}</small></div>)}</section> : null}
     {draft?.warnings.map((warning) => <p className="inline-warning" key={warning}><Icon name="warning" />{localizeBackendText(locale, warning)}</p>)}
@@ -1547,7 +1986,7 @@ function SubmissionElementsDesk({ catalog, draft, values, result, loading, savin
       return <section className="submission-element-group" key={group}><header><h3>{submissionElementGroupLabel(group, locale)}</h3><span>{elements.length}</span></header><ul>{elements.map((element) => <li key={element.id}><span className="element-state"><Icon name={element.editableField ? "format" : "check"} /></span><div><strong>{locale === "en" ? element.labelEn : element.label}</strong><p>{locale === "en" ? element.descriptionEn : element.description}</p><small>{element.editableField ? text("可进入结构化修订", "Structured revision available") : text("作者核对", "Author confirmation")}</small></div></li>)}</ul></section>;
     })}</div> : <div className="submission-elements-empty"><Icon name="target" /><p>{text("当前组合没有出版社级投稿要素；通用检查仍然可用。", "The current composition has no publisher-level elements; general checks remain available.")}</p></div>}
     <BoundaryNote title={text("可信边界", "Trust boundary")} copy={text(`共 ${catalog.elements.length} 项，其中 ${editableCount} 项已连接到后续结构化修订字段。所有来源在右侧只读显示。`, `${catalog.elements.length} elements are listed; ${editableCount} connect to structured revision fields. Every source is shown read-only on the right.`)} />
-    <PaneAction label={changedCount > 0 ? text(`${changedCount} 项待保存`, `${changedCount} change(s) pending`) : text("下一步", "Next")} title={changedCount > 0 ? text(`保存为新版本 v${(draft?.baseVersion ?? 0) + 1}`, `Save as new version v${(draft?.baseVersion ?? 0) + 1}`) : text("核验论文版本", "Verify manuscript versions")} copy={changedCount > 0 ? text("保存后自动重提取并复查新版本；原稿与历史不会被覆盖。", "Saving automatically extracts and rechecks the new version; the source and history remain unchanged.") : text("没有待保存修改，可以继续查看当前版本与历史。", "There are no unsaved changes; continue to the current version and history.")} buttonLabel={changedCount > 0 ? (saving ? text("保存并复查中…", "Saving and rechecking…") : text("保存新版本并复查", "Save new version and recheck")) : text("进入版本", "Continue to versions")} disabled={saving} onClick={changedCount > 0 ? onSave : onContinue} />
+    <PaneAction label={changedCount > 0 ? text(`${changedCount} 项待保存`, `${changedCount} change(s) pending`) : text("下一步", "Next")} title={changedCount > 0 ? text(`保存为新版本 v${(draft?.baseVersion ?? 0) + 1}`, `Save as new version v${(draft?.baseVersion ?? 0) + 1}`) : text("当前版本可以进入投稿包", "The current version can proceed to packaging")} copy={changedCount > 0 ? text("保存后自动重提取、复查并进入投稿包；原稿与历史不会被覆盖。", "Saving automatically extracts, rechecks, and proceeds to packaging; the source and history remain unchanged.") : text("没有待保存修改；版本历史仍可从高级记录单独查看。", "There are no unsaved changes; version history remains available separately under advanced records.")} buttonLabel={changedCount > 0 ? (saving ? text("保存并复查中…", "Saving and rechecking…") : text("保存新版本并进入投稿包", "Save and continue to package")) : text("进入投稿包", "Continue to package")} disabled={saving} onClick={changedCount > 0 ? onSave : onContinue} />
   </>;
 }
 
@@ -1562,11 +2001,15 @@ function submissionElementGroupLabel(group: string, locale: Locale) {
   return localize(locale, label[0], label[1]);
 }
 
-function EvidencePane({ stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, attestation = null, submission = null, submissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory = null, selectedVersion = null, versionComparison = null, isComparingVersions = false }: PaneProps) {
+function EvidencePane({ stage, workspace, structureReport, readinessReport, knowledgeBodySnapshot = null, knowledgeBodyRecord = null, attestation = null, submission = null, submissionExport = null, submissionMaterials = null, submissionTargetSelection = null, submissionTargetPlan = null, journalRequirementSnapshots = [], targetSubmissionExport = null, ruleCatalog = [], selectedRulePackIds = [], submissionElementCatalog = null, revisionDraft = null, revisionValues = {}, revisionResult = null, versionHistory = null, selectedVersion = null, versionComparison = null, isComparingVersions = false }: PaneProps) {
   const { locale, text } = useI18n();
   if (stage === "source") return <EvidenceFrame kicker={text("只读版本证据", "Read-only version evidence")} title={text("当前稿件身份", "Current manuscript identity")}><div className="document-sheet source-sheet"><span className="document-type">{workspace.manuscript.extension.toUpperCase()}</span><p className="document-title">{workspace.manuscript.name}</p><dl><div><dt>{text("内容指纹", "Content fingerprint")}</dt><dd>{workspace.contentHash}</dd></div><div><dt>{text("当前版本", "Current version")}</dt><dd>v{workspace.snapshotVersion}</dd></div><div><dt>{text("状态", "Status")}</dt><dd>{text("不可变；历史不会被覆盖", "Immutable; history is never overwritten")}</dd></div></dl></div></EvidenceFrame>;
+  if (stage === "materials") return <EvidenceFrame kicker={text("本地资料目录", "Local materials catalog")} title={text("出版社文件与内部记录分离", "Publisher files separated from internal records")}><div className="document-sheet source-sheet"><span className="document-type">MATERIALS</span><p className="document-title">{submissionMaterials?.materials.length ?? 0} {text("个附加文件", "supporting files")}</p><dl><div><dt>{text("必需项", "Required items")}</dt><dd>{submissionMaterials?.requiredComplete ? text("已齐", "Complete") : text("待补", "Incomplete")}</dd></div><div><dt>{text("目标期刊", "Target journal")}</dt><dd>{submissionTargetSelection ? (locale === "en" ? submissionTargetSelection.nameEn : submissionTargetSelection.name) : text("未选择", "Not selected")}</dd></div><div><dt>{text("外部传输", "External transmission")}</dt><dd>{text("未发生", "None")}</dd></div></dl><small>{text("文件已复制到当前论文的本地资料目录，源文件不会被移动。", "Files are copied into this manuscript's local materials directory; originals are not moved.")}</small></div></EvidenceFrame>;
   if (stage === "versions") return <VersionEvidence workspace={workspace} history={versionHistory} selectedVersion={selectedVersion} comparison={versionComparison} comparing={isComparingVersions} />;
-  if (stage === "journals") return <EvidenceFrame kicker={text("目录与算法证据", "Catalog and algorithm evidence")} title={text("公开来源、本地评分", "Public sources, local scoring")}><div className="document-sheet source-sheet"><span className="document-type">LOCAL FIT V1.2</span><p className="document-title">computer-ai-2025.1</p><dl><div><dt>{text("国内目录", "Domestic directory")}</dt><dd>CCF 2025 · T1/T2/T3</dd></div><div><dt>{text("国际目录", "International directory")}</dt><dd>CCF AI · A/B/C</dd></div><div><dt>{text("机构评价目录", "Institution evaluation directory")}</dt><dd>{text("只参与后台资格判断，不公开原始目录内容", "Used only for backend eligibility checks; raw directory data is not exposed")}</dd></div><div><dt>{text("评分权重", "Weights")}</dt><dd>{text("校规 24 · 主题 18 · 专业 5 · 类型 8 · 完备度 10 · 语言 6 · 策略 8 · 用途 8 · 时间 10 · 开放获取 3", "Institution 24 · Topic 18 · Specialty 5 · Type 8 · Readiness 10 · Language 6 · Strategy 8 · Purpose 8 · Time 10 · OA 3")}</dd></div><div><dt>{text("学校规则", "Institution rules")}</dt><dd>{text("模型只能抽取客户提供的正式原文；目录条件核验后再计分", "The model extracts only supplied official text; directory conditions are scored only after verification")}</dd></div><div><dt>{text("身份公平", "Identity fairness")}</dt><dd>{text("学校排名和导师名气不参与声誉打分", "Institution rank and adviser fame are never prestige scores")}</dd></div><div><dt>{text("论文实力", "Scholarly strength")}</dt><dd>{text("当前仅有结构完备度；创新与证据强度等待 PWC 版本化审核", "Currently structural readiness only; innovation and evidence strength await versioned PWC review")}</dd></div><div><dt>{text("外部传输", "External transmission")}</dt><dd>{text("每次模型抽取单独确认、出口脱敏并审计", "Each extraction requires consent, boundary redaction, and audit")}</dd></div></dl><small>{text("当前计算的是最适合的投稿准备组合，不是录用概率。进入更高层级的学术判断必须引用可追溯的 PWC 审核档案。", "This computes the best current-fit submission-preparation set, not acceptance odds. Higher-tier scholarly judgments must cite a traceable PWC review profile.")}</small></div></EvidenceFrame>;
+  if (stage === "journals") {
+    const currentRequirements = submissionTargetSelection ? journalRequirementSnapshots.find((snapshot) => snapshot.targetSelectionId === submissionTargetSelection.selectionId) ?? null : null;
+    return <EvidenceFrame kicker={text("候选与来源状态", "Shortlist and source status")} title={text("本地期刊推荐", "Local journal recommendations")}><div className="document-sheet source-sheet"><span className="document-type">JOURNAL ROUTES</span><p className="document-title">{submissionTargetSelection ? (locale === "en" ? submissionTargetSelection.nameEn : submissionTargetSelection.name) : "ManuscriptDock"}</p><dl><div><dt>{text("候选输出", "Shortlist output")}</dt><dd>{text("国内 8 家、国外 8 家 · 各含冲刺 2、匹配 3、保底 3", "8 domestic and 8 international · each with 2 reach, 3 match, and 3 safeguard")}</dd></div><div><dt>{text("投稿路线", "Submission routes")}</dt><dd>{submissionTargetSelection ? text(`1 条主线 · ${submissionTargetPlan?.backups.length ?? 0} 条备选支线`, `1 primary · ${submissionTargetPlan?.backups.length ?? 0} backup route(s)`) : text("尚未选择主线", "No primary selected")}</dd></div><div><dt>{text("主线官方要求", "Primary official requirements")}</dt><dd>{currentRequirements ? text(`${currentRequirements.sources.length} 个来源 · ${currentRequirements.requirements.length} 项要求`, `${currentRequirements.sources.length} source(s) · ${currentRequirements.requirements.length} requirement(s)`) : text("尚未取得", "Not captured")}</dd></div><div><dt>{text("外部传输", "External transmission")}</dt><dd>{text("推荐不联网；官网读取与模型抽取均需逐次确认", "Recommendations stay offline; site fetches and model extraction require per-call consent")}</dd></div></dl>{currentRequirements?.sources.length ? <ul className="provenance-list">{currentRequirements.sources.map((source) => <li key={source.contentHash}><span><Icon name={source.officialHostMatched ? "check" : "warning"} /></span><div><strong>{source.title}</strong><p>{source.url}</p><code>{source.contentHash}</code></div></li>)}</ul> : null}<small>{text("要求快照保留来源、时间与内容指纹；自动抽取不替代投稿前人工核对。", "Requirement snapshots retain source, time, and fingerprint; extraction does not replace final author verification.")}</small></div></EvidenceFrame>;
+  }
   if (stage === "check" && !readinessReport) return <EvidenceFrame kicker={text("结构证据", "Structure evidence")} title={text("论文轮廓", "Manuscript outline")}>{structureReport ? <div className="document-sheet"><p className="document-overline">DETERMINISTIC EXTRACTION · V{structureReport.analysisVersion}</p><p className="document-title">{structureReport.title ?? text("未检测到论文标题", "No manuscript title detected")}</p>{structureReport.authors.length > 0 ? <p className="document-authors">{structureReport.authors.join(" · ")}</p> : null}<p className="document-meta">{structureReport.pageCount ? `${structureReport.pageCount} ${text("页", "pages")}` : `${structureReport.wordCount} ${text("词元", "words")}`} · {text("源快照", "Source snapshot")} v{structureReport.sourceSnapshotVersion}</p>{structureReport.abstractText ? <section className="abstract-evidence"><h3>{text("识别到的摘要", "Detected abstract")}</h3><p>{structureReport.abstractText}</p></section> : null}{structureReport.sections.length > 0 ? <ol className="section-outline" aria-label={text("检测到的章节", "Detected sections")}>{structureReport.sections.slice(0, 16).map((section, index) => <li key={`${section.level}-${section.heading}-${index}`} style={{ "--section-level": section.level } as CSSProperties}><span>{String(index + 1).padStart(2, "0")}</span><strong>{section.heading}</strong></li>)}</ol> : <EvidenceEmpty copy={text("没有形成可靠章节轮廓，请结合警告人工确认。", "No reliable section outline was formed; review warnings and confirm manually.")} />}</div> : <EvidenceEmpty copy={text("完成本地结构提取后，这里显示标题、作者、摘要和章节证据。", "After local extraction, title, author, abstract, and section evidence appears here.")} />}</EvidenceFrame>;
   if (stage === "check") {
     const selected = ruleCatalog.filter((item) => selectedRulePackIds.includes(item.id));
@@ -1577,8 +2020,8 @@ function EvidencePane({ stage, workspace, structureReport, readinessReport, know
     return <EvidenceFrame kicker={text("修订证据", "Revision evidence")} title={pending.length > 0 ? text("修改前后", "Before and after") : text("要素来源与完整性", "Element sources and integrity")}>{pending.length > 0 ? <><div className="revision-diff-meta"><strong>{revisionResult ? `v${revisionResult.baseVersion} → v${revisionResult.outputVersion}` : text(`基于 v${revisionDraft?.baseVersion}`, `Based on v${revisionDraft?.baseVersion}`)}</strong><span>{revisionResult ? text("已保存", "Saved") : text("保存前预览", "Pre-save preview")}</span></div><ol className="revision-diff-list">{pending.map((change) => <li key={change.field}><strong>{revisionDraft?.fields.find((field) => field.field === change.field)?.[locale === "en" ? "labelEn" : "label"] ?? change.field}</strong><div><span>{change.before}</span><Icon name="arrow" /><span>{change.after}</span></div></li>)}</ol></> : submissionElementCatalog?.rulePacks.length ? <ul className="provenance-list">{submissionElementCatalog.rulePacks.map((pack) => <li key={pack.id}><span><Icon name="check" /></span><div><strong>{locale === "en" ? pack.sourceLabelEn : pack.sourceLabel}</strong><p>v{pack.version} · {text("完整性已校验", "Integrity verified")}</p></div></li>)}</ul> : <EvidenceEmpty copy={text("修改字段后，这里会显示保存前差异。", "Edit a field to preview the difference before saving.")} />}</EvidenceFrame>;
   }
   if (stage === "attestation") return <EvidenceFrame kicker={text("存证证据", "Attestation evidence")} title={attestation ? text("不可变本地存证", "Immutable local attestation") : text("将要绑定的对象", "Objects to be bound")}>{attestation ? <LifecycleEvidence id={attestation.attestationId} hash={attestation.recordHash} items={[[text("稿件版本", "Manuscript version"), `v${attestation.manuscriptVersion}`], [text("检查报告", "Check report"), attestation.readinessReportId], [text("输出快照", "Output snapshot"), `v${attestation.readinessOutputSnapshotVersion}`]]} /> : readinessReport ? <div className="package-preview"><span>LOCAL ATTESTATION</span><h2>v{workspace.snapshotVersion}</h2><p>{outcomeLabel(readinessReport.outcome, locale)}</p><dl><div><dt>{text("稿件指纹", "Manuscript fingerprint")}</dt><dd>{workspace.contentHash.slice(0, 16)}</dd></div><div><dt>{text("检查报告", "Check report")}</dt><dd>{readinessReport.reportId.slice(0, 16)}</dd></div></dl><small>{text("仅本机 · 作者确认后创建", "Local only · Created after author confirmation")}</small></div> : <EvidenceEmpty copy={text("完成当前版本检查后才能创建存证。", "Complete checks for the current version before attestation.")} />}</EvidenceFrame>;
-  if (stage === "submission") return <EvidenceFrame kicker={text("投稿证据", "Submission evidence")} title={submission ? text("已登记投稿", "Submission recorded") : text("投稿交付包", "Submission handoff")}>{submission ? <LifecycleEvidence id={submission.submissionId} hash={submission.recordHash} items={[[text("目标", "Target"), submission.target], [text("回执", "Receipt"), submission.receipt ?? text("未填写", "Not provided")], [text("绑定存证", "Bound attestation"), submission.attestationId]]} /> : <div className="package-preview"><span>MANUSCRIPTDOCK</span><h2>{structureReport?.title ?? workspace.manuscript.name}</h2><p>{text("作者控制的投稿交付", "Author-controlled submission handoff")}</p><dl><div><dt>{text("稿件版本", "Manuscript version")}</dt><dd>v{workspace.snapshotVersion}</dd></div><div><dt>{text("存证", "Attestation")}</dt><dd>{attestation?.attestationId.slice(0, 12) ?? text("未完成", "Not ready")}</dd></div><div><dt>{text("导出状态", "Export status")}</dt><dd>{submissionExport ? submissionExport.packageName : text("尚未导出", "Not exported")}</dd></div></dl><small>{text("导出不等于已投稿", "Export does not mean submitted")}</small></div>}</EvidenceFrame>;
-  if (stage === "knowledge") return <><EvidenceFrame kicker={text("对象与声明证据", "Object and assertion evidence")} title={knowledgeBodyRecord ? text("已固化知识体", "Finalized knowledge body") : text("知识体预览", "Knowledge-body preview")}><KnowledgeSpatialMap workspace={workspace} structureReport={structureReport} readinessReport={readinessReport} knowledgeBodySnapshot={knowledgeBodySnapshot} /></EvidenceFrame><KnowledgeDialoguePanel workspace={workspace} knowledgeBodyRecord={knowledgeBodyRecord} /></>;
+  if (stage === "submission") return <EvidenceFrame kicker={text("投稿证据", "Submission evidence")} title={submission ? text("已登记投稿", "Submission recorded") : text("出版社投稿包", "Publisher submission package")}>{submission ? <LifecycleEvidence id={submission.submissionId} hash={submission.recordHash} items={[[text("目标", "Target"), submission.target], [text("回执", "Receipt"), submission.receipt ?? text("未填写", "Not provided")], [text("自动存证", "Automatic attestation"), submission.attestationId]]} /> : <div className="package-preview"><span>MANUSCRIPTDOCK</span><h2>{submissionTargetSelection ? (locale === "en" ? submissionTargetSelection.nameEn : submissionTargetSelection.name) : text("尚未选择目标", "No target selected")}</h2><p>{text("作者控制的投稿资料交付", "Author-controlled publisher handoff")}</p><dl><div><dt>{text("稿件版本", "Manuscript version")}</dt><dd>v{workspace.snapshotVersion}</dd></div><div><dt>{text("附加资料", "Supporting files")}</dt><dd>{submissionMaterials?.materials.length ?? 0}</dd></div><div><dt>{text("导出状态", "Export status")}</dt><dd>{targetSubmissionExport ? targetSubmissionExport.packageName : text("尚未导出", "Not exported")}</dd></div></dl><small>{text("submission 供出版社；records 仅供本地留档。导出不等于已投稿。", "submission is publisher-facing; records is local-only. Export does not mean submitted.")}</small></div>}</EvidenceFrame>;
+  if (stage === "knowledge") return <EvidenceFrame kicker={text("知识体依据", "Knowledge-body evidence")} title={knowledgeBodyRecord ? text("已固化对象与来源", "Finalized objects and sources") : text("候选对象与来源", "Candidate objects and sources")}><div className="document-sheet source-sheet"><span className="document-type">KNOWLEDGE BODY</span><p className="document-title">{knowledgeBodySnapshot?.knowledgeBodyId ?? workspace.manuscript.name}</p><dl><div><dt>{text("快照", "Snapshot")}</dt><dd>S{knowledgeBodySnapshot?.snapshotVersion ?? workspace.snapshotVersion}</dd></div><div><dt>{text("状态", "Status")}</dt><dd>{knowledgeBodyRecord ? text("作者确认并固化", "Author-confirmed and finalized") : text("本地提取候选", "Locally extracted candidates")}</dd></div><div><dt>{text("记录指纹", "Record fingerprint")}</dt><dd>{(knowledgeBodyRecord?.recordHash ?? workspace.contentHash).slice(0, 16)}</dd></div><div><dt>{text("外部传输", "External transmission")}</dt><dd>{text("默认未发生；AI 问答逐次授权", "None by default; AI questions require per-call consent")}</dd></div></dl><small>{text("动态图、节点交互和 AI 问答已放回知识体主界面；这里仅保留可审计依据。", "The dynamic map, node interaction, and AI dialogue are available in the main knowledge-body view; this pane retains auditable evidence only.")}</small></div></EvidenceFrame>;
   return <EvidenceFrame kicker={text("流程证据", "Lifecycle evidence")} title={text("等待当前步骤产物", "Waiting for this stage's output")}><EvidenceEmpty copy={text("完成操作后，这里显示不可变证据和来源。", "Complete the action to see immutable evidence and provenance here.")} /></EvidenceFrame>;
 }
 
@@ -1607,7 +2050,7 @@ function VersionChangeList({ title, items, empty, tone }: { title: string; items
 }
 
 function PanelHeading({ kicker, title, copy }: { kicker: string; title: string; copy: string }) { return <header className="panel-heading"><p>{kicker}</p><h2>{title}</h2><span>{copy}</span></header>; }
-function Metric({ label, value }: { label: string; value: number }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
+function Metric({ label, value }: { label: string; value: ReactNode }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 function Presence({ label, present }: { label: string; present: boolean }) { const { text } = useI18n(); return <li data-present={present}><Icon name={present ? "check" : "warning"} /><span>{label}</span><strong>{present ? text("已检测", "Detected") : text("待确认", "Confirm")}</strong></li>; }
 function BoundaryNote({ title, copy }: { title: string; copy: string }) { return <div className="boundary-note"><Icon name="lock" /><div><strong>{title}</strong><p>{copy}</p></div></div>; }
 function PaneAction({ label, title, copy, buttonLabel, disabled = false, onClick }: { label: string; title: string; copy: string; buttonLabel: string; disabled?: boolean; onClick: () => void }) { return <div className="pane-action"><div><span>{label}</span><h3>{title}</h3><p>{copy}</p></div><button className="primary-button" type="button" disabled={disabled} onClick={onClick}>{buttonLabel}<Icon name="arrow" /></button></div>; }
@@ -1651,9 +2094,81 @@ function conciseKnowledgeText(value: string, limit = 128) {
   return normalized.length > limit ? `${normalized.slice(0, limit).trimEnd()}…` : normalized;
 }
 
-function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<PaneProps, "stage">) {
+function KnowledgePointCloud({ density }: { density: number }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const pointCount = Math.max(28, Math.min(52, 28 + density * 4));
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const points = Array.from(svg.querySelectorAll<SVGCircleElement>("circle"));
+    const motionPreference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const seeds = points.map((_, index) => {
+      const longitude = index * 2.399963229728653;
+      const latitude = Math.asin(-1 + (2 * (index + 0.5)) / points.length);
+      return {
+        x: Math.cos(latitude) * Math.cos(longitude),
+        y: Math.sin(latitude),
+        z: Math.cos(latitude) * Math.sin(longitude),
+      };
+    });
+    let frameId: number | null = null;
+
+    const draw = (angle: number) => {
+      const cosY = Math.cos(angle);
+      const sinY = Math.sin(angle);
+      const tilt = -0.26 + Math.sin(angle * 0.7) * 0.05;
+      const cosX = Math.cos(tilt);
+      const sinX = Math.sin(tilt);
+      seeds.forEach((seed, index) => {
+        const rotatedX = seed.x * cosY + seed.z * sinY;
+        const rotatedZ = -seed.x * sinY + seed.z * cosY;
+        const rotatedY = seed.y * cosX - rotatedZ * sinX;
+        const depth = seed.y * sinX + rotatedZ * cosX;
+        const perspective = 3.8 / (3.8 - depth);
+        const point = points[index];
+        point.setAttribute("cx", (300 + rotatedX * 176 * perspective).toFixed(2));
+        point.setAttribute("cy", (230 + rotatedY * 176 * perspective).toFixed(2));
+        point.setAttribute("r", (1.45 + (depth + 1) * 0.9).toFixed(2));
+        point.style.opacity = String(Math.max(0.16, Math.min(0.72, 0.38 + depth * 0.24)));
+      });
+    };
+
+    const start = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      if (motionPreference?.matches || typeof window.requestAnimationFrame !== "function") {
+        draw(0.7);
+        frameId = null;
+        return;
+      }
+      const startedAt = window.performance.now();
+      let lastDrawAt = startedAt;
+      const animate = (time: number) => {
+        if (time - lastDrawAt >= 40) {
+          draw(((time - startedAt) / 36000) * Math.PI * 2);
+          lastDrawAt = time;
+        }
+        frameId = window.requestAnimationFrame(animate);
+      };
+      draw(0);
+      frameId = window.requestAnimationFrame(animate);
+    };
+
+    start();
+    motionPreference?.addEventListener?.("change", start);
+    return () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      motionPreference?.removeEventListener?.("change", start);
+    };
+  }, [pointCount]);
+
+  return <svg ref={svgRef} className="knowledge-point-cloud" viewBox="0 0 600 460" preserveAspectRatio="none" aria-hidden="true">{Array.from({ length: pointCount }, (_, index) => <circle key={index} cx="300" cy="230" r="2" />)}</svg>;
+}
+
+function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: { workspace: WorkspaceSummary; knowledgeBodySnapshot?: AcademicKnowledgeBodySnapshot | null }) {
   const { locale, text } = useI18n();
   const [view, setView] = useState<KnowledgeView>("single");
+  const [selectedLayerKey, setSelectedLayerKey] = useState("knowledge");
   const network = knowledgeBodySnapshot?.network;
   const bodyCount = network?.bodies.length ?? 1;
   const availableView = view === "pair" ? bodyCount >= 2 : view === "network" ? bodyCount >= 3 : true;
@@ -1684,8 +2199,10 @@ function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<P
     { key: "runtime", label: text("交互与执行运行时", "Interaction & runtime"), version: "RuntimeProfile · v1", state: text("可替换模型 · 单次授权", "Replaceable model · Per-call consent"), complete: architecture !== undefined },
     { key: "trust", label: text("验证、权利与信誉", "Validation, rights & reputation"), version: `Reputation · v${architecture?.validationRightsAndReputation.reputationRecord.version ?? 0}`, state: aiReview ? text(`AIReview v${aiReview.version}${previousReviewVersions ? ` · 历史 ${previousReviewVersions}` : ""}`, `AIReview v${aiReview.version}${previousReviewVersions ? ` · History ${previousReviewVersions}` : ""}`) : text("Rights v1 · 审核待建立", "Rights v1 · Review pending"), complete: architecture !== undefined },
   ];
+  const selectedLayer = layers.find((layer) => layer.key === selectedLayerKey) ?? layers[1];
+  const establishedPointCount = semanticElements.reduce((count, item) => count + (item.element?.candidates.length ?? 0), 0);
   return (
-    <div className="knowledge-space">
+    <section className="knowledge-space" aria-label={text("动态知识点云与关联网络", "Dynamic knowledge point cloud and relationship network")}>
       <div className="knowledge-view-switch" role="tablist" aria-label={text("知识体网络层级", "Knowledge-network level")}>
         {(["single", "pair", "network"] as KnowledgeView[]).map((item, index) => {
           const enabled = item === "single" || (item === "pair" ? bodyCount >= 2 : bodyCount >= 3);
@@ -1694,9 +2211,10 @@ function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<P
         })}
       </div>
       {view === "single" ? (
-        <div className="knowledge-space-visual knowledge-service-space" role="img" aria-label={text(`单篇论文知识体空间视图。稳定 KnowledgeBody 身份包含不可变内容快照 S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}，中心是 Claim v${claim?.claim.version ?? 1} 十二面体。五条空间连接分别指向身份与版本、知识边界与证据、能力契约、可替换交互运行时，以及独立变化的验证权利与信誉记录。`, `Single-paper KnowledgeBody spatial view. A stable KnowledgeBody identity contains immutable content snapshot S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}, centered on a Claim v${claim?.claim.version ?? 1} dodecahedron. Five spatial links lead to identity and version, knowledge boundary and evidence, capability contracts, a replaceable interaction runtime, and independently evolving validation, rights, and reputation records.`)}>
+        <div className="knowledge-space-visual knowledge-service-space" aria-label={text(`单篇论文动态知识点云。稳定 KnowledgeBody 身份包含不可变内容快照 S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}，中心是 Claim v${claim?.claim.version ?? 1} 十二面体；可选择五类节点查看详情。`, `Dynamic single-paper knowledge point cloud. A stable KnowledgeBody identity contains immutable content snapshot S${objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}, centered on a Claim v${claim?.claim.version ?? 1} dodecahedron; select any of five nodes for details.`)}>
           <span className="knowledge-snapshot-label" aria-hidden="true">KnowledgeBody · {text("稳定身份", "stable identity")} · Snapshot S{objects?.knowledgeBodySnapshot.version ?? knowledgeBodySnapshot?.snapshotVersion ?? 1}</span>
           <span className="knowledge-content-boundary" aria-hidden="true">{text("固定内容快照", "Immutable content snapshot")}</span>
+          <KnowledgePointCloud density={establishedPointCount} />
           <svg className="claim-connections" viewBox="0 0 600 460" preserveAspectRatio="none" aria-hidden="true">
             <line x1="300" y1="230" x2="300" y2="68" />
             <line x1="300" y1="230" x2="112" y2="160" />
@@ -1709,12 +2227,13 @@ function KnowledgeSpatialMap({ workspace, knowledgeBodySnapshot = null }: Omit<P
             <ClaimDodecahedron />
             <span className="claim-core"><strong>Claim · v{claim?.claim.version ?? 1}</strong><small>{claimSummary?.element?.state === "established" ? text("作者已确认", "Author confirmed") : text("提取候选 · 待确认", "Extracted candidate · Review pending")}</small></span>
           </div>
-          {layers.map((layer) => <div className={`service-layer-node service-layer-${layer.key}`} data-complete={layer.complete} key={layer.key} aria-hidden="true"><span className="service-layer-sphere"><strong>{layer.label}</strong><small>{layer.version}</small><em title={layer.state}>{layer.state}</em></span></div>)}
+          {layers.map((layer) => <button type="button" className={`service-layer-node service-layer-${layer.key}`} data-complete={layer.complete} data-selected={selectedLayer.key === layer.key} key={layer.key} aria-pressed={selectedLayer.key === layer.key} onClick={() => setSelectedLayerKey(layer.key)}><span className="service-layer-sphere"><strong>{layer.label}</strong><small>{layer.version}</small><em title={layer.state}>{layer.state}</em></span></button>)}
         </div>
       ) : availableView && network ? <KnowledgeNetworkCanvas bodies={view === "pair" ? network.bodies.slice(0, 2) : network.bodies} assertions={network.assertions} view={view} /> : null}
+      {view === "single" ? <div className="knowledge-layer-inspector" role="status" aria-live="polite"><span>{text("当前节点", "Selected node")}</span><strong>{selectedLayer.label} · {selectedLayer.version}</strong><p>{selectedLayer.state}</p></div> : null}
       {view === "single" ? <section className="knowledge-summary-legend" aria-labelledby="knowledge-summary-heading"><header><div><span>{text("当前论文的解构知识", "Decomposed knowledge from this manuscript")}</span><h3 id="knowledge-summary-heading">{text("知识摘要与来源", "Knowledge summaries and sources")}</h3></div><strong>{text("逐项可追溯", "Traceable by item")}</strong></header><ol>{summaries.map((item) => <li key={item.key} data-state={item.element?.state ?? "pending"}><div className="knowledge-summary-label"><strong>{item.label}</strong><span>{item.element?.state === "established" ? text("作者已确认", "Confirmed") : item.candidate ? text("提取候选", "Candidate") : text("未建立", "Pending")}</span></div><p>{item.summary}</p>{item.candidate ? <small>{item.candidate.sourceLabel}{item.candidate.sourceFragmentId ? ` · ${item.candidate.sourceFragmentId}` : ""} · {item.candidate.confidencePercent}%</small> : null}</li>)}</ol></section> : null}
       <p className="knowledge-space-note">{view === "single" ? text("单一知识体是具有稳定身份、明确知识边界、可验证证据、能力契约和可替换运行时的知识服务单元。内容快照不可变；信誉记录可独立更新；v0 表示尚未正式建立。", "A single KnowledgeBody is a knowledge-service unit with stable identity, explicit boundaries, verifiable evidence, capability contracts, and a replaceable runtime. Content snapshots are immutable; reputation records evolve independently; v0 means not yet established.") : text("圆形边界表示知识体自身边界；绿色菱形表示带依据、状态和版本的声明对象。相似度不会自动成为关系。", "Circular boundaries preserve each knowledge body; green diamonds are versioned assertions with basis and status. Similarity never becomes a relationship automatically.")}</p>
-    </div>
+    </section>
   );
 }
 

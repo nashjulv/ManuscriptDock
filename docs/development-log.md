@@ -1,5 +1,154 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.22 target-led publisher package workflow
+
+- Reordered the five primary tasks to Overview, Target Journal, Materials, Check & Revise, and
+  Package. The selected publisher and its current, source-backed requirements now determine the
+  materials checklist before checks or package export.
+- Removed version history from the required revision path. A saved structured revision now runs
+  extraction and checks, then proceeds directly to the package task; version history, local
+  attestation, and the personal knowledge body remain available as advanced options.
+- Bound manual submission records to the exact target-selection record and publisher. Changing or
+  promoting a target invalidates downstream readiness, package, and current-submission state.
+- Enforced target currency, official-requirement freshness, current checks, and required-material
+  completeness inside the Rust boundary. The WebView can no longer export a publisher package by
+  bypassing disabled controls.
+- Prevented recommendations from an earlier manuscript version from being selected, and preserved
+  unsaved knowledge-body review decisions when revisiting the same decomposition.
+- Corrected advanced navigation state and retry behavior, while preserving the gray/green visual
+  system, PingFang typography, local attestation, dynamic knowledge map, and author-controlled AI.
+
+## 2026-09-03 — V0.21 direct package handoff and restored knowledge workspace
+
+- Removed the circular route from version history back to target selection and checks. After checks
+  and revisions, the author now confirms the current immutable version and proceeds directly to the
+  submission package.
+- Moved external revision import and safe restore into an optional branch. Local attestation remains
+  available under advanced records but is not a package-export gate.
+- Restored the knowledge-body spatial experience to the main operation pane instead of hiding it in
+  evidence: a deterministic dynamic point cloud surrounds the Claim object, and all five service-layer
+  nodes are keyboard-operable controls with an on-canvas detail inspector.
+- Restored the author-controlled AI dialogue panel directly below the knowledge map. Candidate and
+  finalized knowledge states now share the same visible spatial language, while AI remains disabled
+  until a valid snapshot exists.
+- Preserved the existing PingFang gray/green visual system and added reduced-motion behavior for the
+  point cloud and Claim projection.
+
+## 2026-09-03 — V0.20 official requirements and backup submission routes
+
+- Added a one-primary/many-backup submission plan. Backup branches can preserve independent
+  preparation evidence, while promotion requires an explicit prior-route outcome and keeps an
+  immutable transition record.
+- Added per-target official-requirement snapshots with source URLs, page hashes, timestamps,
+  90-day freshness, short evidence excerpts, deterministic requirement categories, and local
+  record hashes.
+- Added an author-confirmed network command that only reads public HTTPS pages on the selected
+  journal's site, blocks private-network and cross-site redirects, and enforces page/count limits.
+- Added a no-network fallback for author-pasted official guide text. Pages without identifiable
+  evidence stay in manual-review status and never become a journal-specific checklist.
+- Added requirement evidence and route controls to the Target Journal task while preserving the
+  existing visual language, readable focus states, and progressive disclosure.
+
+## 2026-09-02 — V0.19 task-oriented submission workspace
+
+- Replaced the exposed eight-stage rail with five author-facing tasks: Overview, Materials, Target
+  Journal, Check & Revise, and Package. Version, attestation, and knowledge-body records remain
+  available under progressive disclosure.
+- Added a per-manuscript local submission-material catalog with native file selection, validation,
+  hashing, deduplication, read-only copies, and a dynamic completeness checklist.
+- Added explicit selection of a recommendation as the manuscript's persisted submission target.
+- Added a publisher-facing target package with strict `submission/` and local-only `records/`
+  separation. The former review-report export is now labeled as an internal review archive.
+- Removed local attestation as a package-export gate; recording an author-confirmed real submission
+  creates the attestation automatically when needed.
+- Kept the existing gray/green visual language and PingFang font family while improving navigation,
+  hierarchy, accessible controls, evidence-on-demand, and responsive behavior.
+
+## 2026-09-02 — V0.18 recommendation archive and managed workspace copies
+
+- Added a safe read API for persisted journal recommendation runs, including compatibility with
+  the previous single-portfolio record shape.
+- The Journal Match stage now restores the latest record and exposes versioned history with the
+  journals' publisher names while continuing to omit private ranking internals from the WebView.
+- The landing workspace explains the application-managed default library location.
+- Every active or archived manuscript workspace can be saved as a complete, atomic local copy via
+  a native folder picker. The source manuscript and default library remain in place.
+- Added Rust and React coverage for recommendation recovery, publisher retention, and full-workspace
+  copy export.
+
+## 2026-09-02 — V0.17 domestic and international recommendation portfolios
+
+- Split the recommendation result into independent domestic and international portfolios. Each
+  region targets 2 reach, 3 match, and 3 safeguard journals, for up to 16 unique candidates.
+- Preserved verified eligibility as a hard gate. Candidates blocked by verified institution rules
+  are never used to fill a quota; the interface reports the actual count when eligible supply is short.
+- Added region-level result sections while keeping ranking scores, component weights, thresholds,
+  and private reasons outside the WebView projection.
+- Advanced the Rust recommendation record to schema v5 and the internal algorithm record to
+  `local-fit-v1.4`.
+
+### Verification
+
+- Tests cover both 2/3/3 regional portfolios, global uniqueness, correct region membership,
+  deterministic results, and exclusion of candidates blocked by verified rules.
+
+## 2026-09-02 — V0.16 tiered journal recommendation portfolio
+
+- Replaced the domestic/international quota with a fixed portfolio of 2 reach, 3 match, and 3
+  safeguard journals. Region remains visible on each candidate and no journal may appear twice.
+- Excluded candidates blocked by verified institution rules from the main portfolio and preserved
+  deterministic, versioned recommendation records.
+- Added plain-language group descriptions and retained the boundary that the groups are planning
+  aids, not acceptance probabilities, speed promises, or journal commitments.
+- Audited all observable manuscript, author-goal, institution-rule, directory, and enriched journal
+  factors in the ignored private method archive. Names, institution prestige, and advisor reputation
+  do not influence academic-fit ranking; verified institution requirements can affect eligibility.
+
+### Verification
+
+- Rust recommendation schema advanced to v4 and the internal algorithm record to `local-fit-v1.3`.
+- Unit coverage verifies the 2/3/3 counts, uniqueness, deterministic output, and verified-rule gates.
+
+## 2026-09-02 — V0.15 private journal-ranking boundary and complete Emerging directory
+
+- Replaced the incomplete 2026 Emerging Partition source with the user-provided complete workbook.
+  The prior source remains in local history as inactive; the 2025 CAS and JCR source remains active.
+- Added support for the complete workbook's subject, journal title, ISSN, EISSN, and partition layout,
+  including partition values containing whitespace before the Chinese unit.
+- Added edition-aware replacement for the 2026 Emerging source so a complete snapshot does not remain
+  active alongside an older partial snapshot with a different filename.
+- Introduced a narrow Rust-to-WebView journal result projection. The interface now receives candidates,
+  directory evidence, verification states, and planning status, but not internal scoring or ranking fields.
+- Removed ranking internals from the recommendation interface and public documentation. The product
+  manual documents only user-facing capabilities, data boundaries, output, and limitations.
+- Established a local confidential method archive under the ignored `private/` directory. It is not a
+  Tauri resource and does not enter Git or installation packages.
+
+### Data verification
+
+- Imported 22,281 complete Emerging Partition rows representing 22,273 distinct normalized journal
+  titles; all rows have a partition value.
+- Active local directory now contains 66,302 records across CAS, JCR, and Emerging schemes, with
+  fingerprint `bc71c55c5d924464`.
+
+## 2026-09-02 — V0.14 offline journal directory
+
+- Added a local, versioned journal-directory store that imports user-selected XLSX files without
+  evaluating formulas, macros, or external workbook links.
+- Imported CAS partition, Clarivate JCR, and Emerging Partition rows as separate schemes with source
+  file hashes, release years, cached-value provenance, replacement-on-resync, and atomic writes.
+- Connected the local catalog to journal matching so matching candidates show offline partition
+  evidence and verified institution rules can use available CAS data without a network lookup.
+- Added an in-app import and status card. Raw licensed workbooks and directory data remain in the
+  user's application-data directory and are not bundled into the application or committed.
+
+### Verification
+
+- Parsed the supplied 2025 and 2026 workbooks into 45,932 records representing 22,545 distinct
+  normalized journal names; preserved all three schemes separately.
+- Confirmed that 22,249 cached formula results were read without executing formulas or external
+  links and that re-importing identical sources is idempotent.
+
 ## 2026-09-01 — V0.13 local source identity and version visibility
 
 - Added schema v4 `SourceIdentityVersion` to preserve source-declared title, authors, affiliations,
@@ -132,18 +281,16 @@ run before each commit. It contains no real manuscripts or identifiable review m
 - Made every profile and preference change invalidate the visible result and produce a newly bound
   run. Author name changes attribution only; no author-identity or institutional-prestige scoring is
   permitted.
-- Added specialty, purpose, and deadline feasibility to deterministic scoring. Deadline feasibility
-  measures ManuscriptDock's internal submission-preparation allowance and does not claim to predict
-  review, acceptance, publication, or indexing dates.
-- Added the PWC institution-rule evidence contract and reserved the highest single weight, 24%, for
-  verified official rules. Missing or candidate-only sources are excluded and force a clearly marked
-  provisional shortlist; verified eligibility rules can block a candidate without hiding it.
+- Added specialty, purpose, and deadline context to journal matching. Deadline status supports
+  submission preparation and does not claim to predict review, acceptance, publication, or indexing dates.
+- Added the PWC institution-rule evidence contract. Missing or candidate-only sources force a clearly
+  marked provisional shortlist; verified eligibility rules can identify a conflicting candidate.
 - Defined the future discovery boundary: search only after author authorization, prioritize official
   institution/graduate-school/research-office/faculty pages, never treat search snippets as evidence,
   and require source, scope, validity, original excerpt, verification, and rule-set version before
   scoring.
 - Reworked the bilingual form and result cards with visible labels, 44px controls, narrow-screen
-  reflow, institution-rule status, remaining days, and specialty/purpose/timing components.
+  reflow, institution-rule status, remaining days, and candidate source evidence.
 
 ### Verification
 
