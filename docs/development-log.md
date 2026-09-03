@@ -1,5 +1,17 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.25 removable backup targets and English layout resilience
+
+- Turned the recommendation result's backup action into a reversible toggle. Authors can remove an
+  active backup route without deleting its immutable selection history, and every removal is written
+  to the local audit log.
+- Removed the fixed-height English intake heading that allowed wrapped text to cross its container.
+  Added bounded wrapping for long English actions, workflow headings, target-route statuses,
+  requirement notes, material rows, and package file plans while preserving the established visual
+  system and fonts.
+- Added frontend and Rust regression coverage for removing and re-adding a backup target, including
+  target-plan persistence and audit-event verification.
+
 ## 2026-09-03 — V0.24 target-bound package preflight and conditional blind review
 
 - Bound every newly imported supporting file to the exact manuscript version, primary target,

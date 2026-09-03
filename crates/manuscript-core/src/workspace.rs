@@ -2473,6 +2473,36 @@ impl WorkspaceStore {
         Ok(plan)
     }
 
+    pub fn remove_backup_target(
+        &self,
+        workspace_id: &str,
+        backup_selection_id: &str,
+    ) -> Result<SubmissionTargetPlan, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let mut plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        let index = plan
+            .backups
+            .iter()
+            .position(|target| target.selection_id == backup_selection_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        plan.backups.remove(index);
+        let removed_unix_ms = target_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        plan.updated_unix_ms = removed_unix_ms;
+        write_or_replace_json(&workspace_root.join("targets").join("plan.json"), &plan)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_backup_removed",
+            &manifest.workspace,
+            removed_unix_ms,
+        )?;
+        Ok(plan)
+    }
+
     pub fn promote_backup_target(
         &self,
         workspace_id: &str,
@@ -5798,6 +5828,23 @@ mod tests {
             target.selection_id
         );
         assert_eq!(plan.backups.len(), 1);
+        let backup_selection_id = plan.backups[0].selection_id.clone();
+        let plan = store
+            .remove_backup_target(&workspace.id, &backup_selection_id)
+            .unwrap();
+        assert!(plan.backups.is_empty());
+        let plan = store
+            .add_backup_recommended_journal(&workspace.id, &run.run_id, &backup_candidate.id)
+            .unwrap();
+        assert_eq!(plan.backups.len(), 1);
+        let audit = fs::read_to_string(
+            store
+                .projects_root()
+                .join(&workspace.id)
+                .join("audit.jsonl"),
+        )
+        .unwrap();
+        assert!(audit.contains("submission_backup_removed"));
         let requirement_snapshot = store
             .save_journal_requirement_snapshot(
                 &workspace.id,

@@ -831,6 +831,18 @@ async fn add_backup_recommended_journal(
 }
 
 #[tauri::command]
+async fn remove_backup_target(
+    workspace_id: String,
+    backup_selection_id: String,
+    app: AppHandle,
+) -> Result<SubmissionTargetPlan, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .remove_backup_target(&workspace_id, &backup_selection_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn promote_backup_target(
     workspace_id: String,
     backup_selection_id: String,
@@ -1617,6 +1629,7 @@ pub fn run() {
             confirm_submission_requirement,
             select_recommended_journal,
             add_backup_recommended_journal,
+            remove_backup_target,
             promote_backup_target,
             get_submission_target_plan,
             get_journal_requirement_snapshots,

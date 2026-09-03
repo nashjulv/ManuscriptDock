@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.24")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.24" }));
-    expect(brandStatement.getByText("V0.24")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.25")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.25" }));
+    expect(brandStatement.getByText("V0.25")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -894,6 +894,7 @@ describe("App", () => {
       if (command === "get_submission_materials") return Promise.resolve({ schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, materials: [], checklist: [], requiredComplete: false, targetCheckReady: false });
       if (command === "select_recommended_journal") { const journalId = (args as { journalId: string }).journalId; const target = makeTarget(journalId, "primary", 0); targetPlan = { ...targetPlan, primary: target, updatedUnixMs: Date.UTC(2026,7,30) }; return Promise.resolve(target); }
       if (command === "add_backup_recommended_journal") { const journalId = (args as { journalId: string }).journalId; targetPlan = { ...targetPlan, backups: [...targetPlan.backups, makeTarget(journalId, "backup", targetPlan.backups.length + 1)] }; return Promise.resolve(targetPlan); }
+      if (command === "remove_backup_target") { const selectionId = (args as { backupSelectionId: string }).backupSelectionId; targetPlan = { ...targetPlan, backups: targetPlan.backups.filter((target) => target.selectionId !== selectionId) }; return Promise.resolve(targetPlan); }
       if (command === "discover_journal_requirements") { const targetSelectionId = (args as { targetSelectionId: string }).targetSelectionId; const snapshot = { schemaVersion: 1, snapshotId: "requirements-1", workspaceId: workspace.id, targetSelectionId, journalId: "dr1", journalName: "国内期刊1", sourceMode: "official_network_fetch", status: "official_sources_captured", sources: [{ url: "https://example.test/journal/guide-for-authors", title: "Guide for authors", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026,7,30), officialHostMatched: true }], requirements: [{ id: "requirement-title-page", category: "title_page", label: "标题页", labelEn: "Title page", obligation: "required", detail: "官方原文含明确义务词", sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "A separate title page is required" }], limitations: [], capturedUnixMs: Date.UTC(2026,7,30), freshUntilUnixMs: Date.UTC(2026,10,30), recordHash: "b".repeat(64), externalTransmission: "author_confirmed_official_source_fetch" }; requirementSnapshots = [snapshot]; return Promise.resolve(snapshot); }
       if (command === "list_journal_recommendations") return Promise.resolve([]);
       if (command === "save_journal_recommendation_profile") { const profile = (args as { profile: Record<string, string> }).profile; return Promise.resolve({ ...profile, schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount + 1, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }); }
@@ -935,6 +936,9 @@ describe("App", () => {
     expect(within(primaryRoute).getByText("唯一激活")).toBeVisible();
     await user.click(screen.getAllByRole("button", { name: "加入备选支线" })[0]);
     expect(await screen.findByRole("article", { name: /备选投稿支线/ })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "取消备选" }));
+    expect(screen.queryByRole("article", { name: /备选投稿支线/ })).not.toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("remove_backup_target", { workspaceId: workspace.id, backupSelectionId: "selection-dr2-backup" });
     const refreshedPrimary = screen.getByRole("article", { name: /当前投稿主线/ });
     await user.click(within(refreshedPrimary).getByLabelText(/仅本次允许后端访问/));
     await user.click(within(refreshedPrimary).getByRole("button", { name: "获取官方投稿要求" }));
