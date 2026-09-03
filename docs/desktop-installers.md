@@ -32,6 +32,21 @@ macOS 产物位于 `target/universal-apple-darwin/release/bundle/`，Windows 产
 `target/x86_64-pc-windows-msvc/release/bundle/nsis/`。这些二进制产物属于本机构建结果，
 不提交到 Git。
 
+## V0.35 本地构建记录
+
+2026-09-03 已从提交 `0273e2e` 重新生成以下开发安装包，并复制到本机 `installers/` 交付目录：
+
+| 平台 | 文件 | 大小 | SHA-256 |
+| --- | --- | ---: | --- |
+| macOS universal | `ManuscriptDock-0.35.0-macOS-universal.dmg` | 20 MB | `5c52a761c2ca861f3cd135cf4d322d3e33e4fb4ed59e49a22f05c4770e86d5ac` |
+| Windows x64 | `ManuscriptDock-0.35.0-Windows-x64-setup.exe` | 6.6 MB | `cbf9c99679f0536b3b934e2fa99be3b1b19e440a5d43c5d6ed06985a0dfc5d3e` |
+
+macOS DMG 已通过 `hdiutil verify`，内含应用版本 `0.35.0`、标识
+`com.manuscriptdock.desktop`，主程序同时包含 `arm64` 与 `x86_64`。Windows 安装器由 NSIS
+生成，内含 GUI 子系统的 x86-64 PE 主程序；由于它是在 macOS 上交叉构建，仍需在干净的
+Windows 10/11 真机完成安装、启动、卸载和 WebView2 回归。两套包均未完成公开发行所需的
+Developer ID/Apple 公证或 Windows Authenticode 签名。
+
 ## 自动构建
 
 `.github/workflows/build-installers.yml` 在手动触发或推送 `desktop-v*` 标签时，分别使用真实

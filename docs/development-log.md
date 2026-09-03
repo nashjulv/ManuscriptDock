@@ -1,5 +1,14 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.35 desktop installer rebuild
+
+- Rebuilt the macOS universal App/DMG from commit `0273e2e` and verified the DMG checksum, app
+  version, stable bundle identifier, and `arm64` plus `x86_64` Mach-O slices.
+- Cross-built the Windows x64 NSIS installer and verified that its bundled application is an x86-64
+  PE using the Windows GUI subsystem. A clean Windows 10/11 install/uninstall test remains required.
+- Stored local delivery copies and a SHA-256 manifest under the ignored `installers/` directory;
+  binary artifacts, signing material, and unpublished manuscripts remain outside Git.
+
 ## 2026-09-03 — V0.35 typed figure, table, and supporting-file uploads
 
 - Added a dedicated figures-and-tables upload section to target-specific Materials, while retaining

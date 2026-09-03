@@ -147,7 +147,9 @@ npm run tauri -- build --debug --no-bundle
   明确表示作者已在外部系统完成提交，不声称应用执行了网络投稿。
 - 知识体问答当前是非流式 OpenAI 兼容调用；没有供应商 OAuth、费用预算、公共提问认证、
   内容治理或回答转候选知识对象流程。模型回答不自动改变知识体。
-- macOS 调试构建已验证；Windows、Linux、安装包签名与自动更新仍需各平台 CI/真机验证。
+- V0.35 macOS universal DMG 已完成本机结构与校验和验证，Windows x64 NSIS 已完成 macOS
+  交叉构建及 PE 架构验证；Windows 真机安装/卸载、Linux、平台签名、公证与自动更新仍需
+  各平台 CI 或真机验证。
 
 下一项架构主线是为持久化 `AcademicKnowledgeBody` 建立迁移策略：把结构节点、引用与
 证据关系、修订集和审核派生物注册为稳定对象。自动排版和投稿目标功能必须消费并回写该
