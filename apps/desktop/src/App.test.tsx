@@ -23,6 +23,8 @@ describe("App", () => {
     isTauriMock.mockReset();
     isTauriMock.mockReturnValue(false);
     window.localStorage.clear();
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "zh-CN" });
+    Object.defineProperty(window.navigator, "languages", { configurable: true, value: ["zh-CN"] });
   });
 
   it("explains the local-first import step", () => {
@@ -40,6 +42,7 @@ describe("App", () => {
     expect(screen.getByText("你自主决定是否联网、使用模型和外部投送。")).toBeVisible();
     expect(screen.getByRole("button", { name: "选择论文" })).toBeEnabled();
     expect(screen.getByText("没有文件会在此阶段上传")).toBeVisible();
+    expect(container.querySelector(".product-bar > .current-manuscript")).toHaveAttribute("aria-hidden", "true");
     const navigationIcons = within(screen.getByRole("navigation", { name: "工作台导航" }))
       .getAllByRole("button")
       .map((button) => button.querySelector("svg")?.innerHTML);
@@ -167,6 +170,7 @@ describe("App", () => {
 
   it("recovers recent local workspaces when running inside Tauri", async () => {
     isTauriMock.mockReturnValue(true);
+    const user = userEvent.setup();
     invokeMock.mockResolvedValue({
       workspaces: [
         {
@@ -191,6 +195,15 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "最近工作区" })).toBeVisible();
     expect(screen.getByText("recovered-study.pdf")).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("list_workspaces");
+
+    await user.click(screen.getByRole("button", { name: "打开 recovered-study.pdf" }));
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    const importAnother = await screen.findByRole("button", { name: "Import another" });
+    const actions = importAnother.closest(".bar-actions");
+    expect(actions).not.toBeNull();
+    expect(within(actions as HTMLElement).getByRole("button", { name: "中文" })).toBeVisible();
+    expect(within(actions as HTMLElement).getByRole("button", { name: "EN" })).toBeVisible();
+    expect(within(actions as HTMLElement).getByText("Local only")).toBeVisible();
   });
 
   it("archives, restores, and confirms permanent deletion for each manuscript workspace", async () => {

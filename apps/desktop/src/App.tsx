@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import manuscriptDockLogo from "./assets/manuscriptdock-logo.svg";
 import { PRODUCT_VERSION } from "./version";
-import { I18nProvider, localize, localizeBackendText, useI18n, type Locale } from "./i18n";
+import { I18nProvider, localize, localizeBackendText, localizeSourceLabel, useI18n, type Locale } from "./i18n";
 
 type ManuscriptKind = "word" | "pdf" | "latex";
 
@@ -502,7 +502,7 @@ function Icon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">{paths[name]}</svg>;
 }
 
-function formatBytes(bytes: number) {
+function formatBytes(bytes: number, locale: Locale) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];
   let value = bytes / 1024;
@@ -511,7 +511,7 @@ function formatBytes(bytes: number) {
     value /= 1024;
     unitIndex += 1;
   }
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: value >= 10 ? 0 : 1 }).format(value)} ${units[unitIndex]}`;
 }
 
 function formatModifiedDate(timestamp: number | null, locale: Locale) {
@@ -523,6 +523,17 @@ function normalizeError(error: unknown) {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return "无法打开该文件。请确认文件可访问后重试。";
+}
+
+function localizedCopy(zhCN: string, en: string): LocalizedCopy {
+  return { zhCN, en };
+}
+
+function resolveNotice(locale: Locale, notice: LocalizedNotice | null) {
+  if (!notice) return null;
+  return typeof notice === "string"
+    ? localizeBackendText(locale, notice)
+    : localize(locale, notice.zhCN, notice.en);
 }
 
 function getStageIcon(stage: WorkspaceStage): IconName {
@@ -564,7 +575,7 @@ function ManuscriptDockApp() {
   const [archivedWorkspaces, setArchivedWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [catalogWarnings, setCatalogWarnings] = useState<string[]>([]);
   const [workspaceManagementBusyId, setWorkspaceManagementBusyId] = useState<string | null>(null);
-  const [workspaceManagementNotice, setWorkspaceManagementNotice] = useState<string | null>(null);
+  const [workspaceManagementNotice, setWorkspaceManagementNotice] = useState<LocalizedCopy | null>(null);
   const [workspaceManagementError, setWorkspaceManagementError] = useState<string | null>(null);
   const [workspaceStorage, setWorkspaceStorage] = useState<WorkspaceStorageSummary | null>(null);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -587,7 +598,7 @@ function ManuscriptDockApp() {
   const [versionSelectionId, setVersionSelectionId] = useState<string | null>(null);
   const [versionCandidate, setVersionCandidate] = useState<ManuscriptSummary | null>(null);
   const [versionNote, setVersionNote] = useState("");
-  const [versionNotice, setVersionNotice] = useState<string | null>(null);
+  const [versionNotice, setVersionNotice] = useState<LocalizedNotice | null>(null);
   const [isSelectingVersion, setIsSelectingVersion] = useState(false);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
@@ -762,7 +773,7 @@ function ManuscriptDockApp() {
         setVersionCandidate(null);
         setVersionNote("");
         if (result.status === "unchanged") {
-          setVersionNotice(localizeBackendText(locale, result.message));
+          setVersionNotice(result.message);
           return;
         }
         setActiveWorkspace(result.workspace);
@@ -770,7 +781,7 @@ function ManuscriptDockApp() {
         setStructureReport(null);
         setReadinessReport(null);
         resetDownstreamLifecycle();
-        setVersionNotice(text(`已保存版本 v${result.version.version}`, `Version v${result.version.version} saved`));
+        setVersionNotice(localizedCopy(`已保存版本 v${result.version.version}`, `Version v${result.version.version} saved`));
         loadVersionHistory(result.workspace, previousVersion);
       })
       .catch((error: unknown) => setErrorMessage(normalizeError(error)))
@@ -786,7 +797,7 @@ function ManuscriptDockApp() {
     void invoke<VersionCreation>("restore_manuscript_version", { workspaceId: activeWorkspace.id, version })
       .then((result) => {
         if (result.status === "unchanged") {
-          setVersionNotice(localizeBackendText(locale, result.message));
+          setVersionNotice(result.message);
           return;
         }
         setActiveWorkspace(result.workspace);
@@ -794,7 +805,7 @@ function ManuscriptDockApp() {
         setStructureReport(null);
         setReadinessReport(null);
         resetDownstreamLifecycle();
-        setVersionNotice(text(`已将 v${version} 恢复为新的 v${result.version.version}`, `Restored v${version} as new v${result.version.version}`));
+        setVersionNotice(localizedCopy(`已将 v${version} 恢复为新的 v${result.version.version}`, `Restored v${version} as new v${result.version.version}`));
         loadVersionHistory(result.workspace, previousVersion);
       })
       .catch((error: unknown) => setErrorMessage(normalizeError(error)))
@@ -926,13 +937,13 @@ function ManuscriptDockApp() {
       setArchivedWorkspaces(catalog.archivedWorkspaces ?? []);
       setCatalogWarnings(catalog.warnings);
       setWorkspaceManagementNotice(action === "archive"
-        ? text(`已归档《${workspace.manuscript.name}》`, `Archived “${workspace.manuscript.name}”`)
+        ? localizedCopy(`已归档《${workspace.manuscript.name}》`, `Archived “${workspace.manuscript.name}”`)
         : action === "restore"
-          ? text(`已恢复《${workspace.manuscript.name}》`, `Restored “${workspace.manuscript.name}”`)
-          : text(`已永久删除《${workspace.manuscript.name}》`, `Permanently deleted “${workspace.manuscript.name}”`));
+          ? localizedCopy(`已恢复《${workspace.manuscript.name}》`, `Restored “${workspace.manuscript.name}”`)
+          : localizedCopy(`已永久删除《${workspace.manuscript.name}》`, `Permanently deleted “${workspace.manuscript.name}”`));
       return true;
     } catch (error) {
-      setWorkspaceManagementError(localizeBackendText(locale, normalizeError(error)));
+      setWorkspaceManagementError(normalizeError(error));
       return false;
     } finally {
       setWorkspaceManagementBusyId(null);
@@ -1044,7 +1055,7 @@ function ManuscriptDockApp() {
     try {
       const result = await invoke<RevisionApplication>("apply_manuscript_revision", { workspaceId: activeWorkspace.id, baseVersion: revisionDraft.baseVersion, changes });
       if (result.status === "unchanged") {
-        setVersionNotice(localizeBackendText(locale, result.message));
+        setVersionNotice(result.message);
         return;
       }
       setActiveWorkspace(result.workspace);
@@ -1063,7 +1074,7 @@ function ManuscriptDockApp() {
       const draft = await invoke<RevisionDraft>("get_revision_draft", { workspaceId: result.workspace.id });
       setRevisionDraft(draft);
       setRevisionValues(Object.fromEntries(draft.fields.map((field) => [field.field, field.value])));
-      setVersionNotice(text(`已保存 v${result.version.version}，并完成当前版本复查`, `Saved v${result.version.version} and rechecked the current version`));
+      setVersionNotice(localizedCopy(`已保存 v${result.version.version}，并完成当前版本复查`, `Saved v${result.version.version} and rechecked the current version`));
       loadVersionHistory(result.workspace, result.revisionSet.baseVersion);
       refreshSubmissionMaterials(result.workspace.id);
       setActiveStage("journals");
@@ -1340,12 +1351,12 @@ function ManuscriptDockApp() {
                   <div className="intake-selected">
                     <div className="file-heading">
                       <span className="file-glyph" aria-hidden="true"><Icon name="file" /></span>
-                      <div><p className="status-line"><Icon name="check" /> {text("本地校验完成", "Local validation complete")}</p><h2>{manuscript.name}</h2><p>{manuscript.extension.toUpperCase()} · {formatBytes(manuscript.sizeBytes)}</p></div>
+                      <div><p className="status-line"><Icon name="check" /> {text("本地校验完成", "Local validation complete")}</p><h2>{manuscript.name}</h2><p>{manuscript.extension.toUpperCase()} · {formatBytes(manuscript.sizeBytes, locale)}</p></div>
                       <button className="text-button" type="button" onClick={selectManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("重新选择", "Choose another")}</button>
                     </div>
                     <dl className="summary-grid">
                       <div><dt>{text("文件格式", "Format")}</dt><dd>{manuscript.extension.toUpperCase()}</dd></div>
-                      <div><dt>{text("文件大小", "Size")}</dt><dd>{formatBytes(manuscript.sizeBytes)}</dd></div>
+                      <div><dt>{text("文件大小", "Size")}</dt><dd>{formatBytes(manuscript.sizeBytes, locale)}</dd></div>
                       <div><dt>{text("最近修改", "Last modified")}</dt><dd>{formatModifiedDate(manuscript.modifiedUnixMs, locale)}</dd></div>
                       <div><dt>{text("数据位置", "Data location")}</dt><dd>{text("当前设备", "This device")}</dd></div>
                     </dl>
@@ -1422,7 +1433,7 @@ function ManuscriptDockApp() {
 
 function ProductBar({ manuscriptName, onNewManuscript, isSelecting = false }: { manuscriptName?: string; onNewManuscript?: () => void; isSelecting?: boolean }) {
   const { locale, setLocale, text } = useI18n();
-  return <header className="product-bar"><div className="brand" aria-label={`投稿舱 ManuscriptDock ${PRODUCT_VERSION}`}><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span><span className="brand-version">{PRODUCT_VERSION}</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
+  return <header className="product-bar"><div className="brand" aria-label={`投稿舱 ManuscriptDock ${PRODUCT_VERSION}`}><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span><span className="brand-version">{PRODUCT_VERSION}</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span className="current-manuscript" aria-hidden="true" />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>;
 }
 
 function SubmissionGuide() {
@@ -1797,7 +1808,7 @@ function JournalMatchStage({ workspace, selectedTarget, targetPlan, requirementS
       setHistory((current) => [nextRun, ...current.filter((record) => record.runId !== nextRun.runId)]);
       onRecommendationGenerated();
     }
-    catch (reason) { setError(localizeBackendText(locale, normalizeError(reason))); }
+    catch (reason) { setError(normalizeError(reason)); }
     finally { setBusy(false); }
   }
   const topicOptions: Array<[ResearchTopic, string, string]> = [["auto","自动识别","Auto detect"],["general_ai","通用人工智能","General AI"],["machine_learning","机器学习","Machine learning"],["computer_vision","计算机视觉","Computer vision"],["natural_language_processing","自然语言处理","Natural language processing"],["data_mining","数据挖掘","Data mining"],["software_systems","软件与系统","Software & systems"],["robotics_control","机器人与控制","Robotics & control"]];
@@ -1926,8 +1937,8 @@ function directoryEvidenceLabel(evidence: JournalDirectoryEvidence, locale: Loca
 }
 
 function StructureCheckSummary({ report }: { report: StructureReport }) {
-  const { text } = useI18n();
-  return <section className="check-structure-summary"><header><div><span>{text("结构提取完成", "Structure extracted")}</span><h3>{report.title ?? text("未检测到标题", "No title detected")}</h3></div><strong>v{report.sourceSnapshotVersion}</strong></header><div className="metric-row"><Metric label={text("作者", "Authors")} value={report.authors.length} /><Metric label={text("章节", "Sections")} value={report.sections.length} /><Metric label={text("图", "Figures")} value={report.figureCount} /><Metric label={text("表", "Tables")} value={report.tableCount} /></div>{report.warnings.map((warning) => <p className="inline-warning" key={warning}><Icon name="warning" />{warning}</p>)}</section>;
+  const { locale, text } = useI18n();
+  return <section className="check-structure-summary"><header><div><span>{text("结构提取完成", "Structure extracted")}</span><h3>{report.title ?? text("未检测到标题", "No title detected")}</h3></div><strong>v{report.sourceSnapshotVersion}</strong></header><div className="metric-row"><Metric label={text("作者", "Authors")} value={report.authors.length} /><Metric label={text("章节", "Sections")} value={report.sections.length} /><Metric label={text("图", "Figures")} value={report.figureCount} /><Metric label={text("表", "Tables")} value={report.tableCount} /></div>{report.warnings.map((warning) => <p className="inline-warning" key={warning}><Icon name="warning" />{localizeBackendText(locale, warning)}</p>)}</section>;
 }
 
 function knowledgeCandidates(snapshot: AcademicKnowledgeBodySnapshot) {
@@ -1951,7 +1962,7 @@ function SourceIdentityPreview({ snapshot }: { snapshot: AcademicKnowledgeBodySn
       <div><dt>{text("论文标题", "Manuscript title")}</dt><dd>{identity.title ?? text("未可靠识别", "Not reliably detected")}</dd></div>
       <div><dt>{text("作者", "Authors")}</dt><dd>{identity.authors.length > 0 ? <ul>{identity.authors.map((author) => <li key={author}>{author}</li>)}</ul> : text("未可靠识别", "Not reliably detected")}</dd></div>
       <div><dt>{text("作者单位", "Affiliations")}</dt><dd>{identity.affiliations.length > 0 ? <ul>{identity.affiliations.map((affiliation) => <li key={affiliation}>{affiliation}</li>)}</ul> : text("未可靠识别", "Not reliably detected")}</dd></div>
-      <div><dt>{text("明示联系方式", "Declared contacts")}</dt><dd>{identity.contacts.length > 0 ? <ul>{identity.contacts.map((contact, index) => <li key={`${contact.kind}-${contact.value}-${index}`}><strong>{publicationContactLabel(contact.kind, locale)}</strong><span>{contact.value}</span><small>{contact.sourceFragmentId ? `${contact.sourceFragmentId} · ` : ""}{contact.sourceLabel}</small></li>)}</ul> : text("未可靠识别", "Not reliably detected")}</dd></div>
+      <div><dt>{text("明示联系方式", "Declared contacts")}</dt><dd>{identity.contacts.length > 0 ? <ul>{identity.contacts.map((contact, index) => <li key={`${contact.kind}-${contact.value}-${index}`}><strong>{publicationContactLabel(contact.kind, locale)}</strong><span>{contact.value}</span><small>{contact.sourceFragmentId ? `${contact.sourceFragmentId} · ` : ""}{localizeSourceLabel(locale, contact.sourceLabel)}</small></li>)}</ul> : text("未可靠识别", "Not reliably detected")}</dd></div>
       <div><dt>{text("身份版本", "Identity version")}</dt><dd>Artifact v{identity.sourceArtifact.version} · Snapshot S{identity.version}</dd></div>
     </dl> : <p>{text("当前快照尚未完成身份信息提取。", "Identity extraction has not been completed for this snapshot.")}</p>}
     <p className="source-identity-policy"><Icon name={extracted ? "check" : "warning"} /><span>{text("这些内容来自论文源稿已明示的身份区，不进入 Claim 等语义候选的“纳入/排除”流程。本机可以直接查看；默认不会随知识体问答发送给外部模型。", "These fields come from the manuscript's declared identity area and are not subject to the Include/Exclude flow for Claim-like semantic candidates. They remain visible locally and are excluded from external model questions by default.")}</span></p>
@@ -1959,7 +1970,7 @@ function SourceIdentityPreview({ snapshot }: { snapshot: AcademicKnowledgeBodySn
 }
 
 function KnowledgeCandidatePreview({ snapshot, structureReport, compact = false, reviewable = false, decisions = {}, onDecision }: { snapshot: AcademicKnowledgeBodySnapshot; structureReport?: StructureReport; compact?: boolean; reviewable?: boolean; decisions?: Record<string, KnowledgeCandidateDecision>; onDecision?: (candidateId: string, decision: KnowledgeCandidateDecision) => void }) {
-  const { text } = useI18n();
+  const { locale, text } = useI18n();
   const extraction = snapshot.extraction;
   const elements: Array<{ key: SemanticElementKind; label: string; value?: ExtractedKnowledgeElement }> = [
     { key: "claim", label: "Claim", value: extraction?.claim },
@@ -1978,7 +1989,7 @@ function KnowledgeCandidatePreview({ snapshot, structureReport, compact = false,
       const candidates = element.value?.candidates ?? [];
       return <article key={element.key} data-state={element.value?.state ?? "pending"}><header><h4>{element.label}</h4><span>{element.value?.state === "established" ? text(`已确认 v${element.value.object.version}`, `Established v${element.value.object.version}`) : candidates.length > 0 ? text(`候选 v${element.value?.object.version ?? 0}`, `Candidate v${element.value?.object.version ?? 0}`) : text("未提取", "Not extracted")}</span></header>{candidates.length > 0 ? <ul>{candidates.slice(0, compact ? 1 : 3).map((candidate) => {
         const decision = candidate.authorConfirmed ? "included" : decisions[candidate.candidateId];
-        return <li key={candidate.candidateId} data-decision={decision ?? "pending"}><p>{candidate.text}</p><small>{candidate.sourceFragmentId ? `${candidate.sourceFragmentId} · ` : ""}{candidate.sourceLabel} · {candidate.modality.toUpperCase()} · {candidate.confidencePercent}%</small>{candidate.authorConfirmed ? <span className="candidate-confirmed-badge"><Icon name="check" />{text("作者已确认", "Author confirmed")}</span> : reviewable && onDecision ? <div className="candidate-decision" role="group" aria-label={text(`审核 ${element.label} 候选`, `Review ${element.label} candidate`)}><button type="button" aria-pressed={decision === "included"} onClick={() => onDecision(candidate.candidateId, "included")}><Icon name="check" />{text("纳入知识体", "Include")}</button><button type="button" aria-pressed={decision === "excluded"} onClick={() => onDecision(candidate.candidateId, "excluded")}><Icon name="close" />{text("排除", "Exclude")}</button></div> : null}</li>;
+        return <li key={candidate.candidateId} data-decision={decision ?? "pending"}><p>{candidate.text}</p><small>{candidate.sourceFragmentId ? `${candidate.sourceFragmentId} · ` : ""}{localizeSourceLabel(locale, candidate.sourceLabel)} · {candidate.modality.toUpperCase()} · {candidate.confidencePercent}%</small>{candidate.authorConfirmed ? <span className="candidate-confirmed-badge"><Icon name="check" />{text("作者已确认", "Author confirmed")}</span> : reviewable && onDecision ? <div className="candidate-decision" role="group" aria-label={text(`审核 ${element.label} 候选`, `Review ${element.label} candidate`)}><button type="button" aria-pressed={decision === "included"} onClick={() => onDecision(candidate.candidateId, "included")}><Icon name="check" />{text("纳入知识体", "Include")}</button><button type="button" aria-pressed={decision === "excluded"} onClick={() => onDecision(candidate.candidateId, "excluded")}><Icon name="close" />{text("排除", "Exclude")}</button></div> : null}</li>;
       })}</ul> : <p>{text("当前可解析内容中没有足够明确的语义片段；不会用占位文字冒充知识。", "No sufficiently explicit semantic passage was found in the parseable content; placeholders are not presented as knowledge.")}</p>}</article>;
     })}</div>
     <p className="knowledge-candidate-policy">{text("候选对象可以支持带不确定性说明的问答；只有作者选择纳入并完成整组审核后，状态才会从 candidate 升级为 established。", "Candidates can support uncertainty-aware questions and answers. They become established only after the author includes them and completes the full review.")}</p>
@@ -2395,7 +2406,7 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<LocalizedCopy | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const applySettings = (summary: ModelSettingsSummary) => {
@@ -2455,7 +2466,7 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
         })),
       });
       applySettings(summary);
-      setNotice(text("模型设置已保存；API Key 仅保存在系统凭据库。", "Model settings saved; API keys remain only in the system credential store."));
+      setNotice(localizedCopy("模型设置已保存；API Key 仅保存在系统凭据库。", "Model settings saved; API keys remain only in the system credential store."));
     } catch (reason) {
       setError(normalizeError(reason));
     } finally {
@@ -2509,8 +2520,8 @@ function KnowledgeDialoguePanel({ workspace, knowledgeBodyRecord }: { workspace:
       <div className="model-settings-actions"><p>{text("应用界面不会读取或回显明文 Key。仅在作者主动提问时调用模型；DeepSeek V4 问答会关闭思考模式，把输出额度保留给最终回答。", "The interface never reads or reveals plaintext keys. Models are called only after an author submits a question; DeepSeek V4 requests disable thinking mode so the output allowance remains available for the final answer.")}</p><button className="primary-button" type="button" disabled={isSavingSettings || invalidEnabledDraft} onClick={() => void saveSettings()}>{isSavingSettings ? text("保存中…", "Saving…") : invalidEnabledDraft ? text("请先补全启用项", "Complete enabled slots") : text("保存模型设置", "Save model settings")}</button></div>
     </section> : null}
 
-    {error ? <p className="dialogue-message dialogue-error" role="alert">{error}</p> : null}
-    {notice ? <p className="dialogue-message" role="status">{notice}</p> : null}
+    {error ? <p className="dialogue-message dialogue-error" role="alert">{localizeBackendText(locale, error)}</p> : null}
+    {notice ? <p className="dialogue-message" role="status">{localize(locale, notice.zhCN, notice.en)}</p> : null}
 
     <div className="dialogue-tabs" role="tablist" aria-label={text("知识体对话类型", "Knowledge dialogue type")}>
       <button type="button" role="tab" aria-selected={activeTab === "owner"} onClick={() => setActiveTab("owner")}>{text("我的问答", "My questions")}<span>{ownerItems.length}</span></button>
@@ -2536,7 +2547,7 @@ function KnowledgeDialogueList({ items, loading }: { items: KnowledgeDialogueIte
   if (items.length === 0) return <div className="dialogue-empty"><Icon name="knowledge" /><p>{text("还没有问题。可以从 Claim、Scope、Method 或来源锚点开始。", "No questions yet. Start with the Claim, Scope, Method, or source anchors.")}</p></div>;
   return <ol className="dialogue-ledger">{items.map((item) => <li key={item.inquiry.inquiryId}>
     <article className="inquiry-card"><header><span data-stance={item.inquiry.stance}>{inquiryStanceLabel(item.inquiry.stance, locale)}</span><strong>{inquiryTargetLabel(item.inquiry.target, locale)}</strong><time>{formatModifiedDate(item.inquiry.createdUnixMs, locale)}</time></header><p>{item.inquiry.question}</p><small>S{item.inquiry.snapshotVersion} · {item.inquiry.knowledgeBodyHash.slice(0, 12)}</small></article>
-    {item.answers.length > 0 ? item.answers.map((answer) => <article className="answer-card" key={answer.answerId}><header><strong>{answer.providerLabel} · {answer.model}</strong><span>{modelSlotLabel(answer.modelSlot as ModelSlotRole, locale)}</span></header><p>{answer.answer}</p><footer><span>{text(`${answer.sourceAnchors.length} 个来源锚点`, `${answer.sourceAnchors.length} source anchor(s)`)}</span><code>{answer.recordHash.slice(0, 12)}</code></footer></article>) : <p className="answer-pending">{text("问题已保存在本机；模型尚未形成回答。", "The question is saved locally; no model answer is available yet.")}</p>}
+    {item.answers.length > 0 ? item.answers.map((answer) => <article className="answer-card" key={answer.answerId}><header><strong>{answer.providerLabel} · {answer.model}</strong><span>{modelSlotLabel(answer.modelSlot as ModelSlotRole, locale)}</span></header><p>{answer.answer}</p><footer><span>{text(`${answer.sourceAnchors.length} 个来源锚点`, `${answer.sourceAnchors.length} ${answer.sourceAnchors.length === 1 ? "source anchor" : "source anchors"}`)}</span><code>{answer.recordHash.slice(0, 12)}</code></footer></article>) : <p className="answer-pending">{text("问题已保存在本机；模型尚未形成回答。", "The question is saved locally; no model answer is available yet.")}</p>}
   </li>)}</ol>;
 }
 

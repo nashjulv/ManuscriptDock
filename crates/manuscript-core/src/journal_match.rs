@@ -231,7 +231,11 @@ pub struct JournalRecommendation {
     pub name_en: String,
     pub region: JournalRegion,
     pub publisher: String,
+    #[serde(default)]
+    pub publisher_en: String,
     pub rank_system: String,
+    #[serde(default)]
+    pub rank_system_en: String,
     pub rank_tier: String,
     pub overall_fit: u8,
     pub estimated_submission_preparation_days: u32,
@@ -239,6 +243,8 @@ pub struct JournalRecommendation {
     pub institution_eligibility: String,
     pub scores: JournalFitScores,
     pub reasons: Vec<String>,
+    #[serde(default)]
+    pub reasons_en: Vec<String>,
     pub ranking_source_url: String,
     pub homepage_url: String,
     pub open_access_status: String,
@@ -281,6 +287,8 @@ pub struct JournalRecommendationRun {
     #[serde(default)]
     pub journal_directory_version: Option<String>,
     pub limitations: Vec<String>,
+    #[serde(default)]
+    pub limitations_en: Vec<String>,
     pub external_transmission: String,
 }
 
@@ -313,6 +321,33 @@ struct ScoreContext<'a> {
 
 const RANK_DOMESTIC: &str = "https://www.ccf.org.cn/ccftjgjxskwml/";
 const RANK_INTERNATIONAL: &str = "https://www.ccf.org.cn/Academic_Evaluation/AI/";
+
+fn publisher_english_label(publisher: &str) -> &str {
+    match publisher {
+        "中国科学院计算技术研究所 / 中国计算机学会" => {
+            "Institute of Computing Technology, Chinese Academy of Sciences / China Computer Federation"
+        }
+        "中国科学院软件研究所 / 中国计算机学会" => {
+            "Institute of Software, Chinese Academy of Sciences / China Computer Federation"
+        }
+        "中国科学院自动化研究所 / 中国自动化学会" => {
+            "Institute of Automation, Chinese Academy of Sciences / Chinese Association of Automation"
+        }
+        "中国中文信息学会 / 中国科学院软件研究所" => {
+            "Chinese Information Processing Society of China / Institute of Software, Chinese Academy of Sciences"
+        }
+        "中国自动化学会 / 国家智能计算机研究开发中心" => {
+            "Chinese Association of Automation / National Research Center for Intelligent Computing Systems"
+        }
+        "中国科学院空天信息创新研究院 / 中国图象图形学学会" => {
+            "Aerospace Information Research Institute, Chinese Academy of Sciences / China Society of Image and Graphics"
+        }
+        "中国人工智能学会 / 哈尔滨工程大学" => {
+            "Chinese Association for Artificial Intelligence / Harbin Engineering University"
+        }
+        _ => publisher,
+    }
+}
 
 const CANDIDATES: &[Candidate] = &[
     Candidate {
@@ -829,6 +864,15 @@ pub fn recommend_journals_with_directory(
                 "机构评价目录未导入；涉及分区的资格条件不推断，也不计入得分。".into()
             },
         ],
+        limitations_en: vec![
+            "Fit scores describe current submission-preparation suitability, not acceptance probability, and do not replace the latest journal instructions.".into(),
+            "The deadline measures internal preparation time only; it does not predict peer review, acceptance, publication, or indexing dates.".into(),
+            "The author name is stored only for local ownership. Institution rank and adviser reputation are not prestige scores; official institution policy affects eligibility and purpose only.".into(),
+            "Current content readiness is a structural signal, not a score for novelty or scholarly contribution. No top-journal success claim is allowed without a versioned PWC review profile.".into(),
+            "Domestic T1/T2/T3 and international CCF A/B/C are independent catalogs and are not treated as equivalent tiers.".into(),
+            "The current candidate scope covers only the bundled computer-science and artificial-intelligence journal snapshot.".into(),
+            "Institution evaluation directories are used only for backend eligibility. Unverified data conditions are neither shown nor inferred and do not affect scores.".into(),
+        ],
         external_transmission,
     }
 }
@@ -1330,10 +1374,16 @@ fn score_candidate(
         name_en: candidate.name_en.into(),
         region: candidate.region,
         publisher: candidate.publisher.into(),
+        publisher_en: publisher_english_label(candidate.publisher).into(),
         rank_system: if candidate.region == JournalRegion::Domestic {
             "CCF 中国计算机领域高质量科技期刊分级目录".into()
         } else {
             "CCF 推荐国际学术刊物目录（人工智能）".into()
+        },
+        rank_system_en: if candidate.region == JournalRegion::Domestic {
+            "CCF High-Quality Science and Technology Journal Classification in Computing".into()
+        } else {
+            "CCF Recommended International Academic Venues in Artificial Intelligence".into()
         },
         rank_tier: candidate.tier.into(),
         overall_fit: overall,

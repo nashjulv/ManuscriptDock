@@ -46,14 +46,15 @@ h1, h2, h3, p { margin-top: 0; }
 .brand-name { color: var(--text-secondary); font-size: 14px; letter-spacing: -.01em; }
 .brand-version { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .current-manuscript { min-width: 0; margin: 0; overflow: hidden; color: var(--text-secondary); font-size: 13px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-.bar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.language-switch { height: 30px; display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--border-strong); border-radius: 6px; }
-.language-switch button { height: 24px; padding: 0 7px; color: var(--text-muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.bar-actions { min-width: max-content; display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.language-switch { height: 30px; display: inline-flex; flex: none; align-items: center; padding: 2px; border: 1px solid var(--border-strong); border-radius: 6px; white-space: nowrap; }
+.language-switch button { height: 24px; flex: none; padding: 0 7px; color: var(--text-muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .language-switch button[aria-pressed="true"] { color: var(--text); background: var(--panel-strong); }
 .local-badge, .stage-status, .inline-status, .read-only-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
-.local-badge { height: 30px; padding: 0 10px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; }
+.local-badge { height: 30px; flex: none; padding: 0 10px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; white-space: nowrap; }
 .local-badge svg, .stage-status svg, .inline-status svg, .read-only-badge svg { width: 13px; height: 13px; }
 .bar-button, .text-button { height: 30px; padding: 0 11px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.bar-button { flex: none; white-space: nowrap; }
 .bar-button:hover, .text-button:hover { background: var(--panel); }
 
 /* Shared 48 / 574 / fluid shell measured from PWC publish */
