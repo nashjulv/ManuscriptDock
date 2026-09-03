@@ -1,6 +1,6 @@
 [package]
 name = "manuscript-core"
-version = "0.26.0"
+version = "0.35.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,7 @@ lopdf = "0.42"
 pdf-extract = "0.12"
 pdf-inspector = "=1.17.0"
 quick-xml = "0.38"
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

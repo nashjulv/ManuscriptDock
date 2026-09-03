@@ -232,7 +232,7 @@ pub async fn ask_with_failover(
 ) -> Result<ModelAnswer, String> {
     let models = configured_models(root)?;
     if models.is_empty() {
-        return Err("尚未配置可用模型，请先在知识体的模型设置中保存主模型或备选模型".to_owned());
+        return Err("尚未配置可用模型，请点击应用顶部的“模型设置”保存主模型或备选模型".to_owned());
     }
     let client = Client::builder()
         .timeout(Duration::from_secs(45))

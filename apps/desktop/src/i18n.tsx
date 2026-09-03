@@ -95,7 +95,7 @@ const BACKEND_ENGLISH: Record<string, string> = {
   "知识体五部分服务架构或能力契约无效": "The five-part knowledge-body service architecture or capability contract is invalid.",
   "关联知识体声明缺少成立依据或协议类型无效": "A related knowledge-body assertion lacks a valid basis or protocol type.",
   "知识候选审核必须逐条选择纳入或排除，且必须对应当前论文分解": "Every knowledge candidate must be included or excluded and must belong to the current manuscript decomposition.",
-  "尚未配置可用模型，请先在知识体的模型设置中保存主模型或备选模型": "No model is configured. Save a primary or fallback model in the knowledge-body model settings.",
+  "尚未配置可用模型，请点击应用顶部的“模型设置”保存主模型或备选模型": "No model is configured. Use Models in the product bar to save a primary or fallback model.",
   "达到输出上限，但没有形成最终回答": "The output limit was reached before a final answer was produced.",
   "已完成内部推理，但没有形成最终回答": "Internal reasoning completed without producing a final answer.",
   "返回了空回答": "The model returned an empty answer.",

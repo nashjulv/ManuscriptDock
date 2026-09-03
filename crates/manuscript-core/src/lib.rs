@@ -14,10 +14,11 @@ pub use dialogue::{
     KNOWLEDGE_DIALOGUE_SCHEMA_VERSION,
 };
 pub use journal_directory::{
-    normalize_journal_name, JournalDirectoryCatalog, JournalDirectoryError,
-    JournalDirectoryEvidence, JournalDirectoryImportResult, JournalDirectoryRecord,
-    JournalDirectorySource, JournalDirectoryStore, JournalDirectorySummary, JournalMetricScheme,
-    JOURNAL_DIRECTORY_SCHEMA_VERSION,
+    normalize_issn, normalize_journal_name, JournalDirectoryCatalog, JournalDirectoryError,
+    JournalDirectoryEvidence, JournalDirectoryImportResult, JournalDirectoryProfile,
+    JournalDirectoryRecord, JournalDirectorySource, JournalDirectoryStore, JournalDirectorySummary,
+    JournalMetricScheme, JournalProfileDiscoveryRecord, JournalProfileImportResult,
+    JOURNAL_DIRECTORY_SCHEMA_VERSION, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
 };
 pub use journal_match::{
     deadline_days_remaining, recommend_journals, recommend_journals_with_directory,

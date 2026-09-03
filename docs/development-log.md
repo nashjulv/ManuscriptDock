@@ -1,5 +1,120 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.35 typed figure, table, and supporting-file uploads
+
+- Added a dedicated figures-and-tables upload section to target-specific Materials, while retaining
+  the same upload actions and accepted-format guidance on every dynamic supporting-file requirement.
+- Kept detected figure and table slots visible even when an otherwise valid journal requirement
+  snapshot does not explicitly categorize them, and separated native file-dialog filters across all
+  ten material kinds.
+- Expanded Rust-owned validation for office, OpenDocument, archive, image, text, presentation,
+  media, and common research-data formats. Valid UTF-16 text is accepted with a warning; binary XLS
+  or XLSX files disguised as CSV/TSV are rejected with an exact recovery instruction.
+
+## 2026-09-03 — V0.34 primary-journal cancellation at point of selection
+
+- Changed the selected recommendation card from a disabled status control into a reversible
+  “Clear primary journal” action, so the author does not need to discover a second control farther
+  down in the submission-route section.
+- Added an inline confirmation that states the preservation boundary: recommendation history,
+  journal-requirement snapshots, attachments, backup order, and immutable target records remain local.
+- Corrected the busy-state comparison between target `selectionId` and journal `id`, retained the
+  existing route-level cancellation control, and added regression coverage for cancel and confirm.
+
+## 2026-09-03 — V0.33 globally reachable model credentials
+
+- Restored model and API-key configuration as an always-reachable action in the product bar, before
+  manuscript import and before any journal, institution-rule, or knowledge-body model call.
+- Kept one shared three-slot configuration for the primary model and two fallbacks. The journal and
+  knowledge-body interfaces continue to use the same Rust-owned settings instead of creating
+  feature-specific credentials.
+- Continued storing keys only in macOS Keychain or Windows Credential Manager. The WebView receives
+  only `hasApiKey`; stored plaintext is never returned, written to a workspace, or committed.
+- Added progressive disclosure, keyboard focus containment, Escape handling, unsaved-change
+  confirmation, responsive layout, loading/error/success feedback, and a frontend regression test.
+
+## 2026-09-03 — V0.32 consented journal-profile discovery fallback
+
+- Added a local-first profile check for the selected submission target. A configured model API is
+  reached only when the local SQLite directory lacks one or more requested comparison fields and the
+  author grants consent for that individual call.
+- Restricted the Rust-owned model projection to public journal identity fields: journal names,
+  known publisher, public homepage, and locally known ISSN/EISSN. Manuscript content, files, author,
+  institution, workspace identity, ranking evidence, and recommendation internals are excluded.
+- Stored model output as an immutable, workspace-local discovery lead with provider, model, time,
+  missing fields, and transmission scope. It never updates the global directory or recommendation
+  score and remains explicitly pending official website verification.
+- Added interface states for local evidence versus model leads, retained unknown circulation and
+  review-duration fields, and added Rust/frontend regression coverage for consent and projection boundaries.
+
+## 2026-09-03 — V0.31 normalized offline journal directory
+
+- Replaced the runtime JSON catalogue with a normalized, indexed SQLite directory owned by the
+  Rust backend. Journal entities, aliases, source snapshots, metric records, identifiers, and
+  evidence-backed comparison profiles are stored separately for local querying.
+- Made ISSN and EISSN first-class, separately indexed identity fields. Exact identifier matches are
+  preferred when records from CAS, JCR, Emerging partitions, OpenAlex, and DOAJ are consolidated;
+  normalized journal titles remain a controlled fallback.
+- Migrated only active legacy sources, so the incomplete 2026 Emerging workbook is excluded from the
+  application database. The complete CAS/JCR workbook and complete Emerging list remain the two
+  active local sources.
+- Added local profile fields for publisher, publication scope, author guidance links, annual output
+  volume, peer-review process, review duration, submission-to-publication duration, publication
+  frequency, circulation, APC, OA status, provenance, and retrieval time. Unknown circulation and
+  review-speed values stay null instead of being inferred from publication volume or total cycle.
+- Kept the source workbooks and the private enrichment archive out of the repository and installer;
+  only the user's local application database receives those records.
+
+## 2026-09-03 — V0.30 evidence-aware article-type matching
+
+- Separated missing article-type metadata from verified incompatibility. A journal is no longer
+  excluded merely because the bundled positive-support list does not mention the detected article type.
+- Prioritized candidates with confirmed positive article-type support within each relative tier, then
+  used unknown candidates only when needed. The portfolio baseline likewise prefers confirmed support.
+- Kept source-backed exclusions, ranking mechanics, weights, and evidence-state internals inside the
+  ignored private algorithm archive; public documentation describes only behavior and limitations.
+- Added deterministic regression coverage for review manuscripts, including continued reachability of
+  Journal of Computer Research and Development and CAAI Transactions on Intelligent Systems.
+
+## 2026-09-03 — V0.29 reversible primary targets and eligibility-first recommendations
+
+- Added an author-confirmed action to clear a current primary target before a real submission is
+  recorded. It removes only the active pointer; recommendation history, requirement snapshots,
+  uploaded materials, immutable selections, and backup routes remain local and intact.
+- Kept backups visible after the primary is cleared. The first ordered backup is presented as a
+  next-route suggestion, but promotion remains an explicit author decision and any backup may be chosen.
+- Moved article-type, topic-scope, language, publisher-direction, and verified-rule compatibility
+  ahead of portfolio ranking, so an ineligible journal can no longer displace a qualified candidate
+  merely through a stronger score elsewhere.
+- Corrected the bundled article-type metadata for CAAI Transactions on Intelligent Systems after
+  its official author guidance confirmed that review articles are accepted.
+- Added Rust and frontend regression coverage for preserved route history, submission locking,
+  cancellation confirmation, and review-article eligibility.
+
+## 2026-09-03 — V0.28 partition-consistent journal portfolios
+
+- Corrected the journal portfolio hierarchy so manuscript, journal-scope, and publisher
+  business-scope fit establish the matching baseline while local CAS evidence calibrates relative
+  reach and safeguard levels.
+- Prevented CAS partition 1 journals from appearing as safeguards while partition 2 journals appear
+  as reach targets. Missing groups now show their actual count instead of being filled across tiers.
+- Added deterministic Rust regression coverage for the previously inverted partition scenario and
+  publisher-scope fit, while keeping publisher reputation out of the score and private ranking
+  internals out of the interface.
+
+## 2026-09-03 — V0.27 replaceable supporting files and readable compact navigation
+
+- Added an author-confirmed delete action for every stored supporting-file copy. The original file
+  outside ManuscriptDock remains untouched, while the local checklist and package plan recalculate
+  immediately so the same upload slot can accept a corrected replacement.
+- Hardened Rust deletion against invalid identifiers, unconfirmed requests, unsafe material paths,
+  and symbolic links. Successful deletion removes the local copy and writes an audit event.
+- Reworked the narrow-window sidebar as a readable 156-pixel navigation column with icons and
+  wrapping labels. English “Check/revise” uses a deliberate two-line “Check” / “revise” label
+  instead of collapsing into a tiny icon rail or truncated text.
+- Added Rust and frontend regression coverage for confirmation, deletion, checklist rollback, audit,
+  and re-upload.
+
 ## 2026-09-03 — V0.26 readable English task navigation
 
 - Kept the completed-review manuscript catalogue on the home screen and confirmed that opening an

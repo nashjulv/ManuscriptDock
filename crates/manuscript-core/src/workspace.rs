@@ -6,8 +6,9 @@ use crate::{
     },
     inspect_manuscript,
     journal_directory::{
-        JournalDirectoryCatalog, JournalDirectoryImportResult, JournalDirectoryStore,
-        JournalDirectorySummary,
+        JournalDirectoryCatalog, JournalDirectoryImportResult, JournalDirectoryProfile,
+        JournalDirectoryStore, JournalDirectorySummary, JournalProfileDiscoveryRecord,
+        JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
     },
     journal_match::{
         deadline_days_remaining, recommend_journals_with_directory, ArticleTypePreference,
@@ -456,6 +457,7 @@ pub enum WorkspaceError {
     SubmissionTargetNotFound,
     StaleRecommendationRun,
     InvalidSubmissionTargetPlan,
+    SubmissionTargetLockedBySubmission,
     SubmissionBackupLimitReached,
     InvalidJournalRequirementSource,
     InvalidSubmissionMaterial(String),
@@ -530,6 +532,10 @@ impl fmt::Display for WorkspaceError {
             Self::InvalidSubmissionTargetPlan => {
                 write!(formatter, "投稿主线或备选支线记录无效")
             }
+            Self::SubmissionTargetLockedBySubmission => write!(
+                formatter,
+                "当前主线已经登记投稿，不能直接取消；请通过退稿、撤稿或未投稿原因切换后续路线"
+            ),
             Self::SubmissionBackupLimitReached => {
                 write!(formatter, "最多可保留 8 个备选投稿支线")
             }
@@ -1619,6 +1625,136 @@ impl WorkspaceStore {
             .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))
     }
 
+    pub fn journal_directory_profile(
+        &self,
+        title: &str,
+        issn: Option<&str>,
+        eissn: Option<&str>,
+    ) -> Result<Option<JournalDirectoryProfile>, WorkspaceError> {
+        self.journal_directory_store()
+            .profile_for_identity(title, issn, eissn)
+            .map_err(|error| WorkspaceError::JournalDirectory(error.to_string()))
+    }
+
+    pub fn save_journal_profile_discovery(
+        &self,
+        workspace_id: &str,
+        record: &JournalProfileDiscoveryRecord,
+    ) -> Result<(), WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if record.schema_version != JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION
+            || record.workspace_id != workspace_id
+            || !record.discovery_id.starts_with("jed-")
+            || record.discovery_id.len() != 24
+            || !record.discovery_id[4..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(WorkspaceError::InvalidManifest(
+                "期刊外部发现记录身份无效".to_owned(),
+            ));
+        }
+        let plan = self.submission_target_plan(workspace_id)?;
+        let selected = plan
+            .primary
+            .iter()
+            .chain(plan.backups.iter())
+            .find(|target| target.selection_id == record.target_selection_id)
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        if selected.journal_id != record.journal_id || selected.name != record.journal_name {
+            return Err(WorkspaceError::SubmissionTargetNotFound);
+        }
+        let valid_provenance = matches!(
+            (
+                record.source_mode.as_str(),
+                record.evidence_status.as_str(),
+                record.external_transmission.as_str()
+            ),
+            (
+                "local_directory",
+                "local_profile_available",
+                "not_performed"
+            ) | (
+                "configured_model_candidate",
+                "candidate_requires_official_verification",
+                "author_confirmed_public_journal_identity_only"
+            )
+        );
+        if !valid_provenance {
+            return Err(WorkspaceError::InvalidManifest(
+                "期刊外部发现记录的证据状态无效".to_owned(),
+            ));
+        }
+        let analysis_root = workspace_root.join("analysis");
+        fs::create_dir_all(&analysis_root)?;
+        let path = analysis_root.join(format!(
+            "journal-profile-discovery-{}.json",
+            record.discovery_id
+        ));
+        if !path.exists() {
+            write_json(&path, record)?;
+        }
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            if record.external_transmission == "not_performed" {
+                "journal_profile_resolved_locally"
+            } else {
+                "journal_profile_candidate_discovered_by_model"
+            },
+            &manifest.workspace,
+            record.created_unix_ms,
+        )?;
+        Ok(())
+    }
+
+    pub fn journal_profile_discoveries(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<JournalProfileDiscoveryRecord>, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let analysis_root = workspace_root.join("analysis");
+        if !analysis_root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut records = Vec::new();
+        for entry in fs::read_dir(analysis_root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if !file_name.starts_with("journal-profile-discovery-jed-")
+                || !file_name.ends_with(".json")
+            {
+                continue;
+            }
+            let record: JournalProfileDiscoveryRecord = read_json(&entry.path())?;
+            if record.workspace_id != workspace_id
+                || file_name != format!("journal-profile-discovery-{}.json", record.discovery_id)
+            {
+                return Err(WorkspaceError::InvalidManifest(
+                    "期刊外部发现记录与当前论文工作区不一致".to_owned(),
+                ));
+            }
+            records.push(record);
+        }
+        records.sort_by(|left, right| {
+            right
+                .created_unix_ms
+                .cmp(&left.created_unix_ms)
+                .then_with(|| left.discovery_id.cmp(&right.discovery_id))
+        });
+        Ok(records)
+    }
+
     fn journal_directory_store(&self) -> JournalDirectoryStore {
         JournalDirectoryStore::new(self.root.join("journal-directory"))
     }
@@ -2162,6 +2298,13 @@ impl WorkspaceStore {
                     "不支持 .{extension} 文件"
                 )));
             }
+            if !is_allowed_submission_material_kind_extension(kind, &extension) {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+                    "{}：{}",
+                    original_name,
+                    submission_material_kind_extension_help(kind)
+                )));
+            }
             let material_id = Uuid::new_v4().to_string();
             let relative_path = format!("materials/files/{material_id}.{extension}");
             let destination = workspace_root.join(&relative_path);
@@ -2272,6 +2415,68 @@ impl WorkspaceStore {
             } else {
                 "submission_material_excluded"
             },
+            &manifest.workspace,
+            unix_time_ms()?,
+        )?;
+        self.submission_materials(workspace_id)
+    }
+
+    pub fn delete_submission_material(
+        &self,
+        workspace_id: &str,
+        material_id: &str,
+        author_confirmed: bool,
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        Uuid::parse_str(material_id).map_err(|_| {
+            WorkspaceError::InvalidSubmissionMaterial("无效的投稿材料标识".to_owned())
+        })?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        let mut stored = read_stored_submission_materials(&workspace_root)?;
+        let index = stored
+            .materials
+            .iter()
+            .position(|item| item.material.material_id == material_id)
+            .ok_or_else(|| {
+                WorkspaceError::InvalidSubmissionMaterial("未找到该投稿材料".to_owned())
+            })?;
+        let material_path =
+            resolve_submission_material_path(&workspace_root, &stored.materials[index])?;
+        let deleting_path = workspace_root
+            .join("materials")
+            .join("files")
+            .join(format!(".{material_id}.deleting"));
+        if deleting_path.exists() {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "附件删除暂存位置已存在，请重新打开工作区后再试".to_owned(),
+            ));
+        }
+
+        fs::rename(&material_path, &deleting_path)?;
+        stored.materials.remove(index);
+        stored.schema_version = 3;
+        let catalog_path = workspace_root.join("materials").join("catalog.json");
+        if let Err(error) = write_or_replace_json(&catalog_path, &stored) {
+            let _ = fs::rename(&deleting_path, &material_path);
+            return Err(error);
+        }
+        let metadata = fs::symlink_metadata(&deleting_path)?;
+        if !metadata.file_type().is_symlink() && metadata.permissions().readonly() {
+            let mut permissions = metadata.permissions();
+            make_file_owner_writable(&mut permissions);
+            fs::set_permissions(&deleting_path, permissions)?;
+        }
+        fs::remove_file(&deleting_path)?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_material_deleted",
             &manifest.workspace,
             unix_time_ms()?,
         )?;
@@ -2499,6 +2704,50 @@ impl WorkspaceStore {
             "submission_backup_removed",
             &manifest.workspace,
             removed_unix_ms,
+        )?;
+        Ok(plan)
+    }
+
+    pub fn clear_primary_submission_target(
+        &self,
+        workspace_id: &str,
+        primary_selection_id: &str,
+        author_confirmed: bool,
+    ) -> Result<SubmissionTargetPlan, WorkspaceError> {
+        if !author_confirmed {
+            return Err(WorkspaceError::AuthorConfirmationRequired);
+        }
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        if manifest.workspace.id != workspace_id {
+            return Err(WorkspaceError::InvalidWorkspaceId);
+        }
+        if self.lifecycle(workspace_id)?.submission.is_some() {
+            return Err(WorkspaceError::SubmissionTargetLockedBySubmission);
+        }
+        let mut plan = read_submission_target_plan(&workspace_root, workspace_id)?;
+        if plan
+            .primary
+            .as_ref()
+            .is_none_or(|target| target.selection_id != primary_selection_id)
+        {
+            return Err(WorkspaceError::SubmissionTargetNotFound);
+        }
+        let cleared_unix_ms = target_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        plan.primary = None;
+        plan.updated_unix_ms = cleared_unix_ms;
+        let targets_root = workspace_root.join("targets");
+        write_or_replace_json(&targets_root.join("plan.json"), &plan)?;
+        let current_target_path = targets_root.join("current.json");
+        if current_target_path.exists() {
+            fs::remove_file(current_target_path)?;
+        }
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            "submission_primary_target_cleared",
+            &manifest.workspace,
+            cleared_unix_ms,
         )?;
         Ok(plan)
     }
@@ -4347,18 +4596,24 @@ fn is_allowed_submission_material_extension(extension: &str) -> bool {
         extension,
         "doc"
             | "docx"
+            | "odt"
             | "rtf"
             | "tex"
             | "zip"
             | "tar"
             | "gz"
+            | "tgz"
             | "bib"
             | "bbl"
             | "bst"
             | "cls"
             | "sty"
+            | "ris"
+            | "nbib"
+            | "enw"
             | "pdf"
             | "eps"
+            | "ps"
             | "svg"
             | "png"
             | "jpg"
@@ -4366,10 +4621,144 @@ fn is_allowed_submission_material_extension(extension: &str) -> bool {
             | "tif"
             | "tiff"
             | "csv"
+            | "tsv"
             | "xls"
             | "xlsx"
+            | "ods"
+            | "ppt"
+            | "pptx"
+            | "odp"
             | "txt"
+            | "md"
+            | "json"
+            | "xml"
+            | "mp4"
+            | "mov"
+            | "avi"
+            | "webm"
+            | "mpeg"
+            | "mpg"
+            | "mp3"
+            | "wav"
+            | "m4a"
+            | "sav"
+            | "dta"
+            | "mat"
+            | "h5"
+            | "hdf5"
+            | "parquet"
     )
+}
+
+fn is_allowed_submission_material_kind_extension(
+    kind: SubmissionMaterialKind,
+    extension: &str,
+) -> bool {
+    match kind {
+        SubmissionMaterialKind::SourceProject => matches!(extension, "zip" | "tar" | "gz" | "tgz"),
+        SubmissionMaterialKind::BlindedManuscript => {
+            matches!(extension, "doc" | "docx" | "odt" | "rtf" | "tex" | "pdf")
+        }
+        SubmissionMaterialKind::Figure => matches!(
+            extension,
+            "pdf" | "eps" | "ps" | "svg" | "png" | "jpg" | "jpeg" | "tif" | "tiff"
+        ),
+        SubmissionMaterialKind::Table => matches!(
+            extension,
+            "csv" | "tsv" | "xls" | "xlsx" | "ods" | "doc" | "docx" | "odt" | "rtf" | "tex"
+        ),
+        SubmissionMaterialKind::Bibliography => {
+            matches!(
+                extension,
+                "bib"
+                    | "bbl"
+                    | "ris"
+                    | "nbib"
+                    | "enw"
+                    | "xml"
+                    | "txt"
+                    | "doc"
+                    | "docx"
+                    | "odt"
+                    | "rtf"
+            )
+        }
+        SubmissionMaterialKind::CoverLetter
+        | SubmissionMaterialKind::TitlePage
+        | SubmissionMaterialKind::Declaration => {
+            matches!(
+                extension,
+                "doc" | "docx" | "odt" | "rtf" | "tex" | "pdf" | "txt"
+            )
+        }
+        SubmissionMaterialKind::Supplementary | SubmissionMaterialKind::Other => {
+            is_allowed_submission_material_extension(extension)
+        }
+    }
+}
+
+fn submission_material_kind_extension_help(kind: SubmissionMaterialKind) -> &'static str {
+    match kind {
+        SubmissionMaterialKind::SourceProject => "源文件工程只接受 ZIP、TAR、GZ 或 TGZ",
+        SubmissionMaterialKind::BlindedManuscript => {
+            "匿名主稿只接受 DOC、DOCX、ODT、RTF、TEX 或 PDF"
+        }
+        SubmissionMaterialKind::Figure => {
+            "图片栏只接受 PDF、EPS、PS、SVG、PNG、JPG 或 TIFF；CSV/TSV/Excel 请从“可编辑表格”上传"
+        }
+        SubmissionMaterialKind::Table => {
+            "表格栏只接受 CSV、TSV、Excel、ODS、Word、RTF 或 TEX；图片文件请从“原始图件”上传"
+        }
+        SubmissionMaterialKind::Bibliography => {
+            "参考文献栏只接受 BIB、BBL、RIS、NBIB、ENW、XML、Word、RTF 或 TXT"
+        }
+        SubmissionMaterialKind::CoverLetter
+        | SubmissionMaterialKind::TitlePage
+        | SubmissionMaterialKind::Declaration => {
+            "该文档栏只接受 DOC、DOCX、ODT、RTF、TEX、PDF 或 TXT"
+        }
+        SubmissionMaterialKind::Supplementary | SubmissionMaterialKind::Other => {
+            "文件类型与当前投稿资料类别不匹配"
+        }
+    }
+}
+
+fn is_valid_utf16_text(content: &[u8]) -> bool {
+    if content.len() < 4 {
+        return false;
+    }
+    let (little_endian, payload) = if content.starts_with(&[0xff, 0xfe]) {
+        (true, &content[2..])
+    } else if content.starts_with(&[0xfe, 0xff]) {
+        (false, &content[2..])
+    } else {
+        let pairs = content.chunks_exact(2).take(128).collect::<Vec<_>>();
+        if pairs.len() < 4 {
+            return false;
+        }
+        let little_zeros = pairs.iter().filter(|pair| pair[1] == 0).count();
+        let big_zeros = pairs.iter().filter(|pair| pair[0] == 0).count();
+        if little_zeros.max(big_zeros) * 3 < pairs.len() * 2 {
+            return false;
+        }
+        (little_zeros >= big_zeros, content)
+    };
+    let units = payload
+        .chunks_exact(2)
+        .map(|pair| {
+            if little_endian {
+                u16::from_le_bytes([pair[0], pair[1]])
+            } else {
+                u16::from_be_bytes([pair[0], pair[1]])
+            }
+        })
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).ok().is_some_and(|text| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
+    })
 }
 
 struct SubmissionMaterialValidation {
@@ -4383,6 +4772,11 @@ fn validate_submission_material(
     extension: &str,
     kind: SubmissionMaterialKind,
 ) -> Result<SubmissionMaterialValidation, WorkspaceError> {
+    if !is_allowed_submission_material_kind_extension(kind, extension) {
+        return Err(WorkspaceError::InvalidSubmissionMaterial(
+            submission_material_kind_extension_help(kind).to_owned(),
+        ));
+    }
     let mut file = File::open(path)?;
     let mut header = [0_u8; 16];
     let read = file.read(&mut header)?;
@@ -4391,6 +4785,10 @@ fn validate_submission_material(
         Some("application/pdf")
     } else if bytes.starts_with(b"PK\x03\x04") {
         Some("application/zip")
+    } else if bytes.starts_with(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") {
+        Some("application/x-ole-storage")
+    } else if bytes.starts_with(b"\x1f\x8b") {
+        Some("application/gzip")
     } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
@@ -4399,18 +4797,49 @@ fn validate_submission_material(
         Some("image/tiff")
     } else if bytes.starts_with(b"%!PS-Adobe") {
         Some("application/postscript")
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        Some("video/mp4")
+    } else if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WAVE" {
+        Some("audio/wav")
+    } else if bytes.starts_with(b"\x1a\x45\xdf\xa3") {
+        Some("video/webm")
+    } else if bytes.starts_with(b"ID3")
+        || (bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xe0 == 0xe0)
+    {
+        Some("audio/mpeg")
     } else {
         None
     };
     let mut issues = Vec::new();
     let mut blocked = false;
+    if matches!(extension, "csv" | "tsv") && detected == Some("application/x-ole-storage") {
+        blocked = true;
+        issues.push(format!(
+            "文件内容实际是旧版 Microsoft Excel（.xls），不是 {} 文本；请将扩展名改为 .xls 后从“可编辑表格”重新上传，或在 Excel 中另存为真正的 {}",
+            extension.to_ascii_uppercase(),
+            extension.to_ascii_uppercase()
+        ));
+    } else if matches!(extension, "csv" | "tsv") && detected == Some("application/zip") {
+        blocked = true;
+        issues.push(format!(
+            "文件内容实际是 ZIP/Office Open XML 工作簿，不是 {} 文本；请恢复正确的 .xlsx 扩展名后从“可编辑表格”重新上传，或另存为真正的 {}",
+            extension.to_ascii_uppercase(),
+            extension.to_ascii_uppercase()
+        ));
+    }
     let signature_expected = match extension {
         "pdf" => Some("application/pdf"),
-        "docx" | "xlsx" | "zip" => Some("application/zip"),
+        "docx" | "xlsx" | "odt" | "ods" | "pptx" | "odp" | "zip" => Some("application/zip"),
+        "doc" | "xls" | "ppt" => Some("application/x-ole-storage"),
+        "gz" | "tgz" => Some("application/gzip"),
         "png" => Some("image/png"),
         "jpg" | "jpeg" => Some("image/jpeg"),
         "tif" | "tiff" => Some("image/tiff"),
-        "eps" => Some("application/postscript"),
+        "eps" | "ps" => Some("application/postscript"),
+        "mp4" | "mov" | "m4a" => Some("video/mp4"),
+        "webm" => Some("video/webm"),
+        "wav" => Some("audio/wav"),
+        "mp3" => Some("audio/mpeg"),
         _ => None,
     };
     if let Some(expected) = signature_expected {
@@ -4432,7 +4861,12 @@ fn validate_submission_material(
             }
         }
     }
-    if !blocked && matches!(extension, "docx" | "xlsx" | "zip") {
+    if !blocked
+        && matches!(
+            extension,
+            "docx" | "xlsx" | "odt" | "ods" | "pptx" | "odp" | "zip"
+        )
+    {
         let mut archive = ZipArchive::new(File::open(path)?).map_err(|_| {
             WorkspaceError::InvalidSubmissionMaterial("压缩文件结构无法解析".to_owned())
         })?;
@@ -4457,6 +4891,13 @@ fn validate_submission_material(
         } else if extension == "xlsx" && archive.by_name("xl/workbook.xml").is_err() {
             blocked = true;
             issues.push("XLSX 缺少必要的工作簿结构".to_owned());
+        } else if extension == "pptx" && archive.by_name("ppt/presentation.xml").is_err() {
+            blocked = true;
+            issues.push("PPTX 缺少必要的演示文稿结构".to_owned());
+        } else if matches!(extension, "odt" | "ods" | "odp") && archive.by_name("mimetype").is_err()
+        {
+            blocked = true;
+            issues.push("OpenDocument 文件缺少必要的 mimetype 结构".to_owned());
         }
     }
     if !blocked
@@ -4470,14 +4911,37 @@ fn validate_submission_material(
     if !blocked
         && matches!(
             extension,
-            "doc" | "rtf" | "tex" | "bib" | "bbl" | "bst" | "cls" | "sty" | "csv" | "xls" | "txt"
+            "rtf"
+                | "tex"
+                | "bib"
+                | "bbl"
+                | "bst"
+                | "cls"
+                | "sty"
+                | "ris"
+                | "nbib"
+                | "enw"
+                | "csv"
+                | "tsv"
+                | "txt"
+                | "md"
+                | "json"
+                | "xml"
+                | "svg"
         )
     {
         let mut content = Vec::new();
         File::open(path)?.take(4096).read_to_end(&mut content)?;
-        if content.contains(&0) && !matches!(extension, "doc" | "xls") {
-            blocked = true;
-            issues.push("文本类文件包含异常二进制内容".to_owned());
+        if content.contains(&0) {
+            if is_valid_utf16_text(&content) {
+                issues.push(
+                    "文本文件使用 UTF-16 编码；已按文本接收，投稿前请核对期刊要求的字符编码"
+                        .to_owned(),
+                );
+            } else {
+                blocked = true;
+                issues.push("文本类文件包含异常二进制内容".to_owned());
+            }
         }
     }
     Ok(SubmissionMaterialValidation {
@@ -4556,16 +5020,40 @@ fn read_stored_submission_materials(
     }
     let catalog: StoredSubmissionMaterialCatalog = read_json(&path)?;
     for item in &catalog.materials {
-        let stored_path = resolve_snapshot_path(workspace_root, &item.relative_path)?;
-        if !stored_path.is_file() {
-            return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
-                "缺少已登记文件 {}",
-                item.material.original_name
-            )));
-        }
+        let stored_path = resolve_submission_material_path(workspace_root, item)?;
         verify_file_hash(&stored_path, &item.material.content_hash)?;
     }
     Ok(catalog)
+}
+
+fn resolve_submission_material_path(
+    workspace_root: &Path,
+    item: &StoredSubmissionMaterial,
+) -> Result<PathBuf, WorkspaceError> {
+    let expected = format!(
+        "materials/files/{}.{}",
+        item.material.material_id, item.material.extension
+    );
+    if item.relative_path != expected || !is_safe_relative_path(&item.relative_path) {
+        return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+            "附件 {} 的本地路径无效",
+            item.material.original_name
+        )));
+    }
+    let stored_path = workspace_root.join(&item.relative_path);
+    let metadata = fs::symlink_metadata(&stored_path).map_err(|_| {
+        WorkspaceError::InvalidSubmissionMaterial(format!(
+            "缺少已登记文件 {}",
+            item.material.original_name
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+            "附件 {} 不是安全的本地普通文件",
+            item.material.original_name
+        )));
+    }
+    Ok(stored_path)
 }
 
 fn read_submission_target(
@@ -5103,16 +5591,40 @@ fn build_submission_material_catalog(
             };
             checklist.push(item);
         }
-    } else if figures_expected {
+    }
+    if figures_expected
+        && !checklist
+            .iter()
+            .any(|item| item.material_kind == Some(SubmissionMaterialKind::Figure))
+    {
         checklist.push(file_submission_checklist_item(
             "figure-originals",
-            "原始图片",
+            "原始图件",
             "files",
             false,
             matching_material_ids("figure-originals", SubmissionMaterialKind::Figure),
             structure.map_or(1, |report| report.figure_count.max(1) as usize),
             SubmissionMaterialKind::Figure,
             "正文包含图片；取得目标期刊要求后再确认文件格式和精度".to_owned(),
+            None,
+            journal_requirements,
+        ));
+    }
+    if tables_expected
+        && !checklist
+            .iter()
+            .any(|item| item.material_kind == Some(SubmissionMaterialKind::Table))
+    {
+        checklist.push(file_submission_checklist_item(
+            "table-editables",
+            "可编辑表格",
+            "files",
+            false,
+            matching_material_ids("table-editables", SubmissionMaterialKind::Table),
+            structure.map_or(1, |report| report.table_count.max(1) as usize),
+            SubmissionMaterialKind::Table,
+            "正文包含表格；请提供 CSV、Excel、Word 或 LaTeX 等可编辑文件，图片版表格不能替代源数据"
+                .to_owned(),
             None,
             journal_requirements,
         ));
@@ -5648,15 +6160,17 @@ fn make_file_owner_writable(permissions: &mut fs::Permissions) {
 #[cfg(test)]
 mod tests {
     use super::{
-        make_tree_writable, read_json, write_json, DecompositionManifest,
-        SubmissionTargetSelection, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
+        make_tree_writable, read_json, read_stored_submission_materials, write_json,
+        DecompositionManifest, SubmissionTargetSelection, VersionCreation, VersionOrigin,
+        WorkspaceError, WorkspaceStore,
     };
     use crate::{
         ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
-        JournalRecommendationProfileInput, JournalRequirementSourceDocument,
-        JournalRequirementSourceMode, KnowledgeBodyError, KnowledgeCandidateDecision,
-        KnowledgeInquiryStance, KnowledgeInquiryTarget, ManuscriptPurpose, ReadinessOutcome,
-        RevisionApplication, RevisionChangeInput, RevisionFieldKind, SubmissionMaterialKind,
+        JournalProfileDiscoveryRecord, JournalRecommendationProfileInput,
+        JournalRequirementSourceDocument, JournalRequirementSourceMode, KnowledgeBodyError,
+        KnowledgeCandidateDecision, KnowledgeInquiryStance, KnowledgeInquiryTarget,
+        ManuscriptPurpose, ReadinessOutcome, RevisionApplication, RevisionChangeInput,
+        RevisionFieldKind, SubmissionMaterialKind, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
     };
     use std::{
         fs::{self, File},
@@ -5728,8 +6242,20 @@ mod tests {
                 JournalMatchPreferences::default(),
             )
             .unwrap();
-        let journal_id = run.domestic.sprint.first().unwrap().id.clone();
-        let backup_journal_id = run.domestic.matching.first().unwrap().id.clone();
+        let domestic = run
+            .domestic
+            .sprint
+            .iter()
+            .chain(run.domestic.matching.iter())
+            .chain(run.domestic.safeguard.iter())
+            .collect::<Vec<_>>();
+        let journal_id = domestic.first().unwrap().id.clone();
+        let backup_journal_id = domestic
+            .iter()
+            .find(|journal| journal.id != journal_id)
+            .unwrap()
+            .id
+            .clone();
         let target = store
             .select_recommended_journal(workspace_id, &run.run_id, &journal_id)
             .unwrap();
@@ -5803,14 +6329,23 @@ mod tests {
 
         assert_eq!(profile, same_profile);
         assert_eq!(run.recommendation_profile.profile_id, profile.profile_id);
-        assert_eq!(run.domestic.sprint.len(), 2);
-        assert_eq!(run.domestic.matching.len(), 3);
-        assert_eq!(run.domestic.safeguard.len(), 3);
-        assert_eq!(run.international.sprint.len(), 2);
-        assert_eq!(run.international.matching.len(), 3);
-        assert_eq!(run.international.safeguard.len(), 3);
+        assert!(run.domestic.sprint.len() <= 2);
+        assert!(!run.domestic.matching.is_empty());
+        assert!(run.domestic.matching.len() <= 3);
+        assert!(run.domestic.safeguard.len() <= 3);
+        assert!(run.international.sprint.len() <= 2);
+        assert!(!run.international.matching.is_empty());
+        assert!(run.international.matching.len() <= 3);
+        assert!(run.international.safeguard.len() <= 3);
         assert!(run.school_rule_status.contains("search_required"));
-        let recommended = run.domestic.sprint.first().unwrap();
+        let recommended = run
+            .domestic
+            .sprint
+            .iter()
+            .chain(run.domestic.matching.iter())
+            .chain(run.domestic.safeguard.iter())
+            .next()
+            .unwrap();
         let target = store
             .select_recommended_journal(&workspace.id, &run.run_id, &recommended.id)
             .unwrap();
@@ -5819,7 +6354,53 @@ mod tests {
             store.submission_target(&workspace.id).unwrap(),
             Some(target.clone())
         );
-        let backup_candidate = run.domestic.matching.first().unwrap();
+        let discovery = JournalProfileDiscoveryRecord {
+            schema_version: JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
+            discovery_id: "jed-0123456789abcdefabcd".into(),
+            workspace_id: workspace.id.clone(),
+            target_selection_id: target.selection_id.clone(),
+            journal_id: target.journal_id.clone(),
+            journal_name: target.name.clone(),
+            issn: Some("1234-5678".into()),
+            eissn: Some("8765-4321".into()),
+            publisher: Some(target.publisher.clone()),
+            scope_summary: Some("Synthetic scope discovered from the local directory.".into()),
+            reported_print_circulation: None,
+            average_review_days: None,
+            submission_to_publication_days: Some(120.0),
+            publication_frequency: Some("monthly".into()),
+            apc_status: Some("no_apc".into()),
+            open_access_status: Some("hybrid".into()),
+            official_homepage_url: Some(target.homepage_url.clone()),
+            aims_scope_url: None,
+            author_instructions_url: None,
+            source_urls: vec![target.homepage_url.clone()],
+            missing_fields: vec![
+                "reported_print_circulation".into(),
+                "average_review_days".into(),
+            ],
+            evidence_status: "local_profile_available".into(),
+            source_mode: "local_directory".into(),
+            provider_label: None,
+            model: None,
+            external_transmission: "not_performed".into(),
+            created_unix_ms: 10,
+        };
+        store
+            .save_journal_profile_discovery(&workspace.id, &discovery)
+            .unwrap();
+        assert_eq!(
+            store.journal_profile_discoveries(&workspace.id).unwrap(),
+            vec![discovery]
+        );
+        let backup_candidate = run
+            .domestic
+            .sprint
+            .iter()
+            .chain(run.domestic.matching.iter())
+            .chain(run.domestic.safeguard.iter())
+            .find(|candidate| candidate.id != recommended.id)
+            .unwrap();
         let plan = store
             .add_backup_recommended_journal(&workspace.id, &run.run_id, &backup_candidate.id)
             .unwrap();
@@ -5950,6 +6531,58 @@ mod tests {
         store
             .set_submission_material_included(&workspace.id, &title_page_id, true)
             .unwrap();
+        assert!(matches!(
+            store.delete_submission_material(&workspace.id, &title_page_id, false),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+        let stored_before_delete =
+            read_stored_submission_materials(&store.projects_root().join(&workspace.id)).unwrap();
+        let title_page_path = store.projects_root().join(&workspace.id).join(
+            &stored_before_delete
+                .materials
+                .iter()
+                .find(|item| item.material.material_id == title_page_id)
+                .unwrap()
+                .relative_path,
+        );
+        assert!(title_page_path.is_file());
+        let materials = store
+            .delete_submission_material(&workspace.id, &title_page_id, true)
+            .unwrap();
+        assert!(!title_page_path.exists());
+        assert!(materials
+            .materials
+            .iter()
+            .all(|material| material.material_id != title_page_id));
+        assert!(!materials.required_complete);
+        assert!(
+            !store
+                .target_submission_package_plan(&workspace.id)
+                .unwrap()
+                .ready
+        );
+        let audit = fs::read_to_string(
+            store
+                .projects_root()
+                .join(&workspace.id)
+                .join("audit.jsonl"),
+        )
+        .unwrap();
+        assert!(audit.contains("submission_material_deleted"));
+        let materials = store
+            .add_submission_materials(
+                &workspace.id,
+                SubmissionMaterialKind::TitlePage,
+                std::slice::from_ref(&title_page),
+            )
+            .unwrap();
+        assert!(materials.required_complete);
+        assert!(
+            store
+                .target_submission_package_plan(&workspace.id)
+                .unwrap()
+                .ready
+        );
         let target_export = store
             .export_target_submission_package(&workspace.id, &target_exports)
             .unwrap();
@@ -6104,6 +6737,178 @@ mod tests {
             .chain(evidence_run.international.matching.iter())
             .chain(evidence_run.international.safeguard.iter())
             .any(|item| item.scores.institution_rules == Some(100)));
+    }
+
+    #[test]
+    fn clears_only_the_active_primary_pointer_and_preserves_target_history_and_backups() {
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("clear-primary-target.tex");
+        fs::write(
+            &source_path,
+            r"\title{Primary Target Cancellation}
+\author{Synthetic Author}
+\begin{abstract}Computer vision evidence.\end{abstract}
+\keywords{computer vision}
+\section{Introduction}
+\section{Methods}
+\section{Results}
+\bibliography{synthetic}",
+        )
+        .unwrap();
+        let store = WorkspaceStore::new(temporary.path().join("store"));
+        let workspace = store.create_from_source(&source_path).unwrap();
+        store.analyze_structure(&workspace.id).unwrap();
+        let (target, recommendation_run_id, _, backup_journal_id) =
+            select_synthetic_target(&store, &workspace.id);
+        let plan = store
+            .add_backup_recommended_journal(
+                &workspace.id,
+                &recommendation_run_id,
+                &backup_journal_id,
+            )
+            .unwrap();
+        assert_eq!(plan.backups.len(), 1);
+        assert!(matches!(
+            store.clear_primary_submission_target(&workspace.id, &target.selection_id, false),
+            Err(WorkspaceError::AuthorConfirmationRequired)
+        ));
+
+        let cleared = store
+            .clear_primary_submission_target(&workspace.id, &target.selection_id, true)
+            .unwrap();
+
+        assert!(cleared.primary.is_none());
+        assert_eq!(cleared.backups.len(), 1);
+        assert!(store.submission_target(&workspace.id).unwrap().is_none());
+        let workspace_root = store.projects_root().join(&workspace.id);
+        assert!(workspace_root
+            .join("targets")
+            .join(&target.selection_id)
+            .join("target.json")
+            .is_file());
+        assert!(!workspace_root.join("targets").join("current.json").exists());
+        assert!(fs::read_to_string(workspace_root.join("audit.jsonl"))
+            .unwrap()
+            .contains("submission_primary_target_cleared"));
+        let next_selection_id = cleared.backups[0].selection_id.clone();
+        let promoted = store
+            .promote_backup_target(&workspace.id, &next_selection_id, "not_submitted")
+            .unwrap();
+        assert!(promoted.primary.is_some());
+        assert!(promoted.backups.is_empty());
+        assert_eq!(
+            store
+                .submission_target(&workspace.id)
+                .unwrap()
+                .unwrap()
+                .journal_id,
+            promoted.primary.unwrap().journal_id
+        );
+    }
+
+    #[test]
+    fn separates_figure_and_table_formats_and_accepts_utf16_text() {
+        let temporary = SyntheticDirectory::create();
+        let table_path = temporary.path().join("Table1.csv");
+        let mut utf16_csv = vec![0xff, 0xfe];
+        for unit in "variable,value\r\nsynthetic,1\r\n".encode_utf16() {
+            utf16_csv.extend_from_slice(&unit.to_le_bytes());
+        }
+        fs::write(&table_path, utf16_csv).unwrap();
+
+        assert!(super::is_allowed_submission_material_kind_extension(
+            SubmissionMaterialKind::Table,
+            "csv"
+        ));
+        assert!(!super::is_allowed_submission_material_kind_extension(
+            SubmissionMaterialKind::Figure,
+            "csv"
+        ));
+        let validation =
+            super::validate_submission_material(&table_path, "csv", SubmissionMaterialKind::Table)
+                .unwrap();
+        assert_eq!(validation.status, "warning");
+        assert!(validation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("UTF-16")));
+        assert!(matches!(
+            super::validate_submission_material(
+                &table_path,
+                "csv",
+                SubmissionMaterialKind::Figure
+            ),
+            Err(WorkspaceError::InvalidSubmissionMaterial(message))
+                if message.contains("可编辑表格")
+        ));
+
+        let disguised_excel_path = temporary.path().join("disguised.csv");
+        fs::write(
+            &disguised_excel_path,
+            b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic workbook",
+        )
+        .unwrap();
+        let disguised_validation = super::validate_submission_material(
+            &disguised_excel_path,
+            "csv",
+            SubmissionMaterialKind::Table,
+        )
+        .unwrap();
+        assert_eq!(disguised_validation.status, "blocked");
+        assert!(disguised_validation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("实际是旧版 Microsoft Excel（.xls）")));
+    }
+
+    #[test]
+    fn preserves_detected_figure_and_table_upload_slots_with_official_requirements() {
+        let temporary = SyntheticDirectory::create();
+        let source_path = temporary.path().join("figure-table-study.tex");
+        fs::write(
+            &source_path,
+            r"\title{Figure and Table Study}
+\begin{abstract}Synthetic evidence.\end{abstract}
+\keywords{computer vision}
+\section{Introduction}
+\begin{figure}\caption{Synthetic figure}\end{figure}
+\begin{table}\caption{Synthetic table}\end{table}
+\bibliography{synthetic}",
+        )
+        .unwrap();
+        let store = WorkspaceStore::new(temporary.path().join("store"));
+        let workspace = store.create_from_source(&source_path).unwrap();
+        let structure = store.analyze_structure(&workspace.id).unwrap();
+        assert_eq!(structure.figure_count, 1);
+        assert_eq!(structure.table_count, 1);
+        let (target, _, _, _) = select_synthetic_target(&store, &workspace.id);
+        store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "https://journal.example/guide-for-authors".to_owned(),
+                    title: "Guide for authors".to_owned(),
+                    text: "A separate title page is required.".to_owned(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::AuthorProvidedOfficialText,
+                true,
+                "not_performed",
+            )
+            .unwrap();
+
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        assert!(catalog.checklist.iter().any(|item| {
+            item.id == "figure-originals"
+                && item.verification == "file"
+                && item.material_kind == Some(SubmissionMaterialKind::Figure)
+        }));
+        assert!(catalog.checklist.iter().any(|item| {
+            item.id == "table-editables"
+                && item.verification == "file"
+                && item.material_kind == Some(SubmissionMaterialKind::Table)
+        }));
     }
 
     #[test]
@@ -6968,5 +7773,9 @@ Synthetic method.",
                 .map(|record| record.submission_id.as_str()),
             Some(submission.submission_id.as_str())
         );
+        assert!(matches!(
+            store.clear_primary_submission_target(&workspace.id, &target.selection_id, true),
+            Err(WorkspaceError::SubmissionTargetLockedBySubmission)
+        ));
     }
 }
