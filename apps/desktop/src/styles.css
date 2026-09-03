@@ -923,7 +923,9 @@ body { font-weight: 400; }
 .materials-checklist ul, .material-file-list ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .materials-checklist li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 9px; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
 .materials-checklist li > svg { width: 16px; height: 16px; color: var(--accent); }
-.materials-checklist li[data-status="missing"] > svg { color: var(--warning); }
+.materials-checklist li[data-status="missing"] > svg,
+.materials-checklist li[data-status="author_confirmation"] > svg,
+.materials-checklist li[data-status="manual_verification"] > svg { color: var(--warning); }
 .materials-checklist li strong { font-size: 12px; font-weight: 500; }
 .materials-checklist li p { margin: 2px 0 0; color: var(--text-muted); font-size: 10px; line-height: 15px; }
 .materials-checklist li > span { color: var(--text-muted); font-size: 9px; }
@@ -947,6 +949,32 @@ body { font-weight: 400; }
 .advanced-settings p { margin: 10px 0; color: var(--text-muted); font-size: 10px; line-height: 16px; }
 .advanced-settings small { display: block; margin-top: 8px; color: var(--text-muted); }
 .workspace-shell .primary-button, .workspace-shell .secondary-button { min-height: 40px; }
+
+/* V0.23 content-first recommendation and target-specific readiness */
+.submission-flow-rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; }
+.submission-flow-rail li { min-height: 68px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 10px; padding: 10px 12px; color: var(--text-muted); background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+.submission-flow-rail li > span { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; font-size: 9px; }
+.submission-flow-rail li > span svg { width: 15px; height: 15px; }
+.submission-flow-rail li strong, .submission-flow-rail li small { display: block; }
+.submission-flow-rail li strong { color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.submission-flow-rail li small { margin-top: 3px; font-size: 9px; line-height: 14px; }
+.submission-flow-rail li[data-active="true"] { border-color: var(--border-strong); box-shadow: inset 3px 0 0 var(--accent); }
+.submission-flow-rail li[data-active="true"] strong { color: var(--text); }
+.submission-flow-rail li[data-complete="true"] > span { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.checklist-groups { display: grid; gap: 13px; }
+.checklist-group { padding-top: 12px; border-top: 1px solid var(--border); }
+.checklist-group:first-child { padding-top: 0; border-top: 0; }
+.checklist-group > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.checklist-group > header h4 { margin: 0; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.checklist-group > header span { min-width: 22px; padding: 2px 6px; text-align: center; background: var(--bg); border-radius: 10px; }
+.checklist-item-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.checklist-item-heading > span { flex: 0 0 auto; padding: 2px 6px; color: var(--text-muted); background: var(--panel); border-radius: 5px; font-size: 9px; }
+.checklist-evidence { margin-top: 8px; }
+.checklist-evidence summary { min-height: 32px; display: flex; align-items: center; color: var(--text-secondary); cursor: pointer; font-size: 10px; }
+.checklist-evidence blockquote { margin: 4px 0 7px; padding-left: 9px; color: var(--text-secondary); border-left: 2px solid var(--border-strong); font-size: 10px; line-height: 16px; }
+.checklist-evidence a, .checklist-evidence small { display: block; overflow-wrap: anywhere; color: var(--text-muted); font-size: 9px; line-height: 14px; }
+.checklist-confirm { min-height: 40px; margin-top: 7px; }
+.material-upload-heading { margin: 22px 0 10px; font-size: 13px; font-weight: 600; }
 
 /* V0.20 journal requirement evidence and one-primary/many-backup routes */
 .journal-result-group li[data-backup="true"] { border-style: dashed; border-color: var(--border-strong); }
@@ -1020,7 +1048,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 @media (max-width: 620px) {
   .workspace-shell .workflow-header { align-items: flex-start; flex-direction: column; }
   .workflow-header-actions { justify-content: flex-start; }
-  .overview-summary-grid, .material-type-grid { grid-template-columns: 1fr; }
+  .overview-summary-grid, .material-type-grid, .submission-flow-rail { grid-template-columns: 1fr; }
   .submission-route-plan > header, .route-heading { flex-direction: column; }
   .submission-route-card.backup-route { margin-left: 0; }
   .network-consent, .route-promote { grid-template-columns: 1fr; }

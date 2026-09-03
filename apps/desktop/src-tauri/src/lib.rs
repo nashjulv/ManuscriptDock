@@ -762,6 +762,19 @@ async fn get_submission_materials(
 }
 
 #[tauri::command]
+async fn confirm_submission_requirement(
+    workspace_id: String,
+    item_id: String,
+    confirmed: bool,
+    app: AppHandle,
+) -> Result<SubmissionMaterialCatalog, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .confirm_submission_requirement(&workspace_id, &item_id, confirmed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn select_recommended_journal(
     workspace_id: String,
     recommendation_run_id: String,
@@ -1569,6 +1582,7 @@ pub fn run() {
             export_submission_package,
             add_submission_materials,
             get_submission_materials,
+            confirm_submission_requirement,
             select_recommended_journal,
             add_backup_recommended_journal,
             promote_backup_target,

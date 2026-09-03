@@ -1,5 +1,27 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.23 content-first recommendation and evidence-backed material checklist
+
+- Changed the entry sequence so an imported PDF, DOCX, or TEX manuscript can produce preliminary
+  journal recommendations immediately. Institution, specialty, purpose, and timing remain optional
+  refinements rather than gates before the first recommendation.
+- Persisted the resolved article type with each recommendation and target selection, then generated
+  the materials checklist from the current manuscript, selected journal, article type, and current
+  source-backed author-guide snapshot.
+- Split the checklist into target evidence, manuscript and length, supporting files, and declarations.
+  Multiple abstract, main-text, and section-level length limits retain separate source excerpts, while
+  blinded manuscripts, reporting checklists, permissions, copyright forms, and author agreements are
+  represented as explicit upload requirements.
+- Added author/manual confirmations that are bound to the exact target-selection and requirement
+  snapshot. A refreshed guide or changed target invalidates those confirmations instead of silently
+  carrying them forward.
+- Tightened package export so official requirements, all blocking files and confirmations, and a
+  current post-target check must all be complete at the Rust boundary. Revision now returns to target
+  confirmation because a new manuscript version cannot reuse an older target decision.
+- Added a three-state progress rail: preliminary recommendation, verified target, and submission ready.
+  The interface explicitly excludes grammar polishing and semantic rewriting from the current release,
+  while marking AI semantic and grammar auditing as a planned later capability.
+
 ## 2026-09-03 — V0.22 target-led publisher package workflow
 
 - Reordered the five primary tasks to Overview, Target Journal, Materials, Check & Revise, and

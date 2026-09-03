@@ -48,6 +48,7 @@ pub enum JournalRequirementCategory {
     AuthorContributions,
     Orcid,
     FeesAndOpenAccess,
+    OtherSupportingFiles,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,9 +177,17 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
             "word count",
             "page limit",
             "maximum length",
+            "words maximum",
+            "words or fewer",
+            "words or less",
+            "characters maximum",
+            "not exceed",
+            "no more than",
             "篇幅",
             "字数",
             "页数",
+            "字以内",
+            "不超过",
         ],
     },
     RequirementPattern {
@@ -294,6 +303,25 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
             "发表费",
         ],
     },
+    RequirementPattern {
+        category: JournalRequirementCategory::OtherSupportingFiles,
+        label: "其他支持文件",
+        label_en: "Other supporting files",
+        keywords: &[
+            "supporting document",
+            "additional file",
+            "reporting checklist",
+            "permission form",
+            "copyright form",
+            "author agreement",
+            "其他文件",
+            "支持文件",
+            "报告清单",
+            "授权文件",
+            "版权协议",
+            "作者协议",
+        ],
+    },
 ];
 
 pub fn extract_journal_requirements(
@@ -312,40 +340,112 @@ pub fn extract_journal_requirements(
         .collect::<Vec<_>>();
     let mut requirements = Vec::new();
     for pattern in REQUIREMENT_PATTERNS {
-        let Some((document, excerpt)) = documents.iter().find_map(|document| {
-            find_evidence_excerpt(&document.text, pattern.keywords)
-                .map(|excerpt| (document, excerpt))
-        }) else {
-            continue;
-        };
-        let obligation = detect_obligation(&excerpt);
-        requirements.push(JournalRequirementItem {
-            id: format!("requirement-{}", category_slug(pattern.category)),
-            category: pattern.category,
-            label: pattern.label.to_owned(),
-            label_en: pattern.label_en.to_owned(),
-            obligation,
-            detail: obligation_detail(obligation).to_owned(),
-            source_url: document.url.clone(),
-            evidence_excerpt: excerpt,
-        });
+        let matches = documents
+            .iter()
+            .flat_map(|document| {
+                find_evidence_excerpts(&document.text, pattern.keywords)
+                    .into_iter()
+                    .map(move |excerpt| (document, excerpt))
+            })
+            .take(
+                if pattern.category == JournalRequirementCategory::LengthLimit {
+                    12
+                } else {
+                    1
+                },
+            )
+            .collect::<Vec<_>>();
+        for (index, (document, excerpt)) in matches.into_iter().enumerate() {
+            let obligation = detect_obligation(&excerpt);
+            let (label, label_en) = if pattern.category == JournalRequirementCategory::LengthLimit {
+                length_limit_label(&excerpt)
+            } else {
+                (pattern.label.to_owned(), pattern.label_en.to_owned())
+            };
+            requirements.push(JournalRequirementItem {
+                id: format!(
+                    "requirement-{}{}",
+                    category_slug(pattern.category),
+                    if index == 0 {
+                        String::new()
+                    } else {
+                        format!("-{}", index + 1)
+                    }
+                ),
+                category: pattern.category,
+                label,
+                label_en,
+                obligation,
+                detail: obligation_detail(obligation).to_owned(),
+                source_url: document.url.clone(),
+                evidence_excerpt: excerpt,
+            });
+        }
     }
     (sources, requirements)
 }
 
-fn find_evidence_excerpt(text: &str, keywords: &[&str]) -> Option<String> {
+fn find_evidence_excerpts(text: &str, keywords: &[&str]) -> Vec<String> {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
     normalized
         .split(['.', '!', '?', '。', '！', '？', ';', '；'])
         .map(str::trim)
         .filter(|sentence| sentence.chars().count() >= 12)
-        .find(|sentence| {
+        .filter(|sentence| {
             let lowercase = sentence.to_lowercase();
             keywords
                 .iter()
                 .any(|keyword| keyword_matches(&lowercase, keyword))
         })
         .map(|sentence| truncate_chars(sentence, 360))
+        .collect()
+}
+
+fn length_limit_label(excerpt: &str) -> (String, String) {
+    let lowercase = excerpt.to_lowercase();
+    for (needles, zh, en) in [
+        (
+            &["abstract", "摘要"][..],
+            "摘要篇幅限制",
+            "Abstract length limit",
+        ),
+        (&["title", "标题"][..], "标题篇幅限制", "Title length limit"),
+        (
+            &["introduction", "引言", "绪论"][..],
+            "引言篇幅限制",
+            "Introduction length limit",
+        ),
+        (
+            &["method", "方法"][..],
+            "方法篇幅限制",
+            "Methods length limit",
+        ),
+        (
+            &["result", "结果"][..],
+            "结果篇幅限制",
+            "Results length limit",
+        ),
+        (
+            &["discussion", "讨论"][..],
+            "讨论篇幅限制",
+            "Discussion length limit",
+        ),
+        (
+            &["conclusion", "结论"][..],
+            "结论篇幅限制",
+            "Conclusion length limit",
+        ),
+        (
+            &["main text", "full text", "正文"][..],
+            "正文篇幅限制",
+            "Main-text length limit",
+        ),
+    ] {
+        if needles.iter().any(|needle| lowercase.contains(needle)) {
+            return (zh.to_owned(), en.to_owned());
+        }
+    }
+    ("篇幅限制".to_owned(), "Length limit".to_owned())
 }
 
 fn keyword_matches(value: &str, keyword: &str) -> bool {
@@ -424,6 +524,7 @@ fn category_slug(category: JournalRequirementCategory) -> &'static str {
         JournalRequirementCategory::AuthorContributions => "author-contributions",
         JournalRequirementCategory::Orcid => "orcid",
         JournalRequirementCategory::FeesAndOpenAccess => "fees-open-access",
+        JournalRequirementCategory::OtherSupportingFiles => "other-supporting-files",
     }
 }
 
@@ -469,5 +570,32 @@ mod tests {
         }];
         let (_, requirements) = extract_journal_requirements(&documents, 1_000);
         assert!(requirements.is_empty());
+    }
+
+    #[test]
+    fn keeps_section_length_limits_and_supporting_files_as_separate_evidence() {
+        let documents = vec![JournalRequirementSourceDocument {
+            url: "https://journal.example/instructions".to_owned(),
+            title: "Instructions for authors".to_owned(),
+            text: "The abstract must not exceed 250 words. The main text must be no more than 5,000 words. Authors must upload the completed reporting checklist as a supporting document.".to_owned(),
+            official_host_matched: true,
+        }];
+        let (_, requirements) = extract_journal_requirements(&documents, 1_000);
+        let length_limits = requirements
+            .iter()
+            .filter(|item| item.category == JournalRequirementCategory::LengthLimit)
+            .collect::<Vec<_>>();
+        assert_eq!(length_limits.len(), 2);
+        assert!(length_limits
+            .iter()
+            .any(|item| item.label_en == "Abstract length limit"));
+        assert!(length_limits
+            .iter()
+            .any(|item| item.label_en == "Main-text length limit"));
+        assert!(requirements.iter().any(|item| {
+            item.category == JournalRequirementCategory::OtherSupportingFiles
+                && item.evidence_excerpt.contains("reporting checklist")
+                && item.obligation == JournalRequirementObligation::Required
+        }));
     }
 }

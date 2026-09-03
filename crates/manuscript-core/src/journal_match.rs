@@ -4,7 +4,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 5;
+pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 6;
 pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.4";
 pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2025.1";
 pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 2;
@@ -123,9 +123,7 @@ impl JournalRecommendationProfileInput {
         self.specialty = self.specialty.trim().to_owned();
         self.submission_deadline = self.submission_deadline.trim().to_owned();
         if self.author_name.chars().count() > 120
-            || self.institution.is_empty()
             || self.institution.chars().count() > 200
-            || self.specialty.is_empty()
             || self.specialty.chars().count() > 160
             || parse_iso_date_days(&self.submission_deadline).is_none()
         {
@@ -268,6 +266,8 @@ pub struct JournalRecommendationRun {
     pub catalog_version: String,
     pub catalog_verified_date: String,
     pub inferred_topic: ResearchTopic,
+    #[serde(default = "default_article_type_preference")]
+    pub resolved_article_type: ArticleTypePreference,
     pub topic_basis: String,
     pub maturity_score: u8,
     pub evaluated_unix_ms: u64,
@@ -800,6 +800,7 @@ pub fn recommend_journals_with_directory(
         catalog_version: JOURNAL_CATALOG_VERSION.into(),
         catalog_verified_date: "2025-04-16".into(),
         inferred_topic: topic,
+        resolved_article_type: article_type,
         topic_basis: if preferences.topic == ResearchTopic::Auto {
             topic_basis
         } else {
@@ -830,6 +831,10 @@ pub fn recommend_journals_with_directory(
         ],
         external_transmission,
     }
+}
+
+fn default_article_type_preference() -> ArticleTypePreference {
+    ArticleTypePreference::Auto
 }
 
 fn build_recommendation_portfolio(

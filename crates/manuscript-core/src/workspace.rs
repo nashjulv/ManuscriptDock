@@ -10,10 +10,10 @@ use crate::{
         JournalDirectorySummary,
     },
     journal_match::{
-        deadline_days_remaining, recommend_journals_with_directory, InstitutionRuleEvidence,
-        InstitutionRuleStatus, JournalMatchPreferences, JournalRecommendation,
-        JournalRecommendationProfile, JournalRecommendationProfileInput, JournalRecommendationRun,
-        JOURNAL_PROFILE_SCHEMA_VERSION,
+        deadline_days_remaining, recommend_journals_with_directory, ArticleTypePreference,
+        InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
+        JournalRecommendation, JournalRecommendationProfile, JournalRecommendationProfileInput,
+        JournalRecommendationRun, JOURNAL_PROFILE_SCHEMA_VERSION,
     },
     journal_requirements::{
         extract_journal_requirements, JournalRequirementCategory, JournalRequirementObligation,
@@ -199,6 +199,7 @@ pub struct SubmissionExport {
 #[serde(rename_all = "snake_case")]
 pub enum SubmissionMaterialKind {
     SourceProject,
+    BlindedManuscript,
     Figure,
     Table,
     Bibliography,
@@ -226,9 +227,19 @@ pub struct SubmissionMaterial {
 pub struct SubmissionMaterialChecklistItem {
     pub id: String,
     pub label: String,
+    pub label_en: String,
+    pub group: String,
     pub requirement: String,
     pub status: String,
     pub detail: String,
+    pub verification: String,
+    pub material_kind: Option<SubmissionMaterialKind>,
+    pub blocking: bool,
+    pub confirmable: bool,
+    pub source_url: Option<String>,
+    pub evidence_excerpt: Option<String>,
+    pub captured_unix_ms: Option<u64>,
+    pub fresh_until_unix_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -239,8 +250,13 @@ pub struct SubmissionMaterialCatalog {
     pub manuscript_version: u32,
     pub materials: Vec<SubmissionMaterial>,
     pub checklist: Vec<SubmissionMaterialChecklistItem>,
+    pub recommendation_ready: bool,
+    pub target_verified: bool,
     pub required_complete: bool,
     pub target_check_ready: bool,
+    pub workflow_status: String,
+    pub required_total: usize,
+    pub required_completed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -259,6 +275,8 @@ pub struct SubmissionTargetSelection {
     pub rank_system: String,
     pub rank_tier: String,
     pub homepage_url: String,
+    #[serde(default = "default_article_type_preference")]
+    pub article_type: ArticleTypePreference,
     #[serde(default = "default_primary_target_role")]
     pub plan_role: String,
     #[serde(default)]
@@ -270,6 +288,10 @@ pub struct SubmissionTargetSelection {
 
 fn default_primary_target_role() -> String {
     "primary".to_owned()
+}
+
+fn default_article_type_preference() -> ArticleTypePreference {
+    ArticleTypePreference::Auto
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -416,7 +438,7 @@ impl fmt::Display for WorkspaceError {
             Self::VersionNoteTooLong => write!(formatter, "版本说明不能超过 200 个字符"),
             Self::InvalidJournalProfile => write!(
                 formatter,
-                "请完整填写学校、专业、论文用途和有效的未来投稿截止日期"
+                "请检查投稿背景字段长度，并选择有效的未来投稿截止日期"
             ),
             Self::InvalidInstitutionRuleEvidence => write!(
                 formatter,
@@ -573,12 +595,23 @@ struct StoredSubmissionMaterial {
     relative_path: String,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredSubmissionMaterialCatalog {
     schema_version: u32,
     #[serde(default)]
     materials: Vec<StoredSubmissionMaterial>,
+    #[serde(default)]
+    confirmations: Vec<StoredSubmissionRequirementConfirmation>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSubmissionRequirementConfirmation {
+    item_id: String,
+    target_selection_id: String,
+    requirement_snapshot_id: String,
+    confirmed_unix_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -733,6 +766,7 @@ struct SubmissionTargetPayload<'a> {
     rank_system: &'a str,
     rank_tier: &'a str,
     homepage_url: &'a str,
+    article_type: ArticleTypePreference,
     plan_role: &'a str,
     priority: u32,
     selected_unix_ms: u64,
@@ -1782,6 +1816,10 @@ impl WorkspaceStore {
             })
             .transpose()?
             .flatten();
+        let recommendation_ready = self
+            .journal_recommendation_runs(workspace_id)?
+            .iter()
+            .any(|run| run.manuscript_version == manifest.workspace.snapshot_version);
         Ok(build_submission_material_catalog(
             &manifest.workspace,
             stored,
@@ -1789,6 +1827,7 @@ impl WorkspaceStore {
             readiness.as_ref(),
             target.as_ref(),
             journal_requirements.as_ref(),
+            recommendation_ready,
             unix_time_ms()?,
         ))
     }
@@ -1872,7 +1911,7 @@ impl WorkspaceStore {
             });
             added += 1;
         }
-        stored.schema_version = 1;
+        stored.schema_version = 2;
         let catalog_path = workspace_root.join("materials").join("catalog.json");
         write_or_replace_json(&catalog_path, &stored)?;
         if added > 0 {
@@ -1883,6 +1922,85 @@ impl WorkspaceStore {
                 imported_unix_ms,
             )?;
         }
+        self.submission_materials(workspace_id)
+    }
+
+    pub fn confirm_submission_requirement(
+        &self,
+        workspace_id: &str,
+        item_id: &str,
+        confirmed: bool,
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        Uuid::parse_str(workspace_id).map_err(|_| WorkspaceError::InvalidWorkspaceId)?;
+        if item_id.trim().is_empty() || item_id.chars().count() > 160 {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "无效的投稿要求确认项".to_owned(),
+            ));
+        }
+        let workspace_root = self.projects_root().join(workspace_id);
+        let manifest = read_manifest(&workspace_root.join("manifest.json"))?;
+        let target = read_submission_target(&workspace_root)?
+            .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
+        let snapshot = read_journal_requirement_snapshot(&workspace_root, &target.selection_id)?
+            .ok_or(WorkspaceError::InvalidJournalRequirementSource)?;
+        let mut stored = read_stored_submission_materials(&workspace_root)?;
+        let recommendation_ready = self
+            .journal_recommendation_runs(workspace_id)?
+            .iter()
+            .any(|run| run.manuscript_version == manifest.workspace.snapshot_version);
+        let structure = read_current_structure_report(&workspace_root, &manifest.workspace)?;
+        let readiness = read_current_readiness_report(&workspace_root, &manifest.workspace)?
+            .filter(|report| readiness_matches_target(report, Some(&target), &manifest.workspace));
+        let catalog = build_submission_material_catalog(
+            &manifest.workspace,
+            stored.clone(),
+            structure.as_ref(),
+            readiness.as_ref(),
+            Some(&target),
+            Some(&snapshot),
+            recommendation_ready,
+            unix_time_ms()?,
+        );
+        if !catalog
+            .checklist
+            .iter()
+            .any(|item| item.id == item_id && item.confirmable)
+        {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "该投稿要求不能由作者确认完成".to_owned(),
+            ));
+        }
+        stored.confirmations.retain(|item| {
+            !(item.item_id == item_id
+                && item.target_selection_id == target.selection_id
+                && item.requirement_snapshot_id == snapshot.snapshot_id)
+        });
+        let confirmed_unix_ms = unix_time_ms()?;
+        if confirmed {
+            stored
+                .confirmations
+                .push(StoredSubmissionRequirementConfirmation {
+                    item_id: item_id.to_owned(),
+                    target_selection_id: target.selection_id,
+                    requirement_snapshot_id: snapshot.snapshot_id,
+                    confirmed_unix_ms,
+                });
+        }
+        stored.schema_version = 2;
+        write_or_replace_json(
+            &workspace_root.join("materials").join("catalog.json"),
+            &stored,
+        )?;
+        append_audit_event(
+            &workspace_root.join("audit.jsonl"),
+            if confirmed {
+                "submission_requirement_confirmed"
+            } else {
+                "submission_requirement_confirmation_revoked"
+            },
+            &manifest.workspace,
+            confirmed_unix_ms,
+        )?;
         self.submission_materials(workspace_id)
     }
 
@@ -1910,6 +2028,7 @@ impl WorkspaceStore {
             manifest.workspace.snapshot_version,
             recommendation_run_id,
             journal,
+            run.resolved_article_type,
             "primary",
             0,
             selected_unix_ms,
@@ -1977,6 +2096,7 @@ impl WorkspaceStore {
             manifest.workspace.snapshot_version,
             recommendation_run_id,
             journal,
+            run.resolved_article_type,
             "backup",
             plan.backups.len() as u32 + 1,
             selected_unix_ms,
@@ -2288,6 +2408,10 @@ impl WorkspaceStore {
             })
             .transpose()?
             .flatten();
+        let recommendation_ready = self
+            .journal_recommendation_runs(workspace_id)?
+            .iter()
+            .any(|run| run.manuscript_version == manifest.workspace.snapshot_version);
         let submission_materials = build_submission_material_catalog(
             &manifest.workspace,
             read_stored_submission_materials(&workspace_root)?,
@@ -2295,6 +2419,7 @@ impl WorkspaceStore {
             readiness_report.as_ref(),
             submission_target.as_ref(),
             journal_requirements.as_ref(),
+            recommendation_ready,
             unix_time_ms()?,
         );
         Ok(WorkspaceLifecycle {
@@ -3888,6 +4013,7 @@ fn is_allowed_submission_material_extension(extension: &str) -> bool {
 fn material_kind_folder(kind: SubmissionMaterialKind) -> &'static str {
     match kind {
         SubmissionMaterialKind::SourceProject => "source-project",
+        SubmissionMaterialKind::BlindedManuscript => "blinded-manuscript",
         SubmissionMaterialKind::Figure => "figures",
         SubmissionMaterialKind::Table => "tables",
         SubmissionMaterialKind::Bibliography => "bibliography",
@@ -3924,8 +4050,9 @@ fn read_stored_submission_materials(
     let path = workspace_root.join("materials").join("catalog.json");
     if !path.exists() {
         return Ok(StoredSubmissionMaterialCatalog {
-            schema_version: 1,
+            schema_version: 2,
             materials: Vec::new(),
+            confirmations: Vec::new(),
         });
     }
     let catalog: StoredSubmissionMaterialCatalog = read_json(&path)?;
@@ -4056,11 +4183,13 @@ fn rebind_journal_requirement_snapshot(
     write_or_replace_json(&requirements_root.join("current.json"), &snapshot)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_target_selection(
     workspace_id: &str,
     manuscript_version: u32,
     recommendation_run_id: &str,
     journal: &JournalRecommendation,
+    article_type: ArticleTypePreference,
     plan_role: &str,
     priority: u32,
     selected_unix_ms: u64,
@@ -4071,7 +4200,7 @@ fn build_target_selection(
     }
     .to_owned();
     finalize_target_selection(SubmissionTargetSelection {
-        schema_version: 2,
+        schema_version: 3,
         selection_id: Uuid::new_v4().to_string(),
         workspace_id: workspace_id.to_owned(),
         selected_against_manuscript_version: manuscript_version,
@@ -4084,6 +4213,7 @@ fn build_target_selection(
         rank_system: journal.rank_system.clone(),
         rank_tier: journal.rank_tier.clone(),
         homepage_url: journal.homepage_url.clone(),
+        article_type,
         plan_role: plan_role.to_owned(),
         priority,
         selected_unix_ms,
@@ -4100,7 +4230,7 @@ fn build_target_selection_from_existing(
     selected_unix_ms: u64,
 ) -> Result<SubmissionTargetSelection, WorkspaceError> {
     let mut selection = existing.clone();
-    selection.schema_version = 2;
+    selection.schema_version = 3;
     selection.selection_id = Uuid::new_v4().to_string();
     selection.selected_against_manuscript_version = manuscript_version;
     selection.plan_role = plan_role.to_owned();
@@ -4127,6 +4257,7 @@ fn finalize_target_selection(
         rank_system: &selection.rank_system,
         rank_tier: &selection.rank_tier,
         homepage_url: &selection.homepage_url,
+        article_type: selection.article_type,
         plan_role: &selection.plan_role,
         priority: selection.priority,
         selected_unix_ms: selection.selected_unix_ms,
@@ -4152,6 +4283,7 @@ fn journal_in_run<'a>(
         .find(|journal| journal.id == journal_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_submission_material_catalog(
     workspace: &WorkspaceSummary,
     stored: StoredSubmissionMaterialCatalog,
@@ -4159,6 +4291,7 @@ fn build_submission_material_catalog(
     readiness: Option<&ReadinessReport>,
     target: Option<&SubmissionTargetSelection>,
     journal_requirements: Option<&JournalRequirementSnapshot>,
+    recommendation_ready: bool,
     now_unix_ms: u64,
 ) -> SubmissionMaterialCatalog {
     let has_kind = |kind| {
@@ -4181,199 +4314,288 @@ fn build_submission_material_catalog(
                     && !snapshot.requirements.is_empty()
                     && snapshot.fresh_until_unix_ms >= now_unix_ms
             });
-    let target_requires = |category| {
-        journal_requirements.is_some_and(|snapshot| {
-            snapshot.requirements.iter().any(|item| {
-                item.category == category
-                    && item.obligation == JournalRequirementObligation::Required
+    let confirmed = |item_id: &str| {
+        target
+            .zip(journal_requirements)
+            .is_some_and(|(selection, snapshot)| {
+                stored.confirmations.iter().any(|confirmation| {
+                    confirmation.item_id == item_id
+                        && confirmation.target_selection_id == selection.selection_id
+                        && confirmation.requirement_snapshot_id == snapshot.snapshot_id
+                })
             })
-        })
     };
-    let mut checklist = vec![SubmissionMaterialChecklistItem {
-        id: "main-manuscript".to_owned(),
-        label: "当前主稿".to_owned(),
-        requirement: "required".to_owned(),
-        status: "complete".to_owned(),
-        detail: format!("已保存不可变稿件 v{}", workspace.snapshot_version),
-    }];
-    checklist.push(SubmissionMaterialChecklistItem {
-        id: "target-journal".to_owned(),
-        label: "目标期刊".to_owned(),
-        requirement: "required".to_owned(),
-        status: if target_current {
-            "complete"
-        } else {
-            "missing"
-        }
-        .to_owned(),
-        detail: match target {
-            Some(selection) if target_current => format!("已选择 {}", selection.name),
+    let mut checklist = vec![static_submission_checklist_item(
+        "target-journal",
+        "目标期刊与文章类型",
+        "target",
+        if target_current { "passed" } else { "missing" },
+        match target {
+            Some(selection) if target_current => format!(
+                "已选择 {}（{}）· 文章类型 {}",
+                selection.name,
+                selection.publisher,
+                article_type_label(selection.article_type)
+            ),
             Some(selection) => format!("已选择 {}，需按当前稿件版本复核", selection.name),
-            None => "请先选择目标期刊".to_owned(),
+            None => "请先从初步推荐中选择一个主投期刊".to_owned(),
         },
-    });
-    checklist.push(SubmissionMaterialChecklistItem {
-        id: "official-journal-requirements".to_owned(),
-        label: "期刊官方投稿要求".to_owned(),
-        requirement: "required".to_owned(),
-        status: if requirements_current {
-            "complete"
+    )];
+    checklist.push(static_submission_checklist_item(
+        "official-journal-requirements",
+        "期刊官方投稿要求",
+        "target",
+        if requirements_current {
+            "passed"
         } else {
             "missing"
-        }
-        .to_owned(),
-        detail: match journal_requirements {
+        },
+        match journal_requirements {
             Some(snapshot) if requirements_current => format!(
                 "已保存 {} 个官方来源、{} 项带证据要求",
                 snapshot.sources.len(),
                 snapshot.requirements.len()
             ),
-            Some(_) => "已取得页面，但仍需粘贴或核对明确的作者指南原文".to_owned(),
-            None if target.is_some() => "请先获取或录入该刊官方作者指南".to_owned(),
-            None => "选择目标期刊后获取官方作者指南".to_owned(),
+            Some(_) => "已有抓取记录，但仍需补充、更新或核对官方作者指南".to_owned(),
+            None if target.is_some() => "请取得或录入该刊官方作者指南".to_owned(),
+            None => "选择主投期刊后再取得其官方要求".to_owned(),
         },
-    });
-    checklist.push(SubmissionMaterialChecklistItem {
-        id: "current-check".to_owned(),
-        label: "当前版本检查".to_owned(),
-        requirement: "required".to_owned(),
-        status: if readiness.is_some() {
-            "complete"
+    ));
+    checklist.push(static_submission_checklist_item(
+        "main-manuscript",
+        "当前主稿",
+        "manuscript",
+        "passed",
+        format!("已保存不可变稿件 v{}", workspace.snapshot_version),
+    ));
+    checklist.push(static_submission_checklist_item(
+        "current-check",
+        "按目标期刊重新检查",
+        "target",
+        if readiness.is_some() {
+            "passed"
         } else {
             "missing"
-        }
-        .to_owned(),
-        detail: if readiness.is_some() {
-            "当前稿件版本已有检查报告".to_owned()
-        } else {
-            "选择目标后运行一次投稿检查".to_owned()
         },
-    });
+        if readiness.is_some() {
+            "当前稿件版本已有目标专属检查报告".to_owned()
+        } else {
+            "补齐材料后运行一次与当前目标绑定的投稿检查".to_owned()
+        },
+    ));
     if workspace.manuscript.kind == ManuscriptKind::Latex {
-        checklist.push(SubmissionMaterialChecklistItem {
-            id: "latex-project".to_owned(),
-            label: "完整 LaTeX 工程".to_owned(),
-            requirement: "required".to_owned(),
-            status: if has_kind(SubmissionMaterialKind::SourceProject) {
-                "complete"
-            } else {
-                "missing"
-            }
-            .to_owned(),
-            detail: "建议提供含图片、参考文献和自定义样式的 ZIP/TAR 工程包".to_owned(),
-        });
+        checklist.push(file_submission_checklist_item(
+            "latex-project",
+            "完整 LaTeX 工程",
+            "files",
+            true,
+            has_kind(SubmissionMaterialKind::SourceProject),
+            SubmissionMaterialKind::SourceProject,
+            "请提供含图片、参考文献和自定义样式的 ZIP/TAR 工程包".to_owned(),
+            None,
+            journal_requirements,
+        ));
     }
-    if figures_expected {
-        checklist.push(SubmissionMaterialChecklistItem {
-            id: "figure-originals".to_owned(),
-            label: "原始图片".to_owned(),
-            requirement: "required".to_owned(),
-            status: if has_kind(SubmissionMaterialKind::Figure) {
-                "complete"
-            } else {
-                "missing"
-            }
-            .to_owned(),
-            detail: "正文包含图片，请提供独立原图；系统不会用 PDF 截图冒充出版原图".to_owned(),
-        });
-    }
-    if tables_expected {
-        checklist.push(SubmissionMaterialChecklistItem {
-            id: "editable-tables".to_owned(),
-            label: "可编辑表格".to_owned(),
-            requirement: "recommended".to_owned(),
-            status: if has_kind(SubmissionMaterialKind::Table) {
-                "complete"
-            } else {
-                "recommended"
-            }
-            .to_owned(),
-            detail: "正文包含表格；若期刊要求独立上传，请补充可编辑文件".to_owned(),
-        });
-    }
-    let cover_letter_required = target_requires(JournalRequirementCategory::CoverLetter);
-    checklist.push(SubmissionMaterialChecklistItem {
-        id: "cover-letter".to_owned(),
-        label: "投稿附信".to_owned(),
-        requirement: if cover_letter_required {
-            "required"
-        } else {
-            "recommended"
-        }
-        .to_owned(),
-        status: if has_kind(SubmissionMaterialKind::CoverLetter) {
-            "complete"
-        } else if cover_letter_required {
-            "missing"
-        } else {
-            "recommended"
-        }
-        .to_owned(),
-        detail: if cover_letter_required {
-            "期刊官方原文包含明确的 Cover Letter 要求".to_owned()
-        } else {
-            "选定期刊后准备针对该刊的 Cover Letter".to_owned()
-        },
-    });
-    for (id, label, kind, category, detail) in [
-        (
-            "target-title-page",
-            "独立标题页",
-            SubmissionMaterialKind::TitlePage,
-            JournalRequirementCategory::TitlePage,
-            "期刊官方原文要求独立标题页",
-        ),
-        (
-            "target-supplementary",
-            "补充材料",
-            SubmissionMaterialKind::Supplementary,
-            JournalRequirementCategory::SupplementaryFiles,
-            "期刊官方原文包含明确的补充材料要求",
-        ),
-    ] {
-        if target_requires(category) {
-            checklist.push(SubmissionMaterialChecklistItem {
-                id: id.to_owned(),
-                label: label.to_owned(),
-                requirement: "required".to_owned(),
-                status: if has_kind(kind) {
-                    "complete"
-                } else {
-                    "missing"
+    if let Some(snapshot) = journal_requirements.filter(|_| requirements_current) {
+        for requirement in &snapshot.requirements {
+            let id = format!(
+                "journal-{}",
+                requirement
+                    .id
+                    .strip_prefix("requirement-")
+                    .unwrap_or(&requirement.id)
+            );
+            let blocking = requirement.obligation != JournalRequirementObligation::Recommended;
+            let item = match requirement.category {
+                JournalRequirementCategory::AnonymousReview => file_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "files",
+                    blocking,
+                    has_kind(SubmissionMaterialKind::BlindedManuscript),
+                    SubmissionMaterialKind::BlindedManuscript,
+                    "如该刊采用匿名评审，请提供不含作者身份的独立主稿".to_owned(),
+                    Some(requirement),
+                    journal_requirements,
+                ),
+                JournalRequirementCategory::TitlePage => file_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "files",
+                    blocking,
+                    has_kind(SubmissionMaterialKind::TitlePage),
+                    SubmissionMaterialKind::TitlePage,
+                    "按官方要求提供独立标题页".to_owned(),
+                    Some(requirement),
+                    journal_requirements,
+                ),
+                JournalRequirementCategory::SupplementaryFiles => file_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "files",
+                    blocking,
+                    has_kind(SubmissionMaterialKind::Supplementary),
+                    SubmissionMaterialKind::Supplementary,
+                    "按官方要求提供适用的补充材料".to_owned(),
+                    Some(requirement),
+                    journal_requirements,
+                ),
+                JournalRequirementCategory::CoverLetter => file_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "files",
+                    blocking,
+                    has_kind(SubmissionMaterialKind::CoverLetter),
+                    SubmissionMaterialKind::CoverLetter,
+                    "准备面向该刊编辑的投稿附信".to_owned(),
+                    Some(requirement),
+                    journal_requirements,
+                ),
+                JournalRequirementCategory::OtherSupportingFiles => file_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "files",
+                    blocking,
+                    has_kind(SubmissionMaterialKind::Other),
+                    SubmissionMaterialKind::Other,
+                    "请提供作者指南指出的清单、授权书、协议或其他支持文件".to_owned(),
+                    Some(requirement),
+                    journal_requirements,
+                ),
+                JournalRequirementCategory::Figures if figures_expected => {
+                    file_submission_checklist_item(
+                        &id,
+                        &requirement.label,
+                        "files",
+                        blocking,
+                        has_kind(SubmissionMaterialKind::Figure),
+                        SubmissionMaterialKind::Figure,
+                        "正文包含图片，请提供独立高精度原图".to_owned(),
+                        Some(requirement),
+                        journal_requirements,
+                    )
                 }
-                .to_owned(),
-                detail: detail.to_owned(),
-            });
+                JournalRequirementCategory::Tables if tables_expected => {
+                    file_submission_checklist_item(
+                        &id,
+                        &requirement.label,
+                        "files",
+                        blocking,
+                        has_kind(SubmissionMaterialKind::Table),
+                        SubmissionMaterialKind::Table,
+                        "正文包含表格，请提供期刊要求的可编辑表格".to_owned(),
+                        Some(requirement),
+                        journal_requirements,
+                    )
+                }
+                JournalRequirementCategory::Abstract => automatic_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "manuscript",
+                    blocking,
+                    structure.is_some_and(|report| report.abstract_present),
+                    "系统只核验摘要是否存在；结构、长度仍应按官方原文人工核对".to_owned(),
+                    requirement,
+                    snapshot,
+                ),
+                JournalRequirementCategory::Keywords => automatic_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "manuscript",
+                    blocking,
+                    structure.is_some_and(|report| report.keywords_present),
+                    "系统只核验关键词是否存在；数量和格式仍应按官方原文核对".to_owned(),
+                    requirement,
+                    snapshot,
+                ),
+                JournalRequirementCategory::References => confirmable_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "manuscript",
+                    blocking,
+                    confirmed(&id),
+                    if structure.is_some_and(|report| report.references_present) {
+                        "已检测到参考文献；请确认引用样式与该刊要求一致"
+                    } else {
+                        "未可靠检测到参考文献；请检查并确认引用文件与样式"
+                    }
+                    .to_owned(),
+                    "manual",
+                    requirement,
+                    snapshot,
+                ),
+                JournalRequirementCategory::Ethics
+                | JournalRequirementCategory::ConflictOfInterest
+                | JournalRequirementCategory::DataAvailability
+                | JournalRequirementCategory::AuthorContributions
+                | JournalRequirementCategory::Orcid => confirmable_submission_checklist_item(
+                    &id,
+                    &requirement.label,
+                    "declarations",
+                    blocking,
+                    confirmed(&id),
+                    "请由作者确认内容真实、完整且适用于当前论文；系统不替作者作事实声明".to_owned(),
+                    "author",
+                    requirement,
+                    snapshot,
+                ),
+                JournalRequirementCategory::ManuscriptFile
+                | JournalRequirementCategory::Template
+                | JournalRequirementCategory::LengthLimit
+                | JournalRequirementCategory::Figures
+                | JournalRequirementCategory::Tables
+                | JournalRequirementCategory::FeesAndOpenAccess => {
+                    confirmable_submission_checklist_item(
+                        &id,
+                        &requirement.label,
+                        if requirement.category == JournalRequirementCategory::FeesAndOpenAccess {
+                            "declarations"
+                        } else {
+                            "manuscript"
+                        },
+                        blocking,
+                        confirmed(&id),
+                        "请对照证据原文人工核验；确认也可表示该条件对本文不适用".to_owned(),
+                        "manual",
+                        requirement,
+                        snapshot,
+                    )
+                }
+            };
+            checklist.push(item);
         }
+    } else if figures_expected {
+        checklist.push(file_submission_checklist_item(
+            "figure-originals",
+            "原始图片",
+            "files",
+            false,
+            has_kind(SubmissionMaterialKind::Figure),
+            SubmissionMaterialKind::Figure,
+            "正文包含图片；取得目标期刊要求后再确认文件格式和精度".to_owned(),
+            None,
+            journal_requirements,
+        ));
     }
-    let declaration_required = [
-        JournalRequirementCategory::Ethics,
-        JournalRequirementCategory::ConflictOfInterest,
-        JournalRequirementCategory::DataAvailability,
-        JournalRequirementCategory::AuthorContributions,
-    ]
-    .into_iter()
-    .any(target_requires);
-    if declaration_required {
-        checklist.push(SubmissionMaterialChecklistItem {
-            id: "target-declarations".to_owned(),
-            label: "投稿声明文件".to_owned(),
-            requirement: "required".to_owned(),
-            status: if has_kind(SubmissionMaterialKind::Declaration) {
-                "complete"
-            } else {
-                "missing"
-            }
-            .to_owned(),
-            detail: "期刊官方原文要求伦理、利益冲突、数据可用性或作者贡献声明".to_owned(),
-        });
-    }
-    let required_complete = checklist
+    let required_total = checklist.iter().filter(|item| item.blocking).count();
+    let required_completed = checklist
         .iter()
-        .filter(|item| item.requirement == "required")
-        .all(|item| item.status == "complete");
+        .filter(|item| item.blocking && item.status == "passed")
+        .count();
+    let required_complete = required_completed == required_total;
+    let target_verified = target_current && requirements_current;
+    let target_check_ready = required_complete && target_verified && readiness.is_some();
+    let workflow_status = if target_check_ready {
+        "submission_ready"
+    } else if target_verified {
+        "target_verified"
+    } else if recommendation_ready {
+        "preliminary_recommendation"
+    } else {
+        "manuscript_received"
+    };
     SubmissionMaterialCatalog {
-        schema_version: 1,
+        schema_version: 2,
         workspace_id: workspace.id.clone(),
         manuscript_version: workspace.snapshot_version,
         materials: stored
@@ -4382,8 +4604,194 @@ fn build_submission_material_catalog(
             .map(|item| item.material)
             .collect(),
         checklist,
+        recommendation_ready,
+        target_verified,
         required_complete,
-        target_check_ready: required_complete && target_current && requirements_current,
+        target_check_ready,
+        workflow_status: workflow_status.to_owned(),
+        required_total,
+        required_completed,
+    }
+}
+
+fn static_submission_checklist_item(
+    id: &str,
+    label: &str,
+    group: &str,
+    status: &str,
+    detail: String,
+) -> SubmissionMaterialChecklistItem {
+    SubmissionMaterialChecklistItem {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        label_en: match id {
+            "target-journal" => "Target journal and article type",
+            "official-journal-requirements" => "Official journal requirements",
+            "main-manuscript" => "Current manuscript",
+            "current-check" => "Target-specific recheck",
+            _ => label,
+        }
+        .to_owned(),
+        group: group.to_owned(),
+        requirement: "required".to_owned(),
+        status: status.to_owned(),
+        detail,
+        verification: "automatic".to_owned(),
+        material_kind: None,
+        blocking: true,
+        confirmable: false,
+        source_url: None,
+        evidence_excerpt: None,
+        captured_unix_ms: None,
+        fresh_until_unix_ms: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn file_submission_checklist_item(
+    id: &str,
+    label: &str,
+    group: &str,
+    blocking: bool,
+    present: bool,
+    material_kind: SubmissionMaterialKind,
+    detail: String,
+    requirement: Option<&crate::JournalRequirementItem>,
+    snapshot: Option<&JournalRequirementSnapshot>,
+) -> SubmissionMaterialChecklistItem {
+    submission_checklist_item(
+        id,
+        label,
+        group,
+        if blocking { "required" } else { "recommended" },
+        if present {
+            "passed"
+        } else if blocking {
+            "missing"
+        } else {
+            "recommended"
+        },
+        detail,
+        "file",
+        Some(material_kind),
+        blocking,
+        false,
+        requirement,
+        snapshot,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn automatic_submission_checklist_item(
+    id: &str,
+    label: &str,
+    group: &str,
+    blocking: bool,
+    passed: bool,
+    detail: String,
+    requirement: &crate::JournalRequirementItem,
+    snapshot: &JournalRequirementSnapshot,
+) -> SubmissionMaterialChecklistItem {
+    submission_checklist_item(
+        id,
+        label,
+        group,
+        if blocking { "required" } else { "recommended" },
+        if passed {
+            "passed"
+        } else if blocking {
+            "missing"
+        } else {
+            "recommended"
+        },
+        detail,
+        "automatic",
+        None,
+        blocking,
+        false,
+        Some(requirement),
+        Some(snapshot),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn confirmable_submission_checklist_item(
+    id: &str,
+    label: &str,
+    group: &str,
+    blocking: bool,
+    confirmed: bool,
+    detail: String,
+    verification: &str,
+    requirement: &crate::JournalRequirementItem,
+    snapshot: &JournalRequirementSnapshot,
+) -> SubmissionMaterialChecklistItem {
+    submission_checklist_item(
+        id,
+        label,
+        group,
+        if blocking { "required" } else { "recommended" },
+        if confirmed {
+            "passed"
+        } else if !blocking {
+            "recommended"
+        } else if verification == "author" {
+            "author_confirmation"
+        } else {
+            "manual_verification"
+        },
+        detail,
+        verification,
+        None,
+        blocking,
+        blocking,
+        Some(requirement),
+        Some(snapshot),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submission_checklist_item(
+    id: &str,
+    label: &str,
+    group: &str,
+    requirement: &str,
+    status: &str,
+    detail: String,
+    verification: &str,
+    material_kind: Option<SubmissionMaterialKind>,
+    blocking: bool,
+    confirmable: bool,
+    source: Option<&crate::JournalRequirementItem>,
+    snapshot: Option<&JournalRequirementSnapshot>,
+) -> SubmissionMaterialChecklistItem {
+    SubmissionMaterialChecklistItem {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        label_en: source
+            .map(|item| item.label_en.clone())
+            .unwrap_or_else(|| label.to_owned()),
+        group: group.to_owned(),
+        requirement: requirement.to_owned(),
+        status: status.to_owned(),
+        detail,
+        verification: verification.to_owned(),
+        material_kind,
+        blocking,
+        confirmable,
+        source_url: source.map(|item| item.source_url.clone()),
+        evidence_excerpt: source.map(|item| item.evidence_excerpt.clone()),
+        captured_unix_ms: snapshot.map(|item| item.captured_unix_ms),
+        fresh_until_unix_ms: snapshot.map(|item| item.fresh_until_unix_ms),
+    }
+}
+
+fn article_type_label(article_type: ArticleTypePreference) -> &'static str {
+    match article_type {
+        ArticleTypePreference::Auto => "待确认",
+        ArticleTypePreference::Research => "研究论文",
+        ArticleTypePreference::Review => "综述",
+        ArticleTypePreference::Application => "应用型论文",
     }
 }
 
@@ -4896,7 +5304,7 @@ mod tests {
         assert!(materials
             .checklist
             .iter()
-            .any(|item| item.id == "latex-project" && item.status == "complete"));
+            .any(|item| item.id == "latex-project" && item.status == "passed"));
         assert_eq!(materials.materials.len(), 1);
         let target_exports = temporary.path().join("target-exports");
         fs::create_dir(&target_exports).unwrap();
@@ -4912,6 +5320,9 @@ mod tests {
                 SubmissionMaterialKind::TitlePage,
                 std::slice::from_ref(&title_page),
             )
+            .unwrap();
+        store
+            .confirm_submission_requirement(&workspace.id, "journal-figures", true)
             .unwrap();
         store.evaluate_readiness(&workspace.id, &[]).unwrap();
         let materials = store.submission_materials(&workspace.id).unwrap();
