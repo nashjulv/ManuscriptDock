@@ -1337,6 +1337,18 @@ fn score_candidate(
             threshold - *maturity
         )
     };
+    let readiness_reason_en = if *maturity >= threshold {
+        format!(
+            "the current structure-readiness score {} meets the preparation threshold {}",
+            maturity, threshold
+        )
+    } else {
+        format!(
+            "the current structure-readiness score {} is {} points below the preparation threshold",
+            maturity,
+            threshold - *maturity
+        )
+    };
     let mut reasons = vec![
         format!("主题范围适配 {} 分", topic_score),
         format!("作者专业背景适配 {} 分", specialty),
@@ -1348,11 +1360,25 @@ fn score_candidate(
         format!("当前稿件完备度适配 {} 分；{}", readiness, readiness_reason),
         format!("目标策略适配 {} 分", target),
     ];
+    let mut reasons_en = vec![
+        format!("Topic-scope fit: {}", topic_score),
+        format!("Author-specialty fit: {}", specialty),
+        format!("Manuscript-purpose fit: {}", purpose_fit),
+        format!(
+            "Submission-preparation timing fit: {} ({}-day internal plan)",
+            time_feasibility, estimated_submission_preparation_days
+        ),
+        format!(
+            "Current-manuscript readiness fit: {}; {}",
+            readiness, readiness_reason_en
+        ),
+        format!("Target-strategy fit: {}", target),
+    ];
     for evidence in &directory_evidence {
-        let scheme = match evidence.scheme {
-            JournalMetricScheme::CasPartition => "中科院分区",
-            JournalMetricScheme::ClarivateJcr => "JCR",
-            JournalMetricScheme::EmergingPartition => "新锐分区",
+        let (scheme, scheme_en) = match evidence.scheme {
+            JournalMetricScheme::CasPartition => ("中科院分区", "CAS partition"),
+            JournalMetricScheme::ClarivateJcr => ("JCR", "JCR"),
+            JournalMetricScheme::EmergingPartition => ("新锐分区", "Emerging partition"),
         };
         let partition = evidence
             .partition
@@ -1360,6 +1386,19 @@ fn score_candidate(
             .unwrap_or_else(|| "分区缺失".to_owned());
         reasons.push(format!(
             "本地目录：{scheme} {} · {partition}{}",
+            evidence.release_year,
+            if evidence.top == Some(true) {
+                " · Top"
+            } else {
+                ""
+            }
+        ));
+        let partition_en = evidence
+            .partition
+            .map(|value| format!("partition {value}"))
+            .unwrap_or_else(|| "partition unavailable".to_owned());
+        reasons_en.push(format!(
+            "Local directory: {scheme_en} {} · {partition_en}{}",
             evidence.release_year,
             if evidence.top == Some(true) {
                 " · Top"
@@ -1396,6 +1435,7 @@ fn score_candidate(
         institution_eligibility,
         scores,
         reasons,
+        reasons_en,
         ranking_source_url: source.into(),
         homepage_url: candidate.homepage.into(),
         open_access_status: candidate.oa.into(),
