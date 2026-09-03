@@ -1,5 +1,14 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.26 readable English task navigation
+
+- Kept the completed-review manuscript catalogue on the home screen and confirmed that opening an
+  existing local workspace still hydrates its saved review lifecycle.
+- Changed the compact English task navigation from single-line truncation to centered multi-line
+  labels, so “Check & revise” remains fully visible at the minimum supported window widths.
+- Added the full localized task name as a native tooltip without changing the established sidebar,
+  typography, or primary workflow structure.
+
 ## 2026-09-03 — V0.25 removable backup targets and English layout resilience
 
 - Turned the recommendation result's backup action into a reversible toggle. Authors can remove an

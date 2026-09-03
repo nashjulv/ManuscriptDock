@@ -1404,7 +1404,7 @@ function ManuscriptDockApp() {
           <nav className="primary-task-nav" aria-label={text("投稿准备主任务", "Primary submission tasks")}>
             {WORKSPACE_SECTIONS.map((section) => {
               const complete = section.id === "overview" || (section.id === "materials" && authorMaterialInputsReady(submissionMaterials)) || (section.id === "journals" && isSubmissionTargetCurrent(activeWorkspace, submissionTargetSelection) && journalRequirementSnapshotReady(currentJournalRequirementSnapshot(submissionTargetSelection, journalRequirementSnapshots))) || (section.id === "prepare" && Boolean(readinessReport && readinessReport.blockedCount === 0)) || (section.id === "submission" && Boolean(submission));
-              return <button key={section.id} type="button" aria-current={activeSection === section.id ? "page" : undefined} data-complete={complete} onClick={() => openStage(section.stage)}><Icon name={section.icon} /><span>{localize(locale, section.zh, section.en)}</span><small>{complete ? text("已完成", "Done") : text("待处理", "Pending")}</small></button>;
+              return <button key={section.id} type="button" title={localize(locale, section.zh, section.en)} aria-current={activeSection === section.id ? "page" : undefined} data-complete={complete} onClick={() => openStage(section.stage)}><Icon name={section.icon} /><span>{localize(locale, section.zh, section.en)}</span><small>{complete ? text("已完成", "Done") : text("待处理", "Pending")}</small></button>;
             })}
           </nav>
           <details className="advanced-nav" open={["versions", "attestation", "knowledge"].includes(activeStage)}>

@@ -1,7 +1,7 @@
-# 投稿舱 ManuscriptDock V0.25 产品使用手册
+# 投稿舱 ManuscriptDock V0.26 产品使用手册
 
-- 产品名称：投稿舱 ManuscriptDock V0.25
-- 产品版本：V0.25（安装包版本 `0.25.0`）
+- 产品名称：投稿舱 ManuscriptDock V0.26
+- 产品版本：V0.26（安装包版本 `0.26.0`）
 - 适用平台：macOS 11+、Windows 10/11 x64
 - 手册日期：2026-09-03
 - 产品定位：本地论文投稿准备工作台 / Local-first manuscript submission workspace

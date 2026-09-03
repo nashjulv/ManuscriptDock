@@ -1074,8 +1074,8 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
   .workspace-sidebar { padding-right: 8px; padding-left: 8px; }
   .sidebar-home { justify-content: center; }
   .sidebar-home span, .primary-task-nav button > small, .advanced-nav summary { display: none; }
-  .primary-task-nav button { min-height: 58px; grid-template-columns: 1fr; justify-items: center; gap: 3px; padding: 5px 2px; text-align: center; }
-  .primary-task-nav button > span { max-width: 64px; font-size: 9px; }
+  .primary-task-nav button { min-height: 66px; grid-template-columns: 1fr; justify-items: center; gap: 3px; padding: 6px 2px; text-align: center; }
+  .primary-task-nav button > span { max-width: 66px; overflow: visible; font-size: 9px; line-height: 12px; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
   .advanced-nav { display: grid; gap: 3px; }
   .advanced-nav button { justify-content: center; padding: 0; font-size: 0; }
   .workspace-shell .workspace-panes[data-evidence-open="true"] { grid-template-columns: 1fr; }

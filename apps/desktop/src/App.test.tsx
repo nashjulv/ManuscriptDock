@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.25")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.25" }));
-    expect(brandStatement.getByText("V0.25")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.26")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.26" }));
+    expect(brandStatement.getByText("V0.26")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -462,6 +462,9 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "打开 structured-study.tex" }));
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByRole("button", { name: /Check & revise/ })).toHaveAttribute("title", "Check & revise");
+    await user.click(screen.getByRole("button", { name: "中文" }));
     await user.click(screen.getByRole("button", { name: /检查与修订/ }));
     await user.click(screen.getByRole("button", { name: "提取论文结构" }));
 
