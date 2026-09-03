@@ -68,9 +68,10 @@ pub use workspace::{
     KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, SubmissionExport,
     SubmissionMaterial, SubmissionMaterialCatalog, SubmissionMaterialChecklistItem,
     SubmissionMaterialKind, SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection,
-    SubmissionTargetTransition, TargetSubmissionExport, VersionComparison, VersionCreation,
-    VersionHistory, VersionOrigin, WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation,
-    WorkspaceError, WorkspaceLifecycle, WorkspaceStore, WorkspaceSummary,
+    SubmissionTargetTransition, TargetSubmissionExport, TargetSubmissionPackageFile,
+    TargetSubmissionPackagePlan, VersionComparison, VersionCreation, VersionHistory, VersionOrigin,
+    WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation, WorkspaceError, WorkspaceLifecycle,
+    WorkspaceStore, WorkspaceSummary,
 };
 
 use serde::{Deserialize, Serialize};

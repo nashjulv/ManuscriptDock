@@ -2,9 +2,9 @@
 
 - 状态：0.1 / 产品定义与体验基线
 - 日期：2026-08-24
-- 产品名：ManuscriptDock V0.23（安装标识保持 `ManuscriptDock`）
+- 产品名：ManuscriptDock V0.24（安装标识保持 `ManuscriptDock`）
 - 中文名：投稿舱
-- 当前版本：V0.23
+- 当前版本：V0.24
 - 产品类别：本地论文投稿工作台
 
 ## 1. 一句话定义

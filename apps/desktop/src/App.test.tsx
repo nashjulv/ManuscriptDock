@@ -30,9 +30,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.23")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.23" }));
-    expect(brandStatement.getByText("V0.23")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.24")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.24" }));
+    expect(brandStatement.getByText("V0.24")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -618,11 +618,13 @@ describe("App", () => {
     const submissionMaterials = { schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, materials: [], checklist: [], requiredComplete: true, targetCheckReady: true };
     const submissionTarget = { schemaVersion: 1, selectionId: "target-current", workspaceId: workspace.id, selectedAgainstManuscriptVersion: 2, recommendationRunId: "run-current", journalId: "synthetic-journal", name: "Synthetic Journal", nameEn: "Synthetic Journal", publisher: "Synthetic Publisher", region: "international", rankSystem: "JCR", rankTier: "Q1", homepageUrl: "https://example.test", selectedUnixMs: Date.UTC(2026, 7, 24, 7, 15), recordHash: "6".repeat(64), externalTransmission: "not_performed" };
     const journalRequirements = makeCurrentRequirements(workspace, submissionTarget as ReturnType<typeof makeCurrentTarget>);
+    const packagePlan = { schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, targetSelectionId: submissionTarget.selectionId, targetName: submissionTarget.name, anonymousReview: false, ready: true, files: [{ materialId: null, displayName: workspace.manuscript.name, relativePath: "submission/manuscript.tex", role: "main_manuscript", materialKind: null, checklistItemId: "main-manuscript", checklistLabel: "当前主稿", required: true, included: true, sizeBytes: workspace.manuscript.sizeBytes, contentHash: workspace.contentHash, validationStatus: "passed", validationIssues: [] }], warnings: [], blockers: [], createdUnixMs: Date.UTC(2026, 7, 24, 7, 24), externalTransmission: "not_performed" };
     invokeMock.mockImplementation((command) => {
       if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], warnings: [] });
       if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 2, structureReport, readinessReport, attestation: null, submission: null, knowledgeBody: null, submissionMaterials, submissionTarget, journalRequirements });
       if (command === "get_journal_requirement_snapshots") return Promise.resolve([journalRequirements]);
       if (command === "create_local_attestation") return Promise.resolve(attestation);
+      if (command === "get_target_submission_package_plan") return Promise.resolve(packagePlan);
       if (command === "export_target_submission_package") return Promise.resolve({ packageName: "ManuscriptDock-lifecycl-v2", manuscriptVersion: 2, targetSelectionId: submissionTarget.selectionId, targetName: submissionTarget.name, files: ["submission/manuscript.tex", "records/target-selection.json", "records/package-manifest.json", "README.txt"], warnings: [], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
       if (command === "record_manual_submission") return Promise.resolve(submission);
       return Promise.reject(new Error(`unexpected command ${command}`));
@@ -636,6 +638,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "创建本地存证" }));
     expect(await screen.findByRole("heading", { name: "v2 已完成存证" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "返回投稿包" }));
+    expect(await screen.findByRole("heading", { name: "可以导出" })).toBeVisible();
+    expect(screen.getByText("submission/manuscript.tex")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "选择导出文件夹" }));
     expect(await screen.findByText(/已导出 ManuscriptDock-lifecycl-v2/)).toBeVisible();
     expect(screen.getByLabelText("投稿期刊（来自当前主线）")).toHaveValue("Synthetic Journal");

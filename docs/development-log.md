@@ -1,5 +1,25 @@
 # ManuscriptDock Development Log
 
+## 2026-09-03 — V0.24 target-bound package preflight and conditional blind review
+
+- Bound every newly imported supporting file to the exact manuscript version, primary target,
+  requirement snapshot, and checklist upload slot. Stale materials remain locally visible but are
+  automatically omitted from the current publisher package.
+- Replaced kind-level completion with slot-level file matching and required counts, so one file can
+  no longer satisfy multiple same-kind requirements or stand in for all detected figures/tables.
+- Added local file preflight for signatures, parseability, encrypted PDFs, Office container shape,
+  DOCX comments/tracked revisions, plus visible image-quality reminders.
+- Added a file-by-file package assembly preview with role, destination, requirement mapping,
+  include/exclude control, validation notes, and SHA-256. Rust recomputes the same plan and refuses
+  export when any required slot is excluded or incomplete.
+- Made blind-review packaging conditional. Only an explicit required anonymous-review rule replaces
+  the identified source with a separate blinded manuscript; ambiguous mentions require manual review
+  and do not switch modes automatically.
+- Upgraded the package manifest to per-file roles and hashes, corrected the legacy checklist-status
+  warning bug, and retained strict `submission/` versus local-only `records/` separation.
+- Recorded local rendered document preview and side-by-side visual revision comparison as the next
+  preview phase; V0.24 does not label extracted text or metadata deltas as page rendering.
+
 ## 2026-09-03 — V0.23 content-first recommendation and evidence-backed material checklist
 
 - Changed the entry sequence so an imported PDF, DOCX, or TEX manuscript can produce preliminary

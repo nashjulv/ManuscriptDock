@@ -14,8 +14,8 @@ use manuscript_core::{
     RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
     SubmissionElementCatalog, SubmissionExport, SubmissionMaterialCatalog, SubmissionMaterialKind,
     SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection, TargetSubmissionExport,
-    VersionComparison, VersionCreation, VersionHistory, WorkspaceCatalog, WorkspaceCopyExport,
-    WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
+    TargetSubmissionPackagePlan, VersionComparison, VersionCreation, VersionHistory,
+    WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
 };
 use model_service::{ModelSettingsSummary, ModelSlotInput};
 use serde::{Deserialize, Serialize};
@@ -718,6 +718,7 @@ async fn export_submission_package(
 async fn add_submission_materials(
     workspace_id: String,
     kind: SubmissionMaterialKind,
+    checklist_item_id: Option<String>,
     app: AppHandle,
 ) -> Result<Option<SubmissionMaterialCatalog>, String> {
     let Some(selections) = app
@@ -745,8 +746,37 @@ async fn add_submission_materials(
         .collect::<Result<Vec<_>, _>>()?;
     let root = workspace_root(&app)?;
     WorkspaceStore::new(root)
-        .add_submission_materials(&workspace_id, kind, &paths)
+        .add_submission_materials_for_requirement(
+            &workspace_id,
+            kind,
+            checklist_item_id.as_deref(),
+            &paths,
+        )
         .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_submission_material_included(
+    workspace_id: String,
+    material_id: String,
+    included: bool,
+    app: AppHandle,
+) -> Result<SubmissionMaterialCatalog, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .set_submission_material_included(&workspace_id, &material_id, included)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_target_submission_package_plan(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<TargetSubmissionPackagePlan, String> {
+    let root = workspace_root(&app)?;
+    WorkspaceStore::new(root)
+        .target_submission_package_plan(&workspace_id)
         .map_err(|error| error.to_string())
 }
 
@@ -1581,7 +1611,9 @@ pub fn run() {
             create_local_attestation,
             export_submission_package,
             add_submission_materials,
+            set_submission_material_included,
             get_submission_materials,
+            get_target_submission_package_plan,
             confirm_submission_requirement,
             select_recommended_journal,
             add_backup_recommended_journal,
