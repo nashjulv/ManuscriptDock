@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_REQUIREMENT_SCHEMA_VERSION: u32 = 1;
+pub const JOURNAL_REQUIREMENT_SCHEMA_VERSION: u32 = 2;
 pub const JOURNAL_REQUIREMENT_FRESHNESS_DAYS: u64 = 90;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -117,11 +117,14 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
         keywords: &[
             "file format",
             "manuscript file",
+            "manuscript language",
             ".docx",
             "latex file",
             "source files",
             "稿件格式",
             "主稿文件",
+            "中文稿",
+            "英文稿",
         ],
     },
     RequirementPattern {
@@ -319,6 +322,10 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
             "报告清单",
             "授权文件",
             "版权协议",
+            "投稿声明",
+            "不涉密证明",
+            "著作权转让",
+            "修改说明",
             "作者协议",
         ],
     },
@@ -347,13 +354,11 @@ pub fn extract_journal_requirements(
                     .into_iter()
                     .map(move |excerpt| (document, excerpt))
             })
-            .take(
-                if pattern.category == JournalRequirementCategory::LengthLimit {
-                    12
-                } else {
-                    1
-                },
-            )
+            .take(match pattern.category {
+                JournalRequirementCategory::LengthLimit => 12,
+                JournalRequirementCategory::OtherSupportingFiles => 8,
+                _ => 1,
+            })
             .collect::<Vec<_>>();
         for (index, (document, excerpt)) in matches.into_iter().enumerate() {
             let obligation = detect_obligation(&excerpt);
@@ -386,9 +391,13 @@ pub fn extract_journal_requirements(
 }
 
 fn find_evidence_excerpts(text: &str, keywords: &[&str]) -> Vec<String> {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = text
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n");
     normalized
-        .split(['.', '!', '?', '。', '！', '？', ';', '；'])
+        .split(['\n', '.', '!', '?', '。', '！', '？', ';', '；'])
         .map(str::trim)
         .filter(|sentence| sentence.chars().count() >= 12)
         .filter(|sentence| {
@@ -397,8 +406,99 @@ fn find_evidence_excerpts(text: &str, keywords: &[&str]) -> Vec<String> {
                 .iter()
                 .any(|keyword| keyword_matches(&lowercase, keyword))
         })
+        .filter(|sentence| {
+            is_requirement_statement(sentence) || is_explicit_numeric_constraint(sentence)
+        })
         .map(|sentence| truncate_chars(sentence, 360))
         .collect()
+}
+
+fn is_requirement_statement(value: &str) -> bool {
+    let lowercase = value.to_lowercase();
+    [
+        "must",
+        "required",
+        "mandatory",
+        "shall",
+        "should",
+        "need to",
+        "needs to",
+        "have to",
+        "may not",
+        "must not",
+        "do not",
+        "not exceed",
+        "no more than",
+        "recommended",
+        "encouraged",
+        "optional",
+        "preferably",
+        "必须",
+        "应当",
+        "应提供",
+        "应提交",
+        "应包含",
+        "应使用",
+        "须提供",
+        "须提交",
+        "须包含",
+        "须使用",
+        "须上传",
+        "须隐去",
+        "须填写",
+        "需同时",
+        "作者需",
+        "稿件需",
+        "论文需",
+        "投稿时需",
+        "需要",
+        "要求",
+        "不得",
+        "禁止",
+        "不超过",
+        "不受理",
+        "不予受理",
+        "不接受",
+        "只接收",
+        "请作者",
+        "请提供",
+        "请提交",
+        "请使用",
+        "请注明",
+        "建议",
+        "鼓励",
+        "可选",
+        "推荐",
+        "自愿",
+    ]
+    .iter()
+    .any(|marker| lowercase.contains(marker))
+}
+
+fn is_explicit_numeric_constraint(value: &str) -> bool {
+    let lowercase = value.to_lowercase();
+    lowercase
+        .chars()
+        .any(|character| character.is_ascii_digit())
+        && [
+            " word",
+            "words",
+            "character",
+            " page",
+            "pages",
+            " dpi",
+            " keyword",
+            "keywords",
+            "字以内",
+            "个字",
+            "页以内",
+            "页",
+            "个关键词",
+            "幅图",
+            "张图",
+        ]
+        .iter()
+        .any(|unit| lowercase.contains(unit))
 }
 
 fn length_limit_label(excerpt: &str) -> (String, String) {
@@ -466,31 +566,71 @@ fn keyword_matches(value: &str, keyword: &str) -> bool {
 fn detect_obligation(excerpt: &str) -> JournalRequirementObligation {
     let lowercase = excerpt.to_lowercase();
     if [
-        "must",
-        "required",
-        "mandatory",
-        "shall",
-        "need to",
-        "必须",
-        "应当",
-        "须提供",
-    ]
-    .iter()
-    .any(|marker| lowercase.contains(marker))
-    {
-        JournalRequirementObligation::Required
-    } else if [
         "recommended",
         "encouraged",
         "optional",
+        "preferably",
         "建议",
         "鼓励",
         "可选",
+        "推荐",
+        "自愿",
     ]
     .iter()
     .any(|marker| lowercase.contains(marker))
     {
         JournalRequirementObligation::Recommended
+    } else if [
+        "must",
+        "required",
+        "mandatory",
+        "shall",
+        "should",
+        "need to",
+        "needs to",
+        "have to",
+        "may not",
+        "must not",
+        "do not",
+        "not exceed",
+        "no more than",
+        "必须",
+        "应当",
+        "应提供",
+        "应提交",
+        "应包含",
+        "应使用",
+        "须提供",
+        "须提交",
+        "须包含",
+        "须使用",
+        "须上传",
+        "须隐去",
+        "须填写",
+        "需同时",
+        "作者需",
+        "稿件需",
+        "论文需",
+        "投稿时需",
+        "需要",
+        "要求",
+        "不得",
+        "禁止",
+        "不超过",
+        "不受理",
+        "不予受理",
+        "不接受",
+        "只接收",
+        "请作者",
+        "请提供",
+        "请提交",
+        "请使用",
+        "请注明",
+    ]
+    .iter()
+    .any(|marker| lowercase.contains(marker))
+    {
+        JournalRequirementObligation::Required
     } else {
         JournalRequirementObligation::Verify
     }
@@ -570,6 +710,56 @@ mod tests {
         }];
         let (_, requirements) = extract_journal_requirements(&documents, 1_000);
         assert!(requirements.is_empty());
+    }
+
+    #[test]
+    fn rejects_navigation_article_cards_and_citation_tools_as_requirements() {
+        let documents = vec![JournalRequirementSourceDocument {
+            url: "https://crad.example/".to_owned(),
+            title: "Journal home".to_owned(),
+            text: "所有 标题 作者 关键词 摘要 DOI 栏目 首页 投稿须知 高级检索\n202550462 摘要 HTML全文 PDF PathRoute：基于全切片图像的癌症生存预测方法\n引用参考文献格式 You can copy and paste references from this page".to_owned(),
+            official_host_matched: true,
+        }];
+        let (_, requirements) = extract_journal_requirements(&documents, 1_000);
+        assert!(requirements.is_empty());
+    }
+
+    #[test]
+    fn extracts_only_explicit_requirements_from_crad_author_guidance() {
+        let documents = vec![JournalRequirementSourceDocument {
+            url: "https://crad.example/tougaozhinan".to_owned(),
+            title: "投稿须知".to_owned(),
+            text: "本刊只接收中文稿，不受理英文稿。学术论文建议不超过15页，综述不超过20页，短文不超过4页。作者在投稿系统上传稿件时，需同时向编辑部提交所有作者手写签字确认的投稿声明扫描版，如不提供不予受理。本刊双盲评审，上传系统的电子版中需要隐去作者、单位、基金、作者简介等信息。稿件评审通过后，作者需提交单位审核盖章的不涉密证明和所有作者签字确认的著作权转让声明。".to_owned(),
+            official_host_matched: true,
+        }];
+        let (_, requirements) = extract_journal_requirements(&documents, 1_000);
+
+        assert!(requirements.iter().any(|item| {
+            item.category == JournalRequirementCategory::ManuscriptFile
+                && item.evidence_excerpt.contains("只接收中文稿")
+        }));
+        assert!(requirements.iter().any(|item| {
+            item.category == JournalRequirementCategory::AnonymousReview
+                && item.obligation == JournalRequirementObligation::Required
+        }));
+        assert!(requirements.iter().any(|item| {
+            item.category == JournalRequirementCategory::LengthLimit
+                && item.obligation == JournalRequirementObligation::Recommended
+        }));
+        assert_eq!(
+            requirements
+                .iter()
+                .filter(|item| item.category == JournalRequirementCategory::OtherSupportingFiles)
+                .count(),
+            2
+        );
+        assert!(!requirements.iter().any(|item| matches!(
+            item.category,
+            JournalRequirementCategory::Abstract
+                | JournalRequirementCategory::Keywords
+                | JournalRequirementCategory::Figures
+                | JournalRequirementCategory::References
+        )));
     }
 
     #[test]

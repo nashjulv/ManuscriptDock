@@ -23,14 +23,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     net::IpAddr,
     path::PathBuf,
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use url::Url;
 use uuid::Uuid;
 
@@ -117,10 +117,162 @@ struct FetchedOfficialPage {
     text: String,
 }
 
-fn public_https_url(value: &str) -> Result<Url, String> {
+fn html_attribute_value(tag: &str, attribute: &str) -> Option<String> {
+    let lowercase = tag.to_ascii_lowercase();
+    let mut cursor = 0;
+    while let Some(relative) = lowercase[cursor..].find(attribute) {
+        let start = cursor + relative;
+        let before = lowercase[..start].chars().next_back();
+        let after_name = start + attribute.len();
+        if before.is_some_and(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | ':')
+        }) {
+            cursor = after_name;
+            continue;
+        }
+        let mut equal = after_name;
+        while lowercase
+            .as_bytes()
+            .get(equal)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            equal += 1;
+        }
+        if lowercase.as_bytes().get(equal) != Some(&b'=') {
+            cursor = after_name;
+            continue;
+        }
+        let mut value_start = equal + 1;
+        while lowercase
+            .as_bytes()
+            .get(value_start)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            value_start += 1;
+        }
+        let quote = tag.as_bytes().get(value_start).copied();
+        let (content_start, terminator) = if matches!(quote, Some(b'\'' | b'"')) {
+            (value_start + 1, quote.unwrap())
+        } else {
+            (value_start, b' ')
+        };
+        let mut value_end = content_start;
+        while let Some(byte) = tag.as_bytes().get(value_end) {
+            if *byte == terminator
+                || (terminator == b' ' && (*byte == b'>' || byte.is_ascii_whitespace()))
+            {
+                break;
+            }
+            value_end += 1;
+        }
+        return Some(decode_html_entities(&tag[content_start..value_end]));
+    }
+    None
+}
+
+fn html_input_value(html: &str, input_id: &str) -> Option<String> {
+    let lowercase = html.to_ascii_lowercase();
+    let mut cursor = 0;
+    while let Some(relative) = lowercase[cursor..].find("<input") {
+        let start = cursor + relative;
+        let end = lowercase[start..].find('>')? + start + 1;
+        let tag = &html[start..end];
+        if html_attribute_value(tag, "id").as_deref() == Some(input_id) {
+            return html_attribute_value(tag, "value");
+        }
+        cursor = end;
+    }
+    None
+}
+
+fn instruction_page_hint(value: &str) -> bool {
+    let lowercase = value.to_lowercase();
+    [
+        "guide-for-authors",
+        "guidelines-for-authors",
+        "author-guideline",
+        "author-instruction",
+        "instructions-for-authors",
+        "submission-guideline",
+        "manuscript-preparation",
+        "for-authors",
+        "tougaozhinan",
+        "投稿须知",
+        "投稿指南",
+        "投稿要求",
+        "征稿简则",
+        "作者指南",
+    ]
+    .iter()
+    .any(|keyword| lowercase.contains(keyword))
+}
+
+fn dynamic_news_content(bytes: &[u8]) -> Option<(Option<String>, String)> {
+    let payload = serde_json::from_slice::<serde_json::Value>(bytes).ok()?;
+    let content = payload
+        .pointer("/data/news/content")
+        .and_then(|value| value.as_str())?;
+    let text = html_to_plain_text(content);
+    if text.chars().count() < 20 {
+        return None;
+    }
+    let title = payload
+        .pointer("/data/news/title")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    Some((title, text))
+}
+
+async fn hydrate_dynamic_news_page(client: &reqwest::Client, page: &mut FetchedOfficialPage) {
+    let Some(news_id) = html_input_value(&page.html, "newsId") else {
+        return;
+    };
+    if news_id.is_empty()
+        || !news_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return;
+    }
+    let base_path = html_input_value(&page.html, "basePath").unwrap_or_else(|| "/".to_owned());
+    let endpoint_path = format!("{}/data/news/newsData", base_path.trim_end_matches('/'));
+    let Ok(endpoint) = page.url.join(&endpoint_path) else {
+        return;
+    };
+    if !hosts_share_official_site(&page.url, &endpoint) {
+        return;
+    }
+    let Ok(mut response) = client.post(endpoint).form(&[("id", news_id)]).send().await else {
+        return;
+    };
+    if !response.status().is_success() {
+        return;
+    }
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if bytes.len().saturating_add(chunk.len()) > MAX_OFFICIAL_PAGE_BYTES {
+            return;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let Some((title, text)) = dynamic_news_content(&bytes) else {
+        return;
+    };
+    page.text = text;
+    if let Some(title) = title {
+        page.title = title;
+    }
+}
+
+fn public_source_url(value: &str) -> Result<Url, String> {
     let mut url = Url::parse(value).map_err(|_| "官方来源网址无效".to_owned())?;
-    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
-        return Err("只允许访问不含账号信息的 HTTPS 官方来源".to_owned());
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("官方来源网址只支持 HTTP 或 HTTPS".to_owned());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("官方来源网址不能包含用户名或密码".to_owned());
     }
     let host = url
         .host_str()
@@ -160,6 +312,16 @@ fn public_https_url(value: &str) -> Result<Url, String> {
         }
     }
     url.set_fragment(None);
+    Ok(url)
+}
+
+fn public_https_url(value: &str) -> Result<Url, String> {
+    let url = public_source_url(value)?;
+    if url.scheme() != "https" {
+        return Err(
+            "该期刊官方来源仅提供 HTTP，无法安全自动读取；请粘贴官方作者指南原文".to_owned(),
+        );
+    }
     Ok(url)
 }
 
@@ -280,22 +442,29 @@ fn discover_instruction_links(base: &Url, html: &str) -> Vec<Url> {
         }
         cursor = value_end.saturating_add(1);
         let href = &html[content_start..value_end];
-        let href_lower = href.to_ascii_lowercase();
-        if ![
-            "guide-for-authors",
-            "guidelines-for-authors",
-            "author-guideline",
-            "author-instruction",
-            "instructions-for-authors",
-            "submission-guideline",
-            "manuscript-preparation",
-            "for-authors",
-            "投稿须知",
-            "作者指南",
-        ]
-        .iter()
-        .any(|keyword| href_lower.contains(keyword))
-        {
+        let tag_start = lowercase[..start].rfind('<').unwrap_or(start);
+        let tag_prefix = lowercase[tag_start..start]
+            .trim_start_matches('<')
+            .trim_start();
+        let mut tag_characters = tag_prefix.chars();
+        let is_anchor = tag_characters.next() == Some('a')
+            && tag_characters
+                .next()
+                .is_some_and(|character| character.is_ascii_whitespace() || character == '>');
+        let anchor_text = if is_anchor {
+            lowercase[value_end..]
+                .find('>')
+                .and_then(|relative| {
+                    let label_start = value_end + relative + 1;
+                    lowercase[label_start..].find("</a>").map(|label_end| {
+                        html_to_plain_text(&html[label_start..label_start + label_end])
+                    })
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if !instruction_page_hint(href) && !instruction_page_hint(&anchor_text) {
             continue;
         }
         let Ok(url) = base.join(href) else { continue };
@@ -347,8 +516,19 @@ fn html_to_plain_text(html: &str) -> String {
         }
         if bytes[index] == b'<' {
             if let Some(end) = html[index..].find('>') {
+                let tag = lowercase[index..index + end + 1].trim();
                 index += end + 1;
-                output.push(' ');
+                if tag.starts_with("</p")
+                    || tag.starts_with("</li")
+                    || tag.starts_with("</div")
+                    || tag.starts_with("</h")
+                    || tag.starts_with("</tr")
+                    || tag.starts_with("<br")
+                {
+                    output.push('\n');
+                } else {
+                    output.push(' ');
+                }
                 continue;
             }
         }
@@ -357,9 +537,11 @@ fn html_to_plain_text(html: &str) -> String {
         index += character.len_utf8();
     }
     decode_html_entities(&output)
-        .split_whitespace()
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join(" ")
+        .join("\n")
 }
 
 fn decode_html_entities(value: &str) -> String {
@@ -757,6 +939,7 @@ async fn add_submission_materials(
     workspace_id: String,
     kind: SubmissionMaterialKind,
     checklist_item_id: Option<String>,
+    locale: String,
     app: AppHandle,
 ) -> Result<Option<SubmissionMaterialCatalog>, String> {
     let (filter_name, extensions): (&str, &[&str]) = match kind {
@@ -782,14 +965,30 @@ async fn add_submission_materials(
                 "bib", "bbl", "ris", "nbib", "enw", "xml", "txt", "doc", "docx", "odt", "rtf",
             ],
         ),
-        SubmissionMaterialKind::CoverLetter
-        | SubmissionMaterialKind::TitlePage
-        | SubmissionMaterialKind::Declaration => (
-            "投稿文档",
+        SubmissionMaterialKind::CoverLetter => (
+            "投稿信 / Cover letter",
             &["doc", "docx", "odt", "rtf", "tex", "pdf", "txt"],
         ),
-        SubmissionMaterialKind::Supplementary | SubmissionMaterialKind::Other => (
-            "投稿支持文件",
+        SubmissionMaterialKind::TitlePage => (
+            "标题页 / Title page",
+            &["doc", "docx", "odt", "rtf", "tex", "pdf", "txt"],
+        ),
+        SubmissionMaterialKind::Declaration => (
+            "声明文件 / Declaration documents",
+            &["doc", "docx", "odt", "rtf", "tex", "pdf", "txt"],
+        ),
+        SubmissionMaterialKind::Supplementary => (
+            "补充材料 / Supplementary files",
+            &[
+                "doc", "docx", "odt", "rtf", "tex", "zip", "tar", "gz", "tgz", "bib", "bbl", "bst",
+                "cls", "sty", "ris", "nbib", "enw", "pdf", "eps", "ps", "svg", "png", "jpg",
+                "jpeg", "tif", "tiff", "csv", "tsv", "xls", "xlsx", "ods", "ppt", "pptx", "odp",
+                "txt", "md", "json", "xml", "mp4", "mov", "avi", "webm", "mpeg", "mpg", "mp3",
+                "wav", "m4a", "sav", "dta", "mat", "h5", "hdf5", "parquet",
+            ],
+        ),
+        SubmissionMaterialKind::Other => (
+            "说明与其他支持文件 / Explanations and other files",
             &[
                 "doc", "docx", "odt", "rtf", "tex", "zip", "tar", "gz", "tgz", "bib", "bbl", "bst",
                 "cls", "sty", "ris", "nbib", "enw", "pdf", "eps", "ps", "svg", "png", "jpg",
@@ -816,15 +1015,114 @@ async fn add_submission_materials(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let root = workspace_root(&app)?;
-    WorkspaceStore::new(root)
-        .add_submission_materials_for_requirement(
+    let store = WorkspaceStore::new(root);
+    let current = store
+        .submission_materials(&workspace_id)
+        .map_err(|error| error.to_string())?;
+    let current_target = store
+        .submission_target(&workspace_id)
+        .map_err(|error| error.to_string())?;
+    let current_requirement_snapshot_id = if let Some(target) = current_target.as_ref() {
+        store
+            .journal_requirement_snapshots(&workspace_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|snapshot| snapshot.target_selection_id == target.selection_id)
+            .map(|snapshot| snapshot.snapshot_id)
+    } else {
+        None
+    };
+    let effective_checklist_item_id = checklist_item_id.clone().or_else(|| {
+        let matching = current
+            .checklist
+            .iter()
+            .filter(|item| item.verification == "file" && item.material_kind == Some(kind))
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>();
+        (matching.len() == 1).then(|| matching[0].to_owned())
+    });
+    let selected_names = paths
+        .iter()
+        .filter_map(|path| path.file_name().and_then(|value| value.to_str()))
+        .map(|name| (name.trim().to_lowercase(), name.to_owned()))
+        .collect::<Vec<_>>();
+    let mut unique_selected_names = BTreeSet::new();
+    let duplicate_selection = selected_names
+        .iter()
+        .find(|(normalized, _)| !unique_selected_names.insert(normalized.clone()))
+        .map(|(_, name)| name.clone());
+    if let Some(name) = duplicate_selection {
+        let english = locale == "en";
+        app.dialog()
+            .message(if english {
+                format!("This selection contains more than one file named {name}. Select only one of them and try again.")
+            } else {
+                format!("本次选择包含多个名为 {name} 的文件。请只保留其中一个后重新选择。")
+            })
+            .title(if english { "Duplicate file names" } else { "发现同名文件" })
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCustom(if english {
+                "OK".to_owned()
+            } else {
+                "知道了".to_owned()
+            }))
+            .blocking_show();
+        return Ok(None);
+    }
+    let duplicate_names = selected_names
+        .iter()
+        .filter(|(normalized, _)| {
+            current.materials.iter().any(|material| {
+                material.manuscript_version == current.manuscript_version
+                    && material.kind == kind
+                    && material.target_selection_id.as_deref()
+                        == current_target
+                            .as_ref()
+                            .map(|target| target.selection_id.as_str())
+                    && material.requirement_snapshot_id.as_deref()
+                        == current_requirement_snapshot_id.as_deref()
+                    && material.checklist_item_id.as_deref()
+                        == effective_checklist_item_id.as_deref()
+                    && material.original_name.trim().to_lowercase() == *normalized
+            })
+        })
+        .map(|(_, name)| name.clone())
+        .collect::<BTreeSet<_>>();
+    let replace_same_name = if duplicate_names.is_empty() {
+        false
+    } else {
+        let english = locale == "en";
+        let names = duplicate_names.into_iter().collect::<Vec<_>>().join("\n");
+        app.dialog()
+            .message(if english {
+                format!("The following file name already exists in this upload slot:\n\n{names}\n\nReplace the existing workspace copy? The original file outside ManuscriptDock will not be changed.")
+            } else {
+                format!("当前上传项中已存在以下同名文件：\n\n{names}\n\n是否替换工作区中的已有副本？ManuscriptDock 外部的原始文件不会被修改。")
+            })
+            .title(if english { "Replace existing attachment?" } else { "替换已有附件？" })
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                if english { "Replace".to_owned() } else { "替换已有附件".to_owned() },
+                if english { "Cancel".to_owned() } else { "取消".to_owned() },
+            ))
+            .blocking_show()
+    };
+    let result = if replace_same_name {
+        store.replace_submission_materials_for_requirement(
             &workspace_id,
             kind,
             checklist_item_id.as_deref(),
             &paths,
         )
-        .map(Some)
-        .map_err(|error| error.to_string())
+    } else {
+        store.add_submission_materials_for_requirement(
+            &workspace_id,
+            kind,
+            checklist_item_id.as_deref(),
+            &paths,
+        )
+    };
+    result.map(Some).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1000,16 +1298,29 @@ async fn discover_journal_requirements(
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(20))
-        .user_agent("ManuscriptDock/0.22 official-guideline-fetch")
+        .user_agent("ManuscriptDock/0.42 official-guideline-fetch")
         .build()
         .map_err(|error| format!("无法建立受控网络客户端：{error}"))?;
     let homepage = fetch_official_page(&client, seed.clone(), &seed).await?;
     let candidate_links = discover_instruction_links(&homepage.url, &homepage.html);
-    let mut pages = vec![homepage];
+    let homepage_is_instruction =
+        instruction_page_hint(homepage.url.as_str()) || instruction_page_hint(&homepage.title);
+    let mut homepage = Some(homepage);
+    let mut pages = Vec::new();
+    if homepage_is_instruction {
+        let mut homepage = homepage.take().expect("homepage is available");
+        hydrate_dynamic_news_page(&client, &mut homepage).await;
+        pages.push(homepage);
+    }
     for link in candidate_links {
-        if let Ok(page) = fetch_official_page(&client, link, &seed).await {
+        if let Ok(mut page) = fetch_official_page(&client, link, &seed).await {
+            hydrate_dynamic_news_page(&client, &mut page).await;
             pages.push(page);
         }
+    }
+    if pages.is_empty() {
+        pages
+            .push(homepage.expect("homepage remains available when it is not an instruction page"));
     }
     let documents = pages
         .into_iter()
@@ -1055,8 +1366,8 @@ async fn save_manual_journal_requirements(
         .chain(plan.backups.iter())
         .find(|target| target.selection_id == target_selection_id)
         .ok_or_else(|| "未找到需要录入要求的投稿目标".to_owned())?;
-    let source = public_https_url(source_url.trim())?;
-    let official_homepage = public_https_url(&target.homepage_url)?;
+    let source = public_source_url(source_url.trim())?;
+    let official_homepage = public_source_url(&target.homepage_url)?;
     let document = JournalRequirementSourceDocument {
         url: source.to_string(),
         title: format!("{} author-provided official requirements", target.name),
@@ -2092,11 +2403,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_instruction_links, hosts_share_official_site, html_to_plain_text,
-        institution_rule_model_projection, journal_profile_missing_fields,
-        journal_profile_model_projection, normalize_rank_tiers, parse_institution_rule_extraction,
-        parse_journal_profile_candidate, public_https_url, redact_private_values,
-        PublicJournalDirectoryEvidence, PublicJournalRecommendation,
+        discover_instruction_links, dynamic_news_content, hosts_share_official_site,
+        html_input_value, html_to_plain_text, institution_rule_model_projection,
+        journal_profile_missing_fields, journal_profile_model_projection, normalize_rank_tiers,
+        parse_institution_rule_extraction, parse_journal_profile_candidate, public_https_url,
+        public_source_url, redact_private_values, PublicJournalDirectoryEvidence,
+        PublicJournalRecommendation,
     };
     use manuscript_core::{
         ArticleTypePreference, JournalMetricScheme, JournalProfileDiscoveryRecord, JournalRegion,
@@ -2303,7 +2615,15 @@ mod tests {
 
     #[test]
     fn official_page_guard_rejects_private_networks_and_cross_site_links() {
-        assert!(public_https_url("http://journal.example/authors").is_err());
+        assert_eq!(
+            public_https_url("http://journal.example/authors").unwrap_err(),
+            "该期刊官方来源仅提供 HTTP，无法安全自动读取；请粘贴官方作者指南原文"
+        );
+        assert_eq!(
+            public_source_url("https://account@journal.example/authors").unwrap_err(),
+            "官方来源网址不能包含用户名或密码"
+        );
+        assert!(public_source_url("http://journal.example/authors").is_ok());
         assert!(public_https_url("https://127.0.0.1/authors").is_err());
         let home = public_https_url("https://journal.example/home").unwrap();
         let guide = public_https_url("https://www.journal.example/guide-for-authors").unwrap();
@@ -2325,5 +2645,42 @@ mod tests {
         let text = html_to_plain_text(html);
         assert!(text.contains("A title page is required"));
         assert!(!text.contains("cover letter required"));
+    }
+
+    #[test]
+    fn discovers_transliterated_and_anchor_labeled_author_guides() {
+        let base = public_https_url("https://journal.example/").unwrap();
+        let html = r#"<nav><a href='/tougaozhinan'>投稿须知</a><a href='/column/21'>作者指南</a><a href='/current'>摘要</a></nav>"#;
+        let links = discover_instruction_links(&base, html);
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].as_str(), "https://journal.example/tougaozhinan");
+        assert_eq!(links[1].as_str(), "https://journal.example/column/21");
+    }
+
+    #[test]
+    fn reads_dynamic_news_identifiers_and_preserves_block_boundaries() {
+        let html = r#"<input value="338" type="hidden" id="newsId"><input id='basePath' value='/'><p>本刊只接收中文稿。</p><p>综述建议不超过20页。</p>"#;
+
+        assert_eq!(html_input_value(html, "newsId").as_deref(), Some("338"));
+        assert_eq!(html_input_value(html, "basePath").as_deref(), Some("/"));
+        assert_eq!(
+            html_to_plain_text(html),
+            "本刊只接收中文稿。\n综述建议不超过20页。"
+        );
+    }
+
+    #[test]
+    fn extracts_only_the_official_dynamic_news_body() {
+        let payload = r#"{"data":{"news":{"title":"投稿须知","content":"<p>本刊只接收中文稿，不受理英文稿。</p><p>综述建议不超过20页。</p>"}}}"#;
+
+        let (title, text) =
+            dynamic_news_content(payload.as_bytes()).expect("news body should parse");
+        assert_eq!(title.as_deref(), Some("投稿须知"));
+        assert_eq!(
+            text,
+            "本刊只接收中文稿，不受理英文稿。\n综述建议不超过20页。"
+        );
+        assert!(!text.contains("首页"));
     }
 }

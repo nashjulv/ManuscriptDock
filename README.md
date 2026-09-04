@@ -62,8 +62,13 @@ ManuscriptDock 将作者已有的论文整理为可检查、可投稿、可返�
 
 ```bash
 npm install
-npm run dev
+make start-dev
 ```
+
+`make start-dev` 会先检查 Node、npm、Rust、依赖目录及 Vite 端口 `1420`。如果端口由当前
+仓库遗留的开发进程占用，它会正常停止该进程并等待端口释放；如果占用者属于其他项目，命令
+会安全退出并显示 PID/命令，不会终止无关程序。需要绕过自动清理时，可设置
+`MANUSCRIPTDOCK_AUTO_STOP_DEV=0`。底层仍可直接运行 `npm run dev`。
 
 仓库级验证：
 

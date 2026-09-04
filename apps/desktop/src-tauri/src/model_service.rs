@@ -2,9 +2,10 @@ use keyring::v1::Entry;
 use reqwest::{redirect::Policy, Client};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 use url::Url;
@@ -12,6 +13,32 @@ use url::Url;
 const SETTINGS_SCHEMA_VERSION: u32 = 1;
 const KEYRING_SERVICE: &str = "com.manuscriptdock.model-api";
 const SETTINGS_FILE: &str = "model-settings.json";
+
+#[derive(Default)]
+struct CredentialCache {
+    values: BTreeMap<ModelSlotRole, Option<String>>,
+}
+
+impl CredentialCache {
+    fn get_or_load(
+        &mut self,
+        role: ModelSlotRole,
+        load: impl FnOnce() -> Result<Option<String>, String>,
+    ) -> Result<Option<String>, String> {
+        if let Some(value) = self.values.get(&role) {
+            return Ok(value.clone());
+        }
+        let value = load()?;
+        self.values.insert(role, value.clone());
+        Ok(value)
+    }
+
+    fn set(&mut self, role: ModelSlotRole, value: Option<String>) {
+        self.values.insert(role, value);
+    }
+}
+
+static CREDENTIAL_CACHE: OnceLock<Mutex<CredentialCache>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum ModelSlotRole {
@@ -197,6 +224,7 @@ pub fn save_settings(
                     return Err(format!("无法从系统凭据库删除 API Key：{error}"));
                 }
             }
+            cache_credential(input.role, None);
         } else if let Some(api_key) = input
             .api_key
             .as_deref()
@@ -206,6 +234,7 @@ pub fn save_settings(
             entry
                 .set_password(api_key)
                 .map_err(|error| format!("无法将 API Key 保存到系统凭据库：{error}"))?;
+            cache_credential(input.role, Some(api_key.to_owned()));
         }
     }
     let stored = StoredModelSettings {
@@ -369,15 +398,8 @@ fn configured_models(root: &Path) -> Result<Vec<ConfiguredModel>, String> {
         else {
             continue;
         };
-        let api_key = match credential_entry(role)?.get_password() {
-            Ok(api_key) => api_key,
-            Err(keyring::Error::NoEntry) => continue,
-            Err(error) => {
-                return Err(format!(
-                    "无法从系统凭据库读取 {} API Key：{error}",
-                    role.as_str()
-                ));
-            }
+        let Some(api_key) = cached_credential(role)? else {
+            continue;
         };
         result.push(ConfiguredModel {
             role,
@@ -523,12 +545,33 @@ fn credential_entry(role: ModelSlotRole) -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, role.as_str()).map_err(|error| format!("系统凭据库不可用：{error}"))
 }
 
+fn credential_cache() -> &'static Mutex<CredentialCache> {
+    CREDENTIAL_CACHE.get_or_init(|| Mutex::new(CredentialCache::default()))
+}
+
+fn cached_credential(role: ModelSlotRole) -> Result<Option<String>, String> {
+    credential_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_or_load(role, || match credential_entry(role)?.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(format!(
+                "无法从系统凭据库读取 {} API Key：{error}",
+                role.as_str()
+            )),
+        })
+}
+
+fn cache_credential(role: ModelSlotRole, value: Option<String>) {
+    credential_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .set(role, value);
+}
+
 fn key_exists(role: ModelSlotRole) -> Result<bool, String> {
-    match credential_entry(role)?.get_password() {
-        Ok(_) => Ok(true),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(error) => Err(format!("无法读取系统凭据库状态：{error}")),
-    }
+    Ok(cached_credential(role)?.is_some())
 }
 
 #[cfg(target_os = "macos")]
@@ -549,6 +592,7 @@ fn secure_store_label() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     fn input(role: ModelSlotRole, enabled: bool, base_url: &str) -> ModelSlotInput {
         ModelSlotInput {
@@ -632,6 +676,39 @@ mod tests {
         let mut clearing = enabled;
         clearing[0].clear_api_key = true;
         assert!(validate_credential_requirements(&clearing, |_| Ok(true)).is_err());
+    }
+
+    #[test]
+    fn reuses_a_loaded_credential_for_the_rest_of_the_process_session() {
+        let mut cache = CredentialCache::default();
+        let reads = Cell::new(0_u32);
+        let load = || {
+            reads.set(reads.get() + 1);
+            Ok(Some("synthetic-secret".to_owned()))
+        };
+
+        assert_eq!(
+            cache
+                .get_or_load(ModelSlotRole::Primary, load)
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-secret")
+        );
+        assert_eq!(
+            cache
+                .get_or_load(ModelSlotRole::Primary, load)
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-secret")
+        );
+        assert_eq!(reads.get(), 1);
+
+        cache.set(ModelSlotRole::Primary, None);
+        assert_eq!(
+            cache.get_or_load(ModelSlotRole::Primary, load).unwrap(),
+            None
+        );
+        assert_eq!(reads.get(), 1);
     }
 
     #[test]

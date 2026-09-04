@@ -9,5 +9,6 @@ This directory contains the installable ManuscriptDock desktop application:
 
 Do not add unrestricted filesystem or network access to frontend code. Native capabilities must be exposed through narrow, validated Tauri commands.
 
-Run the full desktop app from the repository root with `npm run dev`. Use
+Run the full desktop app from the repository root with `make start-dev` (or the lower-level
+`npm run dev`). The Make target performs dependency and port preflight checks first. Use
 `npm run frontend:dev` only when working on browser-safe presentation states.

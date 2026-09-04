@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.35")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.35" }));
-    expect(brandStatement.getByText("V0.35")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.42")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.42" }));
+    expect(brandStatement.getByText("V0.42")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -67,6 +67,87 @@ describe("App", () => {
     unmount();
     render(<App />);
     expect(screen.getByRole("heading", { name: "My Workspace" })).toBeVisible();
+  });
+
+  it("keeps an HTTP-only journal target usable through author-provided official text", async () => {
+    isTauriMock.mockReturnValue(true);
+    const workspace = {
+      id: "http-journal-workspace",
+      manuscript: { name: "nlp-study.pdf", extension: "pdf", kind: "pdf", sizeBytes: 2048, modifiedUnixMs: null },
+      contentHash: "8".repeat(64),
+      importedUnixMs: Date.UTC(2026, 8, 4),
+      snapshotVersion: 1,
+    };
+    const target = {
+      ...makeCurrentTarget(workspace, "http-target"),
+      journalId: "jcip",
+      name: "中文信息学报",
+      nameEn: "Journal of Chinese Information Processing",
+      homepageUrl: "http://jcip.cipsc.org.cn/",
+    };
+    const targetPlan = { schemaVersion: 4, workspaceId: workspace.id, primary: target, backups: [], updatedUnixMs: Date.UTC(2026, 8, 4) };
+    const emptyPortfolio = { sprint: [], matching: [], safeguard: [] };
+    const recommendationRun = {
+      schemaVersion: 6,
+      runId: target.recommendationRunId,
+      workspaceId: workspace.id,
+      manuscriptVersion: 1,
+      resolvedArticleType: "research",
+      catalogVersion: "synthetic",
+      catalogVerifiedDate: "2026-09-04",
+      evaluatedUnixMs: Date.UTC(2026, 8, 4),
+      recommendationProfile: { profileVersion: 1, institution: "", specialty: "", manuscriptPurpose: "academic_communication" },
+      deadlineDaysRemaining: 90,
+      domestic: emptyPortfolio,
+      international: emptyPortfolio,
+      schoolRuleStatus: "official_source_search_required_excluded_from_score",
+      journalDirectoryVersion: null,
+      limitations: [],
+      externalTransmission: "not_performed",
+    };
+    const snapshot = {
+      ...makeCurrentRequirements(workspace, target),
+      snapshotId: "http-requirements",
+      sources: [{ url: target.homepageUrl, title: "Author-provided guide", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026, 8, 4), officialHostMatched: true }],
+    };
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "list_workspaces") return Promise.resolve({ workspaces: [workspace], archivedWorkspaces: [], warnings: [] });
+      if (command === "get_workspace_storage_summary") return Promise.reject(new Error("not needed"));
+      if (command === "get_workspace_lifecycle") return Promise.resolve({ workspaceId: workspace.id, currentVersion: 1, structureReport: null, readinessReport: null, attestation: null, submission: null, knowledgeBody: null, submissionTarget: target, submissionTargetPlan: targetPlan, journalRequirements: null });
+      if (command === "get_journal_requirement_snapshots") return Promise.resolve([]);
+      if (command === "get_journal_directory_summary") return Promise.reject(new Error("not imported"));
+      if (command === "get_journal_profile_discoveries") return Promise.resolve([]);
+      if (command === "list_journal_recommendations") return Promise.resolve([recommendationRun]);
+      if (command === "get_submission_materials") return Promise.resolve(null);
+      if (command === "save_manual_journal_requirements") return Promise.resolve(snapshot);
+      return Promise.reject(new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 nlp-study.pdf" }));
+    await user.click(within(screen.getByRole("navigation", { name: "投稿准备主任务" })).getByRole("button", { name: /目标期刊/ }));
+    expect(await screen.findByText("该期刊官网仅提供 HTTP，不能安全自动读取")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "获取官方投稿要求" })).not.toBeInTheDocument();
+    expect(screen.getByText("HTTP 网址只作为来源记录保存；ManuscriptDock 不会访问或上传任何论文资料到该网址。")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByText("This journal site only provides HTTP and cannot be fetched securely")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "中文" }));
+
+    expect(screen.getByLabelText("官方来源网址")).toHaveValue(target.homepageUrl);
+    await user.type(screen.getByLabelText("作者指南原文"), "A separate title page is required for every submitted manuscript.");
+    await user.click(screen.getByRole("checkbox", { name: /我确认这段原文来自/ }));
+    const saveButton = screen.getByRole("button", { name: "保存并生成本地快照" });
+    expect(saveButton).toBeEnabled();
+    await user.click(saveButton);
+    expect(invokeMock).toHaveBeenCalledWith("save_manual_journal_requirements", {
+      workspaceId: workspace.id,
+      targetSelectionId: target.selectionId,
+      sourceUrl: target.homepageUrl,
+      requirementText: "A separate title page is required for every submitted manuscript.",
+      authorAttestedOfficial: true,
+    });
+    expect(await screen.findByText("已建立期刊专属要求快照")).toBeVisible();
   });
 
   it("configures the shared model API key before any manuscript workflow", async () => {
@@ -106,11 +187,15 @@ describe("App", () => {
     await user.click(within(dialog).getByRole("button", { name: "保存模型设置" }));
 
     expect(await within(dialog).findByText(/API Key 仅保存在系统凭据库/)).toBeVisible();
+    expect(within(dialog).getByText(/每个已保存 Key 只向系统凭据库读取一次/)).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("save_model_settings", { slots: expect.arrayContaining([expect.objectContaining({ role: "primary", enabled: true, providerLabel: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", apiKey: "synthetic-global-secret" })]) });
     await user.click(within(dialog).getByRole("button", { name: "关闭模型设置" }));
     const modelSettingsButton = screen.getByRole("button", { name: "模型设置" });
     expect(modelSettingsButton).toBeEnabled();
     expect(within(modelSettingsButton).getByText("1")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    await user.click(screen.getByRole("button", { name: "Models" }));
+    expect(await screen.findByText(/each stored key is read from the credential store only once/)).toBeVisible();
   });
 
   it("renders only safe manuscript metadata after Rust selection", async () => {
@@ -929,7 +1014,7 @@ describe("App", () => {
   it("recommends a two-three-three portfolio for each region and recalculates after adjustment", async () => {
     isTauriMock.mockReturnValue(true);
     const workspace = { id: "journal-workspace", manuscript: { name: "vision-study.tex", extension: "tex", kind: "latex", sizeBytes: 4096, modifiedUnixMs: null }, contentHash: "e".repeat(64), importedUnixMs: Date.UTC(2026, 7, 30), snapshotVersion: 2 };
-    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open", directoryEvidence: [] });
+    const makeItem = (id: string, domestic: boolean, index: number) => ({ id, name: `${domestic ? "国内期刊" : "国际期刊"}${index}`, nameEn: `${domestic ? "Domestic" : "International"} Journal ${index}`, region: domestic ? "domestic" : "international", publisher: "合成学术出版社", publisherEn: "Synthetic Society", rankSystem: "Synthetic CCF", rankTier: domestic ? "T1" : "CCF A", deadlineStatus: "planning_window_sufficient", institutionEligibility: "requires_verified_official_rules", rankingSourceUrl: "https://example.test/rank", homepageUrl: "https://example.test/journal", openAccessStatus: "open", directoryEvidence: [] });
     let runCount = 0;
     let targetPlan: { schemaVersion: number; workspaceId: string; primary: Record<string, unknown> | null; backups: Record<string, unknown>[]; updatedUnixMs: number } = { schemaVersion: 1, workspaceId: workspace.id, primary: null, backups: [], updatedUnixMs: 0 };
     let requirementSnapshots: Record<string, unknown>[] = [];
@@ -937,10 +1022,15 @@ describe("App", () => {
     let profileDiscoveries: Record<string, unknown>[] = [];
     let materialPresent = true;
     const storedMaterial = { materialId: "11111111-1111-4111-8111-111111111111", kind: "title_page", originalName: "title-page.docx", extension: "docx", sizeBytes: 2048, contentHash: "9".repeat(64), importedUnixMs: Date.UTC(2026,7,30), manuscriptVersion: 2, targetSelectionId: "selection-dr1-primary", requirementSnapshotId: "requirements-1", checklistItemId: "journal-title-page", included: true, validationStatus: "passed", validationIssues: [], detectedMediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
-    const materialCatalog = () => ({ schemaVersion: 1, workspaceId: workspace.id, manuscriptVersion: 2, materials: materialPresent ? [storedMaterial] : [], checklist: [
+    const materialCatalog = () => ({ schemaVersion: 4, workspaceId: workspace.id, manuscriptVersion: 2, detectedFigureCount: 1, detectedTableCount: 1, materials: materialPresent ? [storedMaterial] : [], checklist: [
       { id: "journal-title-page", label: "标题页", labelEn: "Title page", group: "files", requirement: "required", status: materialPresent ? "passed" : "missing", detail: materialPresent ? "已绑定标题页" : "请上传标题页", verification: "file", materialKind: "title_page", blocking: true, confirmable: false, sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "A separate title page is required", capturedUnixMs: Date.UTC(2026,7,30), freshUntilUnixMs: Date.UTC(2026,10,30), requiredCount: 1, matchedMaterialIds: materialPresent ? [storedMaterial.materialId] : [] },
       { id: "figure-originals", label: "原始图件", labelEn: "Original figures", group: "files", requirement: "recommended", status: "missing", detail: "正文包含图片；请提供独立高精度原图", verification: "file", materialKind: "figure", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
       { id: "table-editables", label: "可编辑表格", labelEn: "Editable tables", group: "files", requirement: "recommended", status: "missing", detail: "正文包含表格；请提供可编辑源文件", verification: "file", materialKind: "table", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
+      { id: "common-cover-letter", label: "投稿信", labelEn: "Cover letter", group: "files", requirement: "recommended", status: "recommended", detail: "可上传致编辑的投稿信", verification: "file", materialKind: "cover_letter", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
+      { id: "common-declaration-files", label: "声明文件", labelEn: "Declaration documents", group: "declarations", requirement: "recommended", status: "recommended", detail: "可上传伦理、知情同意、利益冲突、资金、数据可用性、作者贡献或 AI 使用声明", verification: "file", materialKind: "declaration", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
+      { id: "common-bibliography-files", label: "参考文献文件", labelEn: "Bibliography files", group: "files", requirement: "recommended", status: "recommended", detail: "可上传可编辑参考文献文件", verification: "file", materialKind: "bibliography", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
+      { id: "common-supplementary-files", label: "补充材料与研究数据", labelEn: "Supplementary materials and research data", group: "files", requirement: "recommended", status: "recommended", detail: "可上传附录、方法补充、数据、代码归档、演示或音视频", verification: "file", materialKind: "supplementary", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
+      { id: "common-explanation-files", label: "说明、回复与其他支持文件", labelEn: "Explanations, responses, and other supporting files", group: "files", requirement: "recommended", status: "recommended", detail: "可上传情况说明、回复信、报告清单、版权或许可文件、作者协议及其他支持资料", verification: "file", materialKind: "other", blocking: false, confirmable: false, sourceUrl: null, evidenceExcerpt: null, capturedUnixMs: null, freshUntilUnixMs: null, requiredCount: 1, matchedMaterialIds: [] },
     ], recommendationReady: true, targetVerified: true, requiredComplete: materialPresent, targetCheckReady: false, workflowStatus: materialPresent ? "materials_complete_check_required" : "materials_required", requiredTotal: 1, requiredCompleted: materialPresent ? 1 : 0 });
     const makeTarget = (journalId: string, role: "primary" | "backup", priority: number) => ({ schemaVersion: 3, selectionId: `selection-${journalId}-${role}`, workspaceId: workspace.id, selectedAgainstManuscriptVersion: 2, recommendationRunId: `jmr-${runCount}`, journalId, name: journalId.startsWith("i") ? "国际期刊1" : "国内期刊1", nameEn: journalId.startsWith("i") ? "International Journal 1" : "Domestic Journal 1", publisher: "Synthetic Society", region: journalId.startsWith("i") ? "international" : "domestic", rankSystem: "Synthetic CCF", rankTier: journalId.startsWith("i") ? "CCF A" : "T1", homepageUrl: "https://example.test/journal", articleType: "research", planRole: role, priority, selectedUnixMs: Date.UTC(2026,7,30), recordHash: "f".repeat(64), externalTransmission: "not_performed" });
     invokeMock.mockImplementation((command, args) => {
@@ -974,12 +1064,21 @@ describe("App", () => {
     expect(calculateButton).toBeEnabled();
     expect(screen.getByRole("heading", { name: "提供学校正式要求" })).toBeVisible();
     expect(screen.getByText(/作者姓名、来源网址、联系方式、学号和论文正文均不发送/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByText(/Generating authorizes this model extraction once/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "中文" }));
     await user.click(calculateButton);
     expect(await screen.findByRole("heading", { name: "已保存推荐 · 1 条" })).toBeVisible();
     expect(screen.getByText("期刊对应出版社")).toBeVisible();
     expect(screen.getByRole("button", { name: /查看推荐记录 jmr-1/ })).toHaveAttribute("aria-pressed", "true");
-    expect(await screen.findByRole("heading", { name: "国内期刊 · 8 家" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "国外期刊 · 8 家" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "中国期刊与出版社 · 8 家" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "全球期刊与出版社 · 8 家" })).toBeVisible();
+    const chinaTargetMap = screen.getByRole("region", { name: "中国期刊与出版社推荐靶图" });
+    expect(within(chinaTargetMap).getAllByRole("button")).toHaveLength(8);
+    const firstReachPoint = within(chinaTargetMap).getByRole("button", { name: /R1/ });
+    await user.click(firstReachPoint);
+    expect(firstReachPoint).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("heading", { name: "出版社与期刊资料" })).toHaveLength(2);
     expect(screen.getAllByRole("heading", { name: "冲刺型 · 2 家" })).toHaveLength(2);
     expect(screen.getAllByRole("heading", { name: "匹配型 · 3 家" })).toHaveLength(2);
     expect(screen.getAllByRole("heading", { name: "保底型 · 3 家" })).toHaveLength(2);
@@ -999,7 +1098,11 @@ describe("App", () => {
     const primaryRoute = await screen.findByRole("article", { name: /当前投稿主线/ });
     expect(within(primaryRoute).getByText("唯一激活")).toBeVisible();
     expect(screen.getByRole("heading", { name: "核对目标期刊画像" })).toBeVisible();
-    await user.click(screen.getByLabelText(/若本地缺失，本次允许发送期刊名/));
+    expect(screen.getByText(/点击即授权这一次受限发现/)).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: /允许发送期刊名/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByText(/Clicking authorizes this restricted discovery once/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "中文" }));
     await user.click(screen.getByRole("button", { name: "核对本地；缺失时发现" }));
     expect(await screen.findByText("模型线索 · 待核验")).toBeVisible();
     expect(screen.getByText(/模型输出只是待核验线索/)).toBeVisible();
@@ -1017,17 +1120,46 @@ describe("App", () => {
     expect(await within(refreshedPrimary).findByText("已建立期刊专属要求快照")).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true });
     await user.click(screen.getByRole("button", { name: "按要求准备投稿资料" }));
-    expect(await screen.findByRole("heading", { name: "只补充这家期刊真正需要的资料" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "按目标期刊组织投稿资料" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "投稿包准备树" })).toBeVisible();
+    expect(screen.getByText("正文扫描 1 幅 · 已上传 0 个")).toBeVisible();
+    expect(screen.getByText("正文扫描 1 个 · 已上传 0 个")).toBeVisible();
+    expect(screen.getAllByText("少 1 个")).toHaveLength(2);
+    expect(screen.getByText("当前准备包 · 2 个拟组包文件")).toBeVisible();
+    expect(screen.getByText("必需项已达标")).toBeVisible();
     expect(screen.getByText("AI 语义与语法审计 · 后续迭代")).toBeVisible();
+    const materialViewTabs = screen.getByRole("tablist", { name: "投稿资料查看模式" });
+    expect(within(materialViewTabs).getAllByRole("tab")).toHaveLength(4);
+    const overviewTab = within(materialViewTabs).getByRole("tab", { name: /准备概览/ });
+    expect(overviewTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("heading", { name: "图表文件" })).not.toBeInTheDocument();
+    overviewTab.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(within(materialViewTabs).getByRole("tab", { name: /要求清单/ })).toHaveAttribute("aria-selected", "true");
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /上传资料/ }));
+    expect(within(materialViewTabs).getByRole("tab", { name: /上传资料/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/发现同名文件后，必须确认才会替换工作区副本/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "图表文件" })).toBeVisible();
     expect(screen.getByRole("button", { name: "为原始图件上传原始图件" })).toHaveTextContent("选择图片文件");
     expect(screen.getByRole("button", { name: "为可编辑表格上传可编辑表格" })).toHaveTextContent("选择表格文件");
     expect(screen.getAllByText(/CSV、TSV、XLS、XLSX、ODS/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "常见投稿附件" })).toBeVisible();
+    expect(screen.getByText("按需补充 · 不默认设为必需")).toBeVisible();
+    expect(screen.getByRole("button", { name: "上传声明文件" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "上传说明、回复与其他支持文件" })).toBeEnabled();
+    expect(screen.getAllByText(/· 可选/).length).toBeGreaterThanOrEqual(5);
     await user.click(screen.getByRole("button", { name: "为原始图件上传原始图件" }));
-    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "figure", checklistItemId: "figure-originals" });
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "figure", checklistItemId: "figure-originals", locale: "zh-CN" });
     await waitFor(() => expect(screen.getByRole("button", { name: "为可编辑表格上传可编辑表格" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "为可编辑表格上传可编辑表格" }));
-    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "table", checklistItemId: "table-editables" });
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "table", checklistItemId: "table-editables", locale: "zh-CN" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传声明文件" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "上传声明文件" }));
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "declaration", checklistItemId: "common-declaration-files", locale: "zh-CN" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传说明、回复与其他支持文件" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "上传说明、回复与其他支持文件" }));
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "other", checklistItemId: "common-explanation-files", locale: "zh-CN" });
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /已存文件/ }));
     expect(screen.getByText("title-page.docx")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "删除附件 title-page.docx" }));
     expect(screen.getByText("删除工作区中的附件副本？")).toBeVisible();
@@ -1035,12 +1167,33 @@ describe("App", () => {
     expect(screen.getByText("title-page.docx")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "删除附件 title-page.docx" }));
     await user.click(within(screen.getByRole("group", { name: "确认删除 title-page.docx" })).getByRole("button", { name: "确认删除附件" }));
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /要求清单/ }));
     expect(await screen.findByText("请上传标题页")).toBeVisible();
     expect(screen.queryByText("title-page.docx")).not.toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("delete_submission_material", { workspaceId: workspace.id, materialId: storedMaterial.materialId, authorConfirmed: true });
     await user.click(screen.getByRole("button", { name: "为标题页添加文件" }));
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /已存文件/ }));
     expect(await screen.findByText("title-page.docx")).toBeVisible();
-    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "title_page", checklistItemId: "journal-title-page" });
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "title_page", checklistItemId: "journal-title-page", locale: "zh-CN" });
+    expect(screen.queryByText("按目标期刊重新检查")).not.toBeInTheDocument();
+    expect(screen.queryByText("补齐材料后运行一次与当前目标绑定的投稿检查")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "进入目标检查" })).toBeVisible();
+    expect(screen.getByText("目标检查是材料完成后的独立步骤，不属于待上传材料。进入“检查与修订”后，系统会将检查报告绑定到当前稿件版本、目标期刊和官方要求。")).toBeVisible();
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /上传资料/ }));
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByRole("heading", { name: "Common submission attachments" })).toBeVisible();
+    expect(screen.getByText(/Replacing an existing workspace copy always requires confirmation/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Upload Declaration documents" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Upload Explanations, responses, and other supporting files" })).toBeEnabled();
+    await user.click(within(materialViewTabs).getByRole("tab", { name: /Overview/ }));
+    expect(screen.getByRole("heading", { name: "Submission package preparation tree" })).toBeVisible();
+    expect(screen.getByText("Scanned 1 figure(s) · 0 uploaded")).toBeVisible();
+    expect(screen.getByText("Scanned 1 table(s) · 0 uploaded")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Continue to target checks" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Continue to manuscript checks/ })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "中文" }));
+    await user.click(screen.getByRole("button", { name: /继续检查当前稿件/ }));
+    expect(await screen.findByRole("heading", { name: "先建立论文结构" })).toBeVisible();
     await user.click(within(screen.getByRole("navigation", { name: "投稿准备主任务" })).getByRole("button", { name: /目标期刊/ }));
     await user.click(screen.getByRole("button", { name: "取消主选期刊" }));
     const clearFromRecommendation = screen.getByRole("group", { name: /确认取消主选期刊/ });

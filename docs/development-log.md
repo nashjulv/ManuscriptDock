@@ -1,5 +1,104 @@
 # ManuscriptDock Development Log
 
+## 2026-09-04 — V0.42 HTTP-only official-source continuation
+
+- Kept automatic journal-guide discovery HTTPS-only, while routing journals whose official sites
+  only provide HTTP into an explicit author-provided-text path instead of raising a generic error.
+- Allowed an author-attested HTTP URL to be stored strictly as local provenance for pasted official
+  guide text. ManuscriptDock does not fetch that URL or transmit manuscript data to it.
+- Split insecure-scheme and embedded-credential validation messages so an HTTP-only site is no
+  longer mislabeled as containing account information.
+- Added Simplified Chinese and English UI states and regression coverage for existing saved targets.
+
+## 2026-09-04 — V0.41 source-aligned journal requirements
+
+- Corrected official-guide discovery for journal sites whose author-guide URL is transliterated or
+  opaque. Discovery now considers the visible anchor label as well as the URL, including the
+  `/tougaozhinan` pattern used by the Journal of Computer Research and Development site.
+- Separated homepage discovery from requirement evidence. When a dedicated author guide is found,
+  navigation, article lists, search controls, RSS content, and citation-export dialogs from the
+  homepage are no longer stored as journal requirements.
+- Added a bounded same-site fallback for the public dynamic-news endpoint used by the journal's site
+  platform. Only the author-guide body is extracted; the official guide URL remains the cited source.
+- Tightened deterministic extraction so a category word alone cannot create a checklist item. An
+  item now needs an explicit obligation, recommendation, prohibition, or numeric constraint in the
+  same local sentence. Evidence remains a short source sentence rather than a page-wide excerpt.
+- Advanced journal-requirement snapshots to schema v2. Older snapshots remain immutable on disk but
+  are no longer treated as current checklist evidence; refreshing the target creates a new aligned
+  snapshot.
+
+## 2026-09-04 — V0.40 compact material views and confirmed same-name replacement
+
+- Replaced the continuously expanded materials page with four top-level views: Overview,
+  Requirements, Upload, and Stored files. Only the selected panel is rendered, while completion and
+  item counts remain visible in the switcher. Arrow keys, Home, and End move between the tabs.
+- Kept the preparation tree as the default landing view, separated type-based upload actions from
+  evidence-backed journal requirements, and moved inclusion, deletion, and replacement-oriented file
+  management into the Stored files view.
+- Added Rust-owned duplicate-name protection within the current manuscript version, target journal,
+  material kind, and upload slot. A selected name that already exists opens a bilingual native warning;
+  the existing workspace copy is replaced only after explicit confirmation, while the external source
+  file remains untouched. Multiple same-name files in one selection are rejected as ambiguous.
+- Replacement validates and stores the new file before removing the old catalog entry, invalidates an
+  older target check, removes the superseded managed copy, and appends a dedicated local audit event.
+
+## 2026-09-04 — V0.39 visual target map and submission preparation tree
+
+- Replaced the dense two-region recommendation grid with paired China and global target maps. Each
+  map places Reach candidates in the bullseye, Match candidates in the middle ring, and Safeguard
+  candidates in the outer ring, while a coordinate-linked journal and publisher list remains visible
+  on the right. The map is an interactive portfolio view, not an acceptance-probability chart or a
+  disclosure of private ranking weights.
+- Added a submission-package preparation tree above the detailed materials checklist. It summarizes
+  planned package files, required-item progress, current-journal attachments, declarations, optional
+  supporting files, and validation blockers without replacing the evidence-backed checklist.
+- Advanced the material-catalog presentation contract to schema v4 and exposed deterministic figure
+  and table counts from the current manuscript structure report. The tree compares those counts with
+  files bound to the corresponding upload slots and explicitly distinguishes a count match from image
+  quality, table editability, or journal-format compliance.
+- Added bilingual interaction coverage for both new views, keyboard-sized target controls, visible
+  text alternatives to color, responsive stacking, and reduced-motion behavior.
+
+## 2026-09-04 — V0.38 streamlined model authorization and keyword detection
+
+- Replaced redundant model-transmission checkboxes in institution-rule extraction and local-first
+  journal discovery with action-level authorization: the button itself authorizes only that named
+  call, while the exact outbound fields and exclusions remain visible beside the action.
+- Added a Rust process-session credential cache. Each stored model Key is read from macOS Keychain
+  or Windows Credential Manager at most once per app run; subsequent model summaries and calls reuse
+  the in-memory credential without repeatedly triggering operating-system confirmation. Saving or
+  deleting a Key updates the cache immediately, and plaintext still never reaches the WebView or disk.
+- Expanded deterministic keyword detection across PDF/plain text, Word, layout-aware Markdown, and
+  LaTeX. Supported labels now include `Keywords`, `Key words`, `Key-words`, `Index Terms`, `关键词`,
+  `关键字`, spaced labels, dash/colon variants, `\\keyword`, `\\kwd`, and IEEE keyword environments.
+  Boundary checks prevent an ordinary body phrase such as `KeywordSearch` from becoming a false hit.
+  The structure-analysis version is advanced to v7 so existing workspaces do not keep a stale
+  pre-fix “keywords missing” decomposition; the next analysis/check creates a new immutable result.
+
+## 2026-09-04 — V0.37 common submission attachment categories
+
+- Added stable, non-blocking upload entries for cover letters, declaration documents, bibliography
+  files, supplementary materials and research data, and explanations, responses, checklists,
+  permissions, agreements, and other supporting files. A separate title/author page is included
+  whenever the official checklist does not already provide that category.
+- Kept journal-specific requirements authoritative: a common entry is optional by default and is
+  suppressed when the current official author-guide snapshot already defines the same file type.
+  Common entries do not increase the required-item count or unlock/lock export by themselves.
+- Separated the common attachment cards from the evidence-backed dynamic checklist to avoid showing
+  one file twice. Native file-picker filters now identify cover letters, title pages, declarations,
+  supplementary files, and explanatory/other files in both Chinese and English.
+
+## 2026-09-04 — V0.36 material-to-check workflow correction
+
+- Removed the target-specific check from the upload checklist, where it had incorrectly appeared as
+  a missing required material and created a circular-looking dependency.
+- Separated backend workflow states for materials still required, materials complete with a current
+  check pending, and submission ready. Package export still requires a current target-bound check.
+- Material additions, deletion, inclusion changes, and author confirmations now invalidate an older
+  check, so a report created before the final material state cannot unlock package export.
+- Added a dedicated bilingual next-step action from Materials to Check/revise and expanded the
+  progress rail to show material completion separately from target-check completion.
+
 ## 2026-09-03 — V0.35 desktop installer rebuild
 
 - Rebuilt the macOS universal App/DMG from commit `0273e2e` and verified the DMG checksum, app

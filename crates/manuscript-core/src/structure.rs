@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
-pub const STRUCTURE_ANALYSIS_VERSION: u32 = 6;
+pub const STRUCTURE_ANALYSIS_VERSION: u32 = 7;
 pub const DECOMPOSITION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -294,6 +294,7 @@ fn extract_tex(path: &Path) -> Result<ExtractedStructure, StructureError> {
     let bytes = std::fs::read(path)?;
     let source = String::from_utf8(bytes).map_err(|_| StructureError::InvalidTextEncoding)?;
     let text = strip_tex_comments(&source);
+    let lowercase_text = text.to_ascii_lowercase();
     let mut extracted = ExtractedStructure {
         quality: Some(AnalysisQuality::Complete),
         title: tex_command_argument(&text, "title"),
@@ -303,7 +304,16 @@ fn extract_tex(path: &Path) -> Result<ExtractedStructure, StructureError> {
             .collect(),
         abstract_text: tex_environment_text(&text, "abstract"),
         abstract_present: text.contains("\\begin{abstract}"),
-        keywords_present: text.contains("\\keywords{") || text.contains("\\begin{keywords}"),
+        keywords_present: [
+            "\\keywords{",
+            "\\keyword{",
+            "\\kwd{",
+            "\\begin{keywords}",
+            "\\begin{keyword}",
+            "\\begin{ieeekeywords}",
+        ]
+        .iter()
+        .any(|marker| lowercase_text.contains(marker)),
         figure_count: count_occurrences(&text, "\\begin{figure"),
         table_count: count_occurrences(&text, "\\begin{table"),
         references_present: text.contains("\\bibliography{")
@@ -520,8 +530,8 @@ fn consume_docx_paragraph(
         }
     }
     if normalized_style.contains("keyword")
-        || normalized_text.starts_with("keywords")
-        || normalized_text.starts_with("关键词")
+        || normalized_style.contains("key word")
+        || is_keyword_marker(text)
     {
         extracted.keywords_present = true;
     }
@@ -1015,14 +1025,7 @@ fn infer_from_plain_text(text: &str) -> ExtractedStructure {
         abstract_present,
         abstract_text,
         abstract_inferred_from_front_matter,
-        keywords_present: lines.iter().take(80).any(|line| {
-            let normalized = line.trim().to_ascii_lowercase();
-            normalized == "keywords"
-                || normalized.starts_with("keywords:")
-                || normalized.starts_with("keywords：")
-                || line.trim() == "关键词"
-                || line.trim().starts_with("关键词：")
-        }),
+        keywords_present: lines.iter().take(160).any(|line| is_keyword_marker(line)),
         sections,
         figure_count: count_numbered_labels(text, &["figure ", "fig. ", "图"]),
         table_count: count_numbered_labels(text, &["table ", "表"]),
@@ -1515,14 +1518,37 @@ fn is_abstract_marker(line: &str) -> bool {
 
 fn is_keyword_marker(line: &str) -> bool {
     let normalized = normalize_line(line);
+    let normalized = normalized.trim_start_matches(['*', '_', '#']).trim_start();
     let lowercase = normalized.to_ascii_lowercase();
     let compact = normalized.split_whitespace().collect::<String>();
-    lowercase == "keywords"
-        || lowercase.starts_with("keywords:")
-        || lowercase.starts_with("keywords：")
-        || compact == "关键词"
-        || compact.starts_with("关键词：")
-        || compact.starts_with("关键词:")
+    let lowercase_compact = compact.to_ascii_lowercase();
+
+    ["keywords", "key words", "key-words", "index terms"]
+        .iter()
+        .any(|marker| has_labeled_prefix(&lowercase, marker))
+        || ["keywords", "key-words", "indexterms"]
+            .iter()
+            .any(|marker| has_labeled_prefix(&lowercase_compact, marker))
+        || ["关键词", "关键字"]
+            .iter()
+            .any(|marker| has_labeled_prefix(normalized, marker))
+        || ["关键词", "关键字"]
+            .iter()
+            .any(|marker| has_labeled_prefix(&compact, marker))
+}
+
+fn has_labeled_prefix(value: &str, label: &str) -> bool {
+    let Some(remainder) = value.strip_prefix(label) else {
+        return false;
+    };
+    remainder.is_empty()
+        || remainder.chars().next().is_some_and(|character| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    ':' | '：' | '—' | '–' | '-' | '−' | '.' | '．' | ';' | '；'
+                )
+        })
 }
 
 fn abstract_content_from_line(line: &str) -> Option<String> {
@@ -2044,6 +2070,22 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_ieee_keyword_environment_case_insensitively() {
+        let path = synthetic_tex_path();
+        fs::write(
+            &path,
+            r"\title{Synthetic IEEE Study}
+\begin{IEEEkeywords}robotics, foundation models\end{IEEEkeywords}",
+        )
+        .unwrap();
+
+        let extracted = extract_tex(&path).unwrap();
+        let _ = fs::remove_file(path);
+
+        assert!(extracted.keywords_present);
+    }
+
+    #[test]
     fn derives_source_backed_knowledge_candidates_from_one_decomposition() {
         let extracted = infer_from_plain_text(
             "Synthetic Study\nAbstract\nWe propose a local method for multilingual manuscript analysis. Results show that the method improves extraction accuracy by 18 percent on the synthetic dataset.\nTable 1 Results show accuracy for every tested language.\nFigure 1 The workflow connects extracted evidence to the reported claim.",
@@ -2080,6 +2122,7 @@ mod tests {
           <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Local Research</w:t></w:r></w:p>
           <w:p><w:pPr><w:pStyle w:val="Author"/></w:pPr><w:r><w:t>Ada Author; Ben Researcher</w:t></w:r></w:p>
           <w:p><w:pPr><w:pStyle w:val="Abstract"/></w:pPr><w:r><w:t>Abstract: evidence.</w:t></w:r></w:p>
+          <w:p><w:r><w:t>Key words—local evidence; reproducibility</w:t></w:r></w:p>
           <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Methods</w:t></w:r></w:p>
           <w:p><w:r><w:drawing/></w:r></w:p><w:tbl></w:tbl>
           <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>References</w:t></w:r></w:p>
@@ -2092,6 +2135,7 @@ mod tests {
         assert_eq!(extracted.authors, vec!["Ada Author", "Ben Researcher"]);
         assert!(extracted.abstract_present);
         assert_eq!(extracted.abstract_text.as_deref(), Some("evidence."));
+        assert!(extracted.keywords_present);
         assert_eq!(extracted.sections.len(), 3);
         assert_eq!(extracted.figure_count, 1);
         assert_eq!(extracted.table_count, 1);
@@ -2136,6 +2180,7 @@ mod tests {
         );
         assert!(extracted.references_present);
         assert_eq!(extracted.table_count, 1);
+        assert!(extracted.keywords_present);
         assert!(!markdown_plain_text(markdown).contains('|'));
     }
 
@@ -2236,6 +2281,7 @@ mod tests {
             english.abstract_text.as_deref(),
             Some("This survey maps durable agent memory. It preserves a second abstract line.")
         );
+        assert!(english.keywords_present);
 
         let chinese = infer_from_plain_text(
             "可信学术工作台研究\n张三，李四\n某某大学计算机学院\n摘 要：本文提出一种本地优先方法。\n关键词：知识体；投稿\n1 引言",
@@ -2245,6 +2291,32 @@ mod tests {
             chinese.abstract_text.as_deref(),
             Some("本文提出一种本地优先方法。")
         );
+        assert!(chinese.keywords_present);
+    }
+
+    #[test]
+    fn recognizes_common_keyword_labels_without_matching_body_mentions() {
+        for marker in [
+            "Key words—embodied synthesis; robotics",
+            "KEY-WORDS: local first, evidence",
+            "Index Terms—foundation models, agents",
+            "K E Y W O R D S：robotics, vision",
+            "关键字：知识体；投稿",
+            "关 键 词：语义审计；本地优先",
+        ] {
+            let extracted = infer_from_plain_text(&format!(
+                "Synthetic Study\nAbstract: A sufficiently clear abstract.\n{marker}\n1 Introduction"
+            ));
+            assert!(
+                extracted.keywords_present,
+                "marker was not recognized: {marker}"
+            );
+        }
+
+        let body_only = infer_from_plain_text(
+            "Synthetic Study\nAbstract: This keyword extraction method improves retrieval.\n1 Introduction\nKeywordSearch is an internal module.",
+        );
+        assert!(!body_only.keywords_present);
     }
 
     #[test]

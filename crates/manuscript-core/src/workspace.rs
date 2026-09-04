@@ -281,6 +281,8 @@ pub struct SubmissionMaterialCatalog {
     pub workflow_status: String,
     pub required_total: usize,
     pub required_completed: usize,
+    pub detected_figure_count: u32,
+    pub detected_table_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -541,7 +543,7 @@ impl fmt::Display for WorkspaceError {
             }
             Self::InvalidJournalRequirementSource => write!(
                 formatter,
-                "期刊要求必须来自有效的 HTTPS 官方来源，并包含可核对的原文"
+                "期刊要求必须来自有效的官方网页地址，并包含可核对的原文"
             ),
             Self::InvalidSubmissionMaterial(message) => {
                 write!(formatter, "投稿材料无效：{message}")
@@ -663,6 +665,8 @@ struct StoredSubmissionMaterial {
 #[serde(rename_all = "camelCase")]
 struct StoredSubmissionMaterialCatalog {
     schema_version: u32,
+    #[serde(default)]
+    updated_unix_ms: u64,
     #[serde(default)]
     materials: Vec<StoredSubmissionMaterial>,
     #[serde(default)]
@@ -2214,6 +2218,39 @@ impl WorkspaceStore {
         checklist_item_id: Option<&str>,
         paths: &[PathBuf],
     ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        self.store_submission_materials_for_requirement(
+            workspace_id,
+            kind,
+            checklist_item_id,
+            paths,
+            false,
+        )
+    }
+
+    pub fn replace_submission_materials_for_requirement(
+        &self,
+        workspace_id: &str,
+        kind: SubmissionMaterialKind,
+        checklist_item_id: Option<&str>,
+        paths: &[PathBuf],
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        self.store_submission_materials_for_requirement(
+            workspace_id,
+            kind,
+            checklist_item_id,
+            paths,
+            true,
+        )
+    }
+
+    fn store_submission_materials_for_requirement(
+        &self,
+        workspace_id: &str,
+        kind: SubmissionMaterialKind,
+        checklist_item_id: Option<&str>,
+        paths: &[PathBuf],
+        replace_same_name: bool,
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
         if paths.is_empty() {
             return self.submission_materials(workspace_id);
         }
@@ -2264,10 +2301,23 @@ impl WorkspaceStore {
             }
         };
         let mut stored = read_stored_submission_materials(&workspace_root)?;
+        let mut selected_names = BTreeSet::new();
+        for path in paths {
+            if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+                let normalized = name.trim().to_lowercase();
+                if !normalized.is_empty() && !selected_names.insert(normalized) {
+                    return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+                        "本次选择包含多个同名文件 {name}；请每次只选择其中一个"
+                    )));
+                }
+            }
+        }
         let files_root = workspace_root.join("materials").join("files");
         fs::create_dir_all(&files_root)?;
-        let imported_unix_ms = unix_time_ms()?;
+        let imported_unix_ms = material_change_unix_ms(&workspace_root, &manifest.workspace)?;
         let mut added = 0_u32;
+        let mut replaced = 0_u32;
+        let mut replaced_paths = Vec::new();
         for path in paths {
             let metadata = fs::metadata(path).map_err(|_| {
                 WorkspaceError::InvalidSubmissionMaterial("无法读取所选文件".to_owned())
@@ -2286,6 +2336,31 @@ impl WorkspaceStore {
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| WorkspaceError::InvalidSubmissionMaterial("文件名无效".to_owned()))?
                 .to_owned();
+            let duplicate_material_ids = stored
+                .materials
+                .iter()
+                .filter(|item| {
+                    item.material.kind == kind
+                        && item.material.manuscript_version == manifest.workspace.snapshot_version
+                        && item.material.target_selection_id.as_deref()
+                            == Some(target.selection_id.as_str())
+                        && item.material.requirement_snapshot_id.as_deref()
+                            == Some(requirement_snapshot.snapshot_id.as_str())
+                        && item.material.checklist_item_id.as_deref()
+                            == Some(resolved_item_id.as_str())
+                        && item
+                            .material
+                            .original_name
+                            .to_lowercase()
+                            .eq(&original_name.to_lowercase())
+                })
+                .map(|item| item.material.material_id.clone())
+                .collect::<Vec<_>>();
+            if !duplicate_material_ids.is_empty() && !replace_same_name {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
+                    "同一上传项中已存在同名文件 {original_name}；请确认替换后再上传"
+                )));
+            }
             let extension = path
                 .extension()
                 .and_then(|value| value.to_str())
@@ -2336,6 +2411,20 @@ impl WorkspaceStore {
                 continue;
             }
             set_readonly(&destination)?;
+            for duplicate_material_id in duplicate_material_ids {
+                if let Some(index) = stored
+                    .materials
+                    .iter()
+                    .position(|item| item.material.material_id == duplicate_material_id)
+                {
+                    let duplicate = stored.materials.remove(index);
+                    replaced_paths.push(resolve_submission_material_path(
+                        &workspace_root,
+                        &duplicate,
+                    )?);
+                    replaced += 1;
+                }
+            }
             stored.materials.push(StoredSubmissionMaterial {
                 material: SubmissionMaterial {
                     material_id,
@@ -2358,13 +2447,23 @@ impl WorkspaceStore {
             });
             added += 1;
         }
-        stored.schema_version = 3;
+        stored.schema_version = 4;
+        if added > 0 {
+            stored.updated_unix_ms = imported_unix_ms;
+        }
         let catalog_path = workspace_root.join("materials").join("catalog.json");
         write_or_replace_json(&catalog_path, &stored)?;
+        for replaced_path in replaced_paths {
+            let _ = fs::remove_file(replaced_path);
+        }
         if added > 0 {
             append_audit_event(
                 &workspace_root.join("audit.jsonl"),
-                "submission_materials_added",
+                if replaced > 0 {
+                    "submission_materials_replaced"
+                } else {
+                    "submission_materials_added"
+                },
                 &manifest.workspace,
                 imported_unix_ms,
             )?;
@@ -2403,7 +2502,9 @@ impl WorkspaceStore {
             ));
         }
         material.material.included = included;
-        stored.schema_version = 3;
+        let updated_unix_ms = material_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        stored.schema_version = 4;
+        stored.updated_unix_ms = updated_unix_ms;
         write_or_replace_json(
             &workspace_root.join("materials").join("catalog.json"),
             &stored,
@@ -2416,7 +2517,7 @@ impl WorkspaceStore {
                 "submission_material_excluded"
             },
             &manifest.workspace,
-            unix_time_ms()?,
+            updated_unix_ms,
         )?;
         self.submission_materials(workspace_id)
     }
@@ -2461,7 +2562,9 @@ impl WorkspaceStore {
 
         fs::rename(&material_path, &deleting_path)?;
         stored.materials.remove(index);
-        stored.schema_version = 3;
+        let updated_unix_ms = material_change_unix_ms(&workspace_root, &manifest.workspace)?;
+        stored.schema_version = 4;
+        stored.updated_unix_ms = updated_unix_ms;
         let catalog_path = workspace_root.join("materials").join("catalog.json");
         if let Err(error) = write_or_replace_json(&catalog_path, &stored) {
             let _ = fs::rename(&deleting_path, &material_path);
@@ -2478,7 +2581,7 @@ impl WorkspaceStore {
             &workspace_root.join("audit.jsonl"),
             "submission_material_deleted",
             &manifest.workspace,
-            unix_time_ms()?,
+            updated_unix_ms,
         )?;
         self.submission_materials(workspace_id)
     }
@@ -2533,7 +2636,7 @@ impl WorkspaceStore {
                 && item.target_selection_id == target.selection_id
                 && item.requirement_snapshot_id == snapshot.snapshot_id)
         });
-        let confirmed_unix_ms = unix_time_ms()?;
+        let confirmed_unix_ms = material_change_unix_ms(&workspace_root, &manifest.workspace)?;
         if confirmed {
             stored
                 .confirmations
@@ -2544,7 +2647,8 @@ impl WorkspaceStore {
                     confirmed_unix_ms,
                 });
         }
-        stored.schema_version = 2;
+        stored.schema_version = 4;
+        stored.updated_unix_ms = confirmed_unix_ms;
         write_or_replace_json(
             &workspace_root.join("materials").join("catalog.json"),
             &stored,
@@ -2871,7 +2975,10 @@ impl WorkspaceStore {
     ) -> Result<JournalRequirementSnapshot, WorkspaceError> {
         if documents.is_empty()
             || documents.iter().any(|document| {
-                !document.url.starts_with("https://")
+                let permitted_source = document.url.starts_with("https://")
+                    || (source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText
+                        && document.url.starts_with("http://"));
+                !permitted_source
                     || document.text.trim().chars().count() < 20
                     || document.text.chars().count() > 1_000_000
             })
@@ -2909,6 +3016,16 @@ impl WorkspaceStore {
             .any(|document| !document.official_host_matched)
         {
             limitations.push("部分来源由作者确认，域名未与期刊主页自动匹配".to_owned());
+        }
+        if source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText
+            && documents
+                .iter()
+                .any(|document| document.url.starts_with("http://"))
+        {
+            limitations.push(
+                "来源为作者确认的 HTTP 官方页面；系统未联网读取，传输安全性和原文真实性需作者复核"
+                    .to_owned(),
+            );
         }
         let fresh_until_unix_ms = captured_unix_ms
             .saturating_add(JOURNAL_REQUIREMENT_FRESHNESS_DAYS * 24 * 60 * 60 * 1_000);
@@ -4155,6 +4272,17 @@ fn target_change_unix_ms(
     Ok(current.max(after_readiness))
 }
 
+fn material_change_unix_ms(
+    workspace_root: &Path,
+    workspace: &WorkspaceSummary,
+) -> Result<u64, WorkspaceError> {
+    let current = unix_time_ms()?;
+    let after_readiness = read_current_readiness_report(workspace_root, workspace)?
+        .map(|report| report.generated_unix_ms.saturating_add(1))
+        .unwrap_or(0);
+    Ok(current.max(after_readiness))
+}
+
 fn read_current_attestation(
     workspace_root: &Path,
     workspace: &WorkspaceSummary,
@@ -5013,7 +5141,8 @@ fn read_stored_submission_materials(
     let path = workspace_root.join("materials").join("catalog.json");
     if !path.exists() {
         return Ok(StoredSubmissionMaterialCatalog {
-            schema_version: 3,
+            schema_version: 4,
+            updated_unix_ms: 0,
             materials: Vec::new(),
             confirmations: Vec::new(),
         });
@@ -5101,7 +5230,7 @@ fn read_journal_requirement_snapshot(
         return Ok(None);
     }
     let snapshot: JournalRequirementSnapshot = read_json(&path)?;
-    if snapshot.schema_version != JOURNAL_REQUIREMENT_SCHEMA_VERSION
+    if snapshot.schema_version > JOURNAL_REQUIREMENT_SCHEMA_VERSION
         || snapshot.target_selection_id != target_selection_id
     {
         return Err(WorkspaceError::InvalidJournalRequirementSource);
@@ -5124,6 +5253,9 @@ fn read_journal_requirement_snapshot(
     };
     if hash_serializable(&payload)? != snapshot.record_hash {
         return Err(WorkspaceError::InvalidJournalRequirementSource);
+    }
+    if snapshot.schema_version < JOURNAL_REQUIREMENT_SCHEMA_VERSION {
+        return Ok(None);
     }
     Ok(Some(snapshot))
 }
@@ -5187,7 +5319,7 @@ fn build_target_selection(
     }
     .to_owned();
     finalize_target_selection(SubmissionTargetSelection {
-        schema_version: 3,
+        schema_version: 4,
         selection_id: Uuid::new_v4().to_string(),
         workspace_id: workspace_id.to_owned(),
         selected_against_manuscript_version: manuscript_version,
@@ -5366,21 +5498,6 @@ fn build_submission_material_catalog(
         "manuscript",
         "passed",
         format!("已保存不可变稿件 v{}", workspace.snapshot_version),
-    ));
-    checklist.push(static_submission_checklist_item(
-        "current-check",
-        "按目标期刊重新检查",
-        "target",
-        if readiness.is_some() {
-            "passed"
-        } else {
-            "missing"
-        },
-        if readiness.is_some() {
-            "当前稿件版本已有目标专属检查报告".to_owned()
-        } else {
-            "补齐材料后运行一次与当前目标绑定的投稿检查".to_owned()
-        },
     ));
     if workspace.manuscript.kind == ManuscriptKind::Latex {
         checklist.push(file_submission_checklist_item(
@@ -5629,6 +5746,80 @@ fn build_submission_material_catalog(
             journal_requirements,
         ));
     }
+    if target_current && requirements_current {
+        for (id, label, label_en, group, kind, detail) in [
+            (
+                "common-title-page",
+                "标题页与作者信息页",
+                "Title and author-information page",
+                "files",
+                SubmissionMaterialKind::TitlePage,
+                "适用于期刊要求将作者、单位、通讯信息与匿名主稿分离的情况",
+            ),
+            (
+                "common-cover-letter",
+                "投稿信",
+                "Cover letter",
+                "files",
+                SubmissionMaterialKind::CoverLetter,
+                "可上传致编辑的投稿信；是否需要以及内容格式以当前期刊要求为准",
+            ),
+            (
+                "common-declaration-files",
+                "声明文件",
+                "Declaration documents",
+                "declarations",
+                SubmissionMaterialKind::Declaration,
+                "可上传伦理、知情同意、利益冲突、资金、数据可用性、作者贡献或 AI 使用声明",
+            ),
+            (
+                "common-bibliography-files",
+                "参考文献文件",
+                "Bibliography files",
+                "files",
+                SubmissionMaterialKind::Bibliography,
+                "可上传 BIB、RIS、NBIB、EndNote、XML 或其他可编辑参考文献文件",
+            ),
+            (
+                "common-supplementary-files",
+                "补充材料与研究数据",
+                "Supplementary materials and research data",
+                "files",
+                SubmissionMaterialKind::Supplementary,
+                "可上传附录、方法补充、数据、代码归档、演示或音视频等期刊允许的补充材料",
+            ),
+            (
+                "common-explanation-files",
+                "说明、回复与其他支持文件",
+                "Explanations, responses, and other supporting files",
+                "files",
+                SubmissionMaterialKind::Other,
+                "可上传情况说明、回复信、报告清单、版权或许可文件、作者协议及其他支持资料",
+            ),
+        ] {
+            if kind != SubmissionMaterialKind::Other
+                && checklist
+                    .iter()
+                    .any(|item| item.material_kind == Some(kind))
+            {
+                continue;
+            }
+            let mut item = file_submission_checklist_item(
+                id,
+                label,
+                group,
+                false,
+                matching_material_ids(id, kind),
+                1,
+                kind,
+                detail.to_owned(),
+                None,
+                journal_requirements,
+            );
+            item.label_en = label_en.to_owned();
+            checklist.push(item);
+        }
+    }
     let required_total = checklist.iter().filter(|item| item.blocking).count();
     let required_completed = checklist
         .iter()
@@ -5636,18 +5827,26 @@ fn build_submission_material_catalog(
         .count();
     let required_complete = required_completed == required_total;
     let target_verified = target_current && requirements_current;
-    let target_check_ready = required_complete && target_verified && readiness.is_some();
+    let check_prerequisite_unix_ms = stored
+        .updated_unix_ms
+        .max(target.map_or(0, |selection| selection.selected_unix_ms))
+        .max(journal_requirements.map_or(0, |snapshot| snapshot.captured_unix_ms));
+    let target_check_current =
+        readiness.is_some_and(|report| report.generated_unix_ms >= check_prerequisite_unix_ms);
+    let target_check_ready = required_complete && target_verified && target_check_current;
     let workflow_status = if target_check_ready {
         "submission_ready"
+    } else if required_complete && target_verified {
+        "materials_complete_check_required"
     } else if target_verified {
-        "target_verified"
+        "materials_required"
     } else if recommendation_ready {
         "preliminary_recommendation"
     } else {
         "manuscript_received"
     };
     SubmissionMaterialCatalog {
-        schema_version: 3,
+        schema_version: 4,
         workspace_id: workspace.id.clone(),
         manuscript_version: workspace.snapshot_version,
         materials: stored
@@ -5663,6 +5862,8 @@ fn build_submission_material_catalog(
         workflow_status: workflow_status.to_owned(),
         required_total,
         required_completed,
+        detected_figure_count: structure.map_or(0, |report| report.figure_count),
+        detected_table_count: structure.map_or(0, |report| report.table_count),
     }
 }
 
@@ -5680,7 +5881,6 @@ fn static_submission_checklist_item(
             "target-journal" => "Target journal and article type",
             "official-journal-requirements" => "Official journal requirements",
             "main-manuscript" => "Current manuscript",
-            "current-check" => "Target-specific recheck",
             _ => label,
         }
         .to_owned(),
@@ -6176,7 +6376,6 @@ mod tests {
         fs::{self, File},
         io::Write,
         path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
     };
     use zip::{write::SimpleFileOptions, ZipWriter};
 
@@ -6184,10 +6383,7 @@ mod tests {
 
     impl SyntheticDirectory {
         fn create() -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time should follow the Unix epoch")
-                .as_nanos();
+            let nonce = uuid::Uuid::new_v4();
             let path = std::env::temp_dir().join(format!(
                 "manuscriptdock-workspace-test-{}-{nonce}",
                 std::process::id()
@@ -6431,7 +6627,7 @@ mod tests {
                 &workspace.id,
                 &target.selection_id,
                 &[JournalRequirementSourceDocument {
-                    url: "https://journal.example/guide-for-authors".to_owned(),
+                    url: "http://journal.example/guide-for-authors".to_owned(),
                     title: "Guide for authors".to_owned(),
                     text: "A separate title page is required. A blinded manuscript is required for double-blind review. Figures must be supplied at 300 dpi. A cover letter is recommended.".to_owned(),
                     official_host_matched: true,
@@ -6442,6 +6638,25 @@ mod tests {
             )
             .unwrap();
         assert_eq!(requirement_snapshot.requirements.len(), 4);
+        assert!(requirement_snapshot
+            .limitations
+            .iter()
+            .any(|item| item.contains("HTTP 官方页面")));
+        assert!(store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "http://journal.example/guide-for-authors".to_owned(),
+                    title: "Unsafe automatic source".to_owned(),
+                    text: "A separate title page is required.".to_owned(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::OfficialNetworkFetch,
+                false,
+                "author_confirmed_official_source_fetch",
+            )
+            .is_err());
         assert_eq!(
             store
                 .journal_requirement_snapshots(&workspace.id)
@@ -6449,6 +6664,29 @@ mod tests {
                 .len(),
             1
         );
+        let initial_materials = store.submission_materials(&workspace.id).unwrap();
+        let common_items = initial_materials
+            .checklist
+            .iter()
+            .filter(|item| item.id.starts_with("common-"))
+            .collect::<Vec<_>>();
+        assert_eq!(common_items.len(), 4);
+        assert!(common_items.iter().all(|item| !item.blocking));
+        assert!(common_items.iter().all(|item| item.status == "recommended"));
+        assert!(common_items.iter().any(|item| {
+            item.id == "common-declaration-files"
+                && item.material_kind == Some(SubmissionMaterialKind::Declaration)
+                && item.label_en == "Declaration documents"
+        }));
+        assert!(common_items.iter().any(|item| {
+            item.id == "common-explanation-files"
+                && item.material_kind == Some(SubmissionMaterialKind::Other)
+        }));
+        assert!(initial_materials
+            .checklist
+            .iter()
+            .all(|item| item.id != "common-title-page" && item.id != "common-cover-letter"));
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
         let source_project = temporary.path().join("source-project.zip");
         write_synthetic_zip(&source_project, &[("manuscript.tex", b"Synthetic source")]);
         let materials = store
@@ -6465,6 +6703,61 @@ mod tests {
             .iter()
             .any(|item| item.id == "latex-project" && item.status == "passed"));
         assert_eq!(materials.materials.len(), 1);
+        let first_source = materials.materials[0].clone();
+        let first_source_path =
+            read_stored_submission_materials(&store.projects_root().join(&workspace.id))
+                .unwrap()
+                .materials[0]
+                .relative_path
+                .clone();
+        write_synthetic_zip(
+            &source_project,
+            &[("manuscript.tex", b"Replacement synthetic source")],
+        );
+        let duplicate_error = store
+            .add_submission_materials(
+                &workspace.id,
+                SubmissionMaterialKind::SourceProject,
+                std::slice::from_ref(&source_project),
+            )
+            .unwrap_err();
+        assert!(duplicate_error.to_string().contains("请确认替换"));
+        let materials = store
+            .replace_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::SourceProject,
+                Some("latex-project"),
+                std::slice::from_ref(&source_project),
+            )
+            .unwrap();
+        let replacement_source = materials
+            .materials
+            .iter()
+            .find(|material| material.kind == SubmissionMaterialKind::SourceProject)
+            .unwrap();
+        assert_ne!(replacement_source.material_id, first_source.material_id);
+        assert_ne!(replacement_source.content_hash, first_source.content_hash);
+        assert_eq!(
+            materials
+                .materials
+                .iter()
+                .filter(|material| material.kind == SubmissionMaterialKind::SourceProject)
+                .count(),
+            1
+        );
+        assert!(!store
+            .projects_root()
+            .join(&workspace.id)
+            .join(first_source_path)
+            .exists());
+        assert!(fs::read_to_string(
+            store
+                .projects_root()
+                .join(&workspace.id)
+                .join("audit.jsonl")
+        )
+        .unwrap()
+        .contains("submission_materials_replaced"));
         let target_exports = temporary.path().join("target-exports");
         fs::create_dir(&target_exports).unwrap();
         assert!(matches!(
@@ -6501,6 +6794,17 @@ mod tests {
         store
             .confirm_submission_requirement(&workspace.id, "journal-figures", true)
             .unwrap();
+        let materials = store.submission_materials(&workspace.id).unwrap();
+        assert!(materials.required_complete);
+        assert!(!materials.target_check_ready);
+        assert_eq!(
+            materials.workflow_status,
+            "materials_complete_check_required"
+        );
+        assert!(materials
+            .checklist
+            .iter()
+            .all(|item| item.id != "current-check"));
         store.evaluate_readiness(&workspace.id, &[]).unwrap();
         let materials = store.submission_materials(&workspace.id).unwrap();
         assert!(materials.required_complete);
@@ -6531,6 +6835,13 @@ mod tests {
         store
             .set_submission_material_included(&workspace.id, &title_page_id, true)
             .unwrap();
+        assert!(
+            !store
+                .target_submission_package_plan(&workspace.id)
+                .unwrap()
+                .ready
+        );
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
         assert!(matches!(
             store.delete_submission_material(&workspace.id, &title_page_id, false),
             Err(WorkspaceError::AuthorConfirmationRequired)
@@ -6577,6 +6888,8 @@ mod tests {
             )
             .unwrap();
         assert!(materials.required_complete);
+        assert!(!materials.target_check_ready);
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
         assert!(
             store
                 .target_submission_package_plan(&workspace.id)
@@ -6899,6 +7212,9 @@ mod tests {
             .unwrap();
 
         let catalog = store.submission_materials(&workspace.id).unwrap();
+        assert_eq!(catalog.schema_version, 4);
+        assert_eq!(catalog.detected_figure_count, 1);
+        assert_eq!(catalog.detected_table_count, 1);
         assert!(catalog.checklist.iter().any(|item| {
             item.id == "figure-originals"
                 && item.verification == "file"
