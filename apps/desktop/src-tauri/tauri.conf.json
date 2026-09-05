@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ManuscriptDock",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "identifier": "com.manuscriptdock.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "投稿舱 ManuscriptDock V0.43",
+        "title": "投稿舱 ManuscriptDock V0.44",
         "width": 1180,
         "height": 780,
         "minWidth": 760,

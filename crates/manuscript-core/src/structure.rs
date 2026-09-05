@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
-pub const STRUCTURE_ANALYSIS_VERSION: u32 = 7;
+pub const STRUCTURE_ANALYSIS_VERSION: u32 = 8;
 pub const DECOMPOSITION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -1166,28 +1166,6 @@ fn derive_semantic_candidates(
         }
     }
 
-    if !scored
-        .iter()
-        .any(|candidate| candidate.element == SemanticElementKind::Claim)
-    {
-        if let Some(abstract_text) = extracted.abstract_text.as_deref() {
-            if let Some(sentence) = semantic_sentences(abstract_text)
-                .into_iter()
-                .filter(|sentence| sentence.chars().count() >= 24)
-                .max_by_key(|sentence| sentence.chars().count())
-            {
-                scored.push(SemanticCandidate {
-                    element: SemanticElementKind::Claim,
-                    text: sentence,
-                    source_label: "摘要 / Abstract".to_owned(),
-                    source_fragment_id: None,
-                    modality: SourceModality::Text,
-                    confidence_percent: 58,
-                });
-            }
-        }
-    }
-
     scored.sort_by(|left, right| {
         left.element
             .cmp(&right.element)
@@ -1217,6 +1195,7 @@ fn semantic_sentences(text: &str) -> Vec<String> {
     text.split_inclusive(['。', '！', '？', '.', '!', '?'])
         .flat_map(|part| part.split(['\n', '\r']))
         .map(normalize_line)
+        .map(strip_manuscript_metadata_suffix)
         .filter(|sentence| {
             let length = sentence.chars().count();
             (16..=900).contains(&length)
@@ -1231,6 +1210,9 @@ fn semantic_score(
     modality: SourceModality,
 ) -> Option<u8> {
     let lower = sentence.to_ascii_lowercase();
+    if contains_manuscript_metadata(&lower) {
+        return None;
+    }
     let contains_any = |markers: &[&str]| markers.iter().any(|marker| lower.contains(marker));
     let in_abstract = source_label.contains("摘要") || source_label.contains("Abstract");
     let numeric = sentence.chars().any(|character| character.is_ascii_digit());
@@ -1240,18 +1222,43 @@ fn semantic_score(
                 "we demonstrate",
                 "we show",
                 "we find",
+                "we found",
                 "we conclude",
+                "we establish",
+                "we identify",
+                "we argue",
+                "results show",
+                "result shows",
+                "results indicate",
+                "result indicates",
                 "this study demonstrates",
                 "our contribution",
-                "we propose",
-                "本文提出",
+                "our contributions",
+                "our findings",
+                "this paper provides",
+                "this paper presents",
+                "this paper identifies",
+                "this review",
+                "this survey",
                 "本研究表明",
                 "研究发现",
                 "结果表明",
+                "结果显示",
+                "实验结果表明",
+                "实验结果显示",
                 "本文证明",
                 "主要贡献",
-                "我们提出",
                 "我们发现",
+                "我们表明",
+                "本文系统",
+                "本文综述",
+                "本文分析",
+                "本文总结",
+                "本文梳理",
+                "本文探讨",
+                "本文认为",
+                "本文指出",
+                "本文给出",
             ]) =>
         {
             82 + u8::from(in_abstract) * 8
@@ -1354,6 +1361,44 @@ fn semantic_score(
         _ => return None,
     };
     Some(score.min(96))
+}
+
+fn contains_manuscript_metadata(lower: &str) -> bool {
+    manuscript_metadata_markers()
+        .iter()
+        .any(|marker| lower.contains(marker))
+        || lower.contains('@')
+}
+
+fn strip_manuscript_metadata_suffix(sentence: String) -> String {
+    let lower = sentence.to_ascii_lowercase();
+    let metadata_start = manuscript_metadata_markers()
+        .iter()
+        .filter_map(|marker| lower.find(marker))
+        .min();
+    metadata_start
+        .map(|index| normalize_line(&sentence[..index]))
+        .unwrap_or(sentence)
+}
+
+fn manuscript_metadata_markers() -> &'static [&'static str] {
+    &[
+        "收稿日期",
+        "修回日期",
+        "录用日期",
+        "基金项目",
+        "作者简介",
+        "通讯作者",
+        "中图分类号",
+        "文献标志码",
+        "received:",
+        "received date",
+        "revised:",
+        "accepted:",
+        "corresponding author",
+        "this work was supported",
+        "doi:",
+    ]
 }
 
 fn infer_title(line: &str) -> Option<String> {
@@ -2096,6 +2141,14 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.element == SemanticElementKind::Claim));
+        assert!(candidates.iter().any(|candidate| {
+            candidate.element == SemanticElementKind::Claim
+                && candidate.text.starts_with("Results show")
+        }));
+        assert!(!candidates.iter().any(|candidate| {
+            candidate.element == SemanticElementKind::Claim
+                && candidate.text.starts_with("We propose")
+        }));
         assert!(candidates
             .iter()
             .any(|candidate| candidate.element == SemanticElementKind::Method));
@@ -2114,6 +2167,47 @@ mod tests {
         assert!(coverage.text_fragments > 0);
         assert_eq!(coverage.table_fragments, 1);
         assert_eq!(coverage.figure_fragments, 1);
+    }
+
+    #[test]
+    fn derives_a_review_claim_without_absorbing_manuscript_metadata() {
+        let extracted = infer_from_plain_text(
+            "Synthetic Review\nAbstract\nExisting systems leave an unresolved interoperability gap. This paper provides a systematic analysis of the field and identifies three recurring design constraints. 然后，本文梳理了主要研究方向并指出可验证的开放问题。收稿日期：2099-01-01 基金项目：Synthetic Grant This work was supported by synthetic funding.\nMethods\nWe propose a layered classification method for the review.",
+        );
+
+        let (candidates, _) = derive_semantic_candidates(&extracted);
+        let claims = candidates
+            .iter()
+            .filter(|candidate| candidate.element == SemanticElementKind::Claim)
+            .collect::<Vec<_>>();
+
+        assert!(claims.iter().any(|candidate| candidate
+            .text
+            .starts_with("This paper provides a systematic analysis")));
+        assert!(claims
+            .iter()
+            .any(|candidate| candidate.text.starts_with("然后，本文梳理了")));
+        assert!(claims.iter().all(|candidate| {
+            !candidate.text.contains("收稿日期")
+                && !candidate.text.contains("基金项目")
+                && !candidate.text.contains("This work was supported")
+        }));
+    }
+
+    #[test]
+    fn leaves_claim_pending_when_only_a_method_is_stated() {
+        let extracted = infer_from_plain_text(
+            "Synthetic Method Note\nAbstract\nWe propose a local method for deterministic manuscript analysis.\nMethods\nThe algorithm uses a synthetic fixture.",
+        );
+
+        let (candidates, _) = derive_semantic_candidates(&extracted);
+
+        assert!(!candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Claim));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.element == SemanticElementKind::Method));
     }
 
     #[test]

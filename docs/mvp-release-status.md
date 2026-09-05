@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.43 开发 MVP 完成状态
+# 投稿舱 ManuscriptDock V0.44 开发 MVP 完成状态
 
 - 状态：M0–M9 开发完成，可用于本机技术与用户流程验证
 - 日期：2026-09-04
@@ -133,12 +133,12 @@
 
 ## 最终验证基线
 
-- 前端：V0.43 的 26 个测试通过，包括双语界面、HTTP／跨域逐次授权、投稿附件分类、逐篇归档、恢复、永久删除确认、全局模型
+- 前端：V0.44 的 26 个测试通过，包括双语界面、HTTP／跨域逐次授权、投稿附件分类、逐篇归档、恢复、永久删除确认、全局模型
   三槽设置、知识体问答和外部入口边界；TypeScript 类型检查和 Vite 生产构建通过。
 - Rust：81 个核心测试与 30 个桌面后端确定性测试通过；rustfmt 和 Clippy `-D warnings` 通过。
-- 桌面：V0.43 `cargo build -p manuscriptdock-desktop` 通过；前端生产资源已构建，未生成或安装发行包。
+- 桌面：V0.44 `cargo build -p manuscriptdock-desktop` 通过；前端生产资源已构建，未生成或安装发行包。
 - Windows：此前 `cargo xwin check --workspace --target x86_64-pc-windows-msvc` 通过，覆盖 Windows
-  Credential Manager、模型 HTTPS 客户端与完整桌面依赖图；本次 V0.43 未重新执行 Windows 验证。
+  Credential Manager、模型 HTTPS 客户端与完整桌面依赖图；本次 V0.44 未重新执行 Windows 验证。
 - 公开官网：本机 DNS 返回 `198.18.x.x` 保留地址，已由网络防护阻止；真实页面获取未通过验收。
   详见[官方来源读取](official-source-access.md)。
 - 界面：实现 PWC 基线宽屏双面板与 960px 以下单面板切换；导航、页签、加载状态、

@@ -1103,12 +1103,7 @@ impl WorkspaceStore {
         if destination.starts_with(&workspace_root) {
             return Err(WorkspaceError::InvalidExportDestination);
         }
-        let manuscript_stem = Path::new(&manifest.workspace.manuscript.name)
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .map(safe_export_component)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "manuscript".to_owned());
+        let manuscript_stem = manuscript_export_stem(&manifest.workspace.manuscript.name);
         let folder_name = format!(
             "ManuscriptDock-{manuscript_stem}-v{}-{}",
             manifest.workspace.snapshot_version,
@@ -3459,18 +3454,9 @@ impl WorkspaceStore {
         }
         let readiness_report = read_current_readiness_report(&workspace_root, &manifest.workspace)?
             .filter(|report| readiness_matches_target(report, Some(&target), &manifest.workspace));
-        let target_component = safe_export_component(if target.name_en.trim().is_empty() {
-            &target.name
-        } else {
-            &target.name_en
-        });
         let package_name = format!(
-            "ManuscriptDock-{}-v{}",
-            if target_component.is_empty() {
-                "target"
-            } else {
-                &target_component
-            },
+            "{}-submission-v{}",
+            manuscript_submission_stem(&manifest.workspace.manuscript.name),
             manifest.workspace.snapshot_version
         );
         let final_root = destination.join(&package_name);
@@ -4741,6 +4727,45 @@ fn safe_export_component(value: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_owned()
+}
+
+fn manuscript_export_stem(manuscript_name: &str) -> String {
+    Path::new(manuscript_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(safe_export_component)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "manuscript".to_owned())
+}
+
+fn manuscript_submission_stem(manuscript_name: &str) -> String {
+    let stem = Path::new(manuscript_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("manuscript");
+    let sanitized = stem
+        .chars()
+        .map(|character| {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
+                '-'
+            } else {
+                character
+            }
+        })
+        .take(120)
+        .collect::<String>()
+        .trim_matches(|character: char| character.is_whitespace() || matches!(character, '.' | '-'))
+        .to_owned();
+    if sanitized.is_empty() {
+        "manuscript".to_owned()
+    } else {
+        sanitized
+    }
 }
 
 fn verify_snapshot(
@@ -6441,10 +6466,11 @@ fn make_file_owner_writable(permissions: &mut fs::Permissions) {
 #[cfg(test)]
 mod tests {
     use super::{
-        make_tree_writable, read_json, read_stored_submission_materials, write_json,
-        DecompositionManifest, SubmissionTargetSelection, VersionCreation, VersionOrigin,
-        WorkspaceError, WorkspaceStore,
+        make_tree_writable, manuscript_submission_stem, read_json,
+        read_stored_submission_materials, write_json, DecompositionManifest,
+        SubmissionTargetSelection, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
     };
+
     use crate::{
         ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
         JournalProfileDiscoveryRecord, JournalRecommendationProfileInput,
@@ -6460,6 +6486,15 @@ mod tests {
         path::{Path, PathBuf},
     };
     use zip::{write::SimpleFileOptions, ZipWriter};
+
+    #[test]
+    fn keeps_the_manuscript_name_readable_in_submission_package_folders() {
+        assert_eq!(
+            manuscript_submission_stem("高性能智算中心网络：现状、挑战与趋势 (1).pdf"),
+            "高性能智算中心网络：现状、挑战与趋势 (1)"
+        );
+        assert_eq!(manuscript_submission_stem("?.pdf"), "manuscript");
+    }
 
     struct SyntheticDirectory(PathBuf);
 
@@ -7082,6 +7117,10 @@ mod tests {
         let target_export = store
             .export_target_submission_package(&workspace.id, &target_exports)
             .unwrap();
+        assert_eq!(
+            target_export.package_name,
+            "journal-profile-study-submission-v1"
+        );
         let target_root = target_exports.join(&target_export.package_name);
         assert!(!target_root.join("submission/manuscript.tex").exists());
         assert!(target_root

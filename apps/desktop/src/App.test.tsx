@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.43")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.43" }));
-    expect(brandStatement.getByText("V0.43")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.44")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.44" }));
+    expect(brandStatement.getByText("V0.44")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -771,7 +771,7 @@ describe("App", () => {
       if (command === "get_journal_requirement_snapshots") return Promise.resolve([journalRequirements]);
       if (command === "create_local_attestation") return Promise.resolve(attestation);
       if (command === "get_target_submission_package_plan") return Promise.resolve(packagePlan);
-      if (command === "export_target_submission_package") return Promise.resolve({ packageName: "ManuscriptDock-lifecycl-v2", manuscriptVersion: 2, targetSelectionId: submissionTarget.selectionId, targetName: submissionTarget.name, files: ["submission/manuscript.tex", "records/target-selection.json", "records/package-manifest.json", "README.txt"], warnings: [], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
+      if (command === "export_target_submission_package") return Promise.resolve({ packageName: "lifecycle-submission-v2", manuscriptVersion: 2, targetSelectionId: submissionTarget.selectionId, targetName: submissionTarget.name, files: ["submission/manuscript.tex", "records/target-selection.json", "records/package-manifest.json", "README.txt"], warnings: [], exportedUnixMs: Date.UTC(2026, 7, 24, 7, 25), externalTransmission: "not_performed" });
       if (command === "record_manual_submission") return Promise.resolve(submission);
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
@@ -787,7 +787,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "可以导出" })).toBeVisible();
     expect(screen.getByText("submission/manuscript.tex")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "选择导出文件夹" }));
-    expect(await screen.findByText(/已导出 ManuscriptDock-lifecycl-v2/)).toBeVisible();
+    expect(await screen.findByText(/已导出 lifecycle-submission-v2/)).toBeVisible();
     expect(screen.getByLabelText("投稿期刊（来自当前主线）")).toHaveValue("Synthetic Journal");
     await user.type(screen.getByLabelText("稿件号或回执（可选）"), "SYN-2026");
     await user.click(screen.getByRole("checkbox", { name: /我确认已经向上述期刊/ }));
@@ -970,8 +970,13 @@ describe("App", () => {
     expect(spatialMap).toHaveTextContent("验证、权利与信誉Reputation · v4AIReview v2 · 历史 v1");
     await user.click(within(spatialMap).getByRole("button", { name: /能力契约/ }));
     expect(within(spatialMap).getByRole("status")).toHaveTextContent("能力契约 · v1 · 1");
-    expect(screen.getByRole("heading", { name: "知识摘要与来源" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "知识命题与来源" })).toBeVisible();
+    expect(screen.getByText("Claim · 核心命题")).toBeVisible();
     expect(screen.getAllByText("The proposed method improves traceable manuscript analysis under the reported conditions.").length).toBeGreaterThanOrEqual(2);
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByRole("heading", { name: "Knowledge propositions and sources" })).toBeVisible();
+    expect(screen.getByText("Claim · Central proposition")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "中文" }));
 
     await user.click(screen.getByRole("tab", { name: "2. 两体关联" }));
     expect(screen.getByRole("img", { name: /2 个保持边界的知识体/ })).toBeVisible();
@@ -1143,6 +1148,8 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "为原始图件上传原始图件" })).toHaveTextContent("选择图片文件");
     expect(screen.getByRole("button", { name: "为可编辑表格上传可编辑表格" })).toHaveTextContent("选择表格文件");
     expect(screen.getAllByText(/CSV、TSV、XLS、XLSX、ODS/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "当前期刊与主稿附件" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "为标题页选择文件" })).toHaveTextContent("添加或替换文件");
     expect(screen.getByRole("heading", { name: "常见投稿附件" })).toBeVisible();
     expect(screen.getByText("按需补充 · 不默认设为必需")).toBeVisible();
     expect(screen.getByRole("button", { name: "上传声明文件" })).toBeEnabled();
@@ -1159,6 +1166,13 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "上传说明、回复与其他支持文件" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "上传说明、回复与其他支持文件" }));
     expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "other", checklistItemId: "common-explanation-files", locale: "zh-CN" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "为标题页选择文件" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "为标题页选择文件" }));
+    expect(invokeMock).toHaveBeenCalledWith("add_submission_materials", { workspaceId: workspace.id, kind: "title_page", checklistItemId: "journal-title-page", locale: "zh-CN" });
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByRole("heading", { name: "Current journal and manuscript files" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Choose files for Title page" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "中文" }));
     await user.click(within(materialViewTabs).getByRole("tab", { name: /已存文件/ }));
     expect(screen.getByText("title-page.docx")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "删除附件 title-page.docx" }));

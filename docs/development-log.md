@@ -1,5 +1,19 @@
 # ManuscriptDock Development Log
 
+## 2026-09-05 — V0.44 complete attachment-upload routing
+
+- Fixed an upload-view filter that exposed only figure/table slots and `common-*` optional slots.
+  File-backed entries generated for the selected journal or manuscript were present in the
+  requirements checklist but missing from the dedicated Upload view.
+- Added a separate “Current journal and manuscript files” section to the Upload view. Complete
+  source projects, blinded manuscripts, journal-specific title pages, cover letters, declarations,
+  supplementary files, and other evidence-backed requirements now retain direct upload actions.
+- Kept the three upload groups distinct: figures and editable tables, current journal/manuscript
+  requirements, and common optional attachments. The Upload tab count now covers every file-backed
+  checklist entry rather than only the two previously visible subsets.
+- Added Simplified Chinese and English interaction coverage for the restored journal-specific file
+  route, including the add-or-replace state for an already bound attachment.
+
 ## 2026-09-05 — V0.43 controlled public-source compatibility
 
 - Separated HTTP/HTTPS provenance storage from network permission; retained HTTP model-discovery
@@ -12,6 +26,19 @@
   snapshots, and existing immutable snapshots are preserved.
 - Added bilingual consent/error/result surfaces and deterministic network/storage/UI regression
   coverage. Live public-site checks are separate from the default test suite.
+- Renamed publisher-facing target packages from a journal-derived internal label to
+  `<source-manuscript-name>-submission-v<version>`, so every Save As result remains visibly bound
+  to the paper while the selected journal stays in the package records and README.
+- Redefined deterministic Claim extraction as a central proposition, contribution, finding, or
+  conclusion. A sentence that only says a method was proposed is now classified as Method rather
+  than being duplicated as Claim.
+- Removed the longest-abstract-sentence fallback that could invent a weak Claim and absorb dates,
+  funding, author metadata, or DOI text. Metadata suffixes are stripped before scoring; when no
+  reliable proposition exists, Claim remains pending for author review.
+- Updated the knowledge-body legend in Simplified Chinese and English to distinguish Claim from an
+  abstract summary and to label Scope, Method, Result, and Evidence by their semantic roles.
+- Advanced deterministic structure analysis to v8 so a subsequent analysis creates a fresh,
+  immutable decomposition instead of reusing v7 candidates.
 
 ## 2026-09-04 — V0.42 HTTP-only official-source continuation
 
