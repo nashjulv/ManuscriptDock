@@ -23,6 +23,10 @@ export function localize(locale: Locale, chinese: string, english: string) {
 }
 
 const BACKEND_ENGLISH: Record<string, string> = {
+  "自动抽取只建立带来源的准备清单，不替代作者对官网原文的最终核对": "Automatic extraction creates a source-backed preparation checklist; the author must still verify the official text.",
+  "已保存官方页面指纹，但未识别到明确投稿条目；请粘贴作者指南原文": "The page fingerprint was saved, but no explicit submission requirements were identified. Paste the author-guide text.",
+  "部分来源由作者确认，域名未与期刊主页自动匹配": "Some sources were confirmed by the author; their domains did not automatically match the journal homepage.",
+  "来源为作者确认的 HTTP 官方页面；系统未联网读取，传输安全性和原文真实性需作者复核": "The author supplied an HTTP official-page source. The app did not fetch it; the author must verify transport security and the original text.",
   "未检测到 \\title{}": "No \\title{} declaration was detected",
   "未检测到 \\author{}": "No \\author{} declaration was detected",
   "未检测到 Word 标题样式": "No Word title style was detected",
@@ -214,7 +218,41 @@ function systemDetail(value: string) {
   return containsChinese(value) ? "See the local audit record for system details." : value;
 }
 
+export const OFFICIAL_SOURCE_MESSAGES: Record<string, [string, string]> = {
+  OFFICIAL_INVALID_URL: ["请输入有效的 HTTP 或 HTTPS 来源网址。", "Enter a valid HTTP or HTTPS source URL."],
+  OFFICIAL_CREDENTIALS: ["来源网址不能包含用户名或密码。", "Source URLs cannot contain a username or password."],
+  OFFICIAL_PORT_BLOCKED: ["公开页面读取仅支持标准 HTTP／HTTPS 端口，请粘贴官方原文。", "Public-page reading supports standard HTTP/HTTPS ports only. Paste official text instead."],
+  OFFICIAL_PRIVATE_ADDRESS: ["目标地址指向本机、私网或非公网范围，已停止访问。", "The destination resolves to a local, private, or non-public address. Access was stopped."],
+  OFFICIAL_DNS_FAILED: ["无法解析官网域名，请稍后重试或粘贴官方原文。", "The journal domain could not be resolved. Retry later or paste official text."],
+  OFFICIAL_TIMEOUT: ["官方页面读取超时，请重试或粘贴原文。", "The official-page request timed out. Retry or paste the source text."],
+  OFFICIAL_TLS_FAILED: ["HTTPS 证书验证失败，未绕过证书校验。", "HTTPS certificate validation failed. Certificate checks were not bypassed."],
+  OFFICIAL_CONNECTION_FAILED: ["无法连接官方页面；这不代表网站仅支持 HTTP。", "The official page could not be reached; this does not establish that the site supports only HTTP."],
+  OFFICIAL_CLIENT_FAILED: ["无法建立受控页面读取客户端。", "The controlled page reader could not be initialized."],
+  OFFICIAL_ORIGIN_CONFIRMATION: ["发现另一域名，访问前需确认其属于官方来源。", "Another domain was found. Confirm it is an official source before accessing it."],
+  OFFICIAL_HTTP_CONFIRMATION: ["HTTP 访问尚未授权，需要本次明确确认。", "HTTP access is not authorized. Explicit confirmation is required for this request."],
+  OFFICIAL_REDIRECT_LIMIT: ["页面循环跳转或超过跳转上限，已停止访问。", "The page redirected in a loop or exceeded the redirect limit. Access was stopped."],
+  OFFICIAL_REQUEST_LIMIT: ["本次访问已达到请求数量上限，请粘贴官方原文。", "The request limit was reached. Paste official text instead."],
+  OFFICIAL_BAD_REDIRECT: ["官方页面返回了无效跳转地址。", "The official page returned an invalid redirect URL."],
+  OFFICIAL_HTTP_STATUS: ["官方页面返回 HTTP 状态码", "The official page returned HTTP status"],
+  OFFICIAL_TOO_LARGE: ["页面超过 2 MB 上限，请粘贴相关官方原文。", "The page exceeds the 2 MB limit. Paste the relevant official text."],
+  OFFICIAL_UNSUPPORTED_FORMAT: ["该来源不是支持的网页或纯文本，PDF 等来源请粘贴原文。", "This source is not a supported web or plain-text page. Paste text from PDF or other sources."],
+  OFFICIAL_NO_TEXT: ["页面没有可读取正文，可能依赖脚本，请粘贴原文。", "No readable page text was found. The page may require scripts; paste the source text."],
+  OFFICIAL_GUIDE_NOT_FOUND: ["已读取主页，但未取得可用的作者指南，请粘贴官方指南原文。", "The homepage was read, but no usable author guide was captured. Paste the official guide text."],
+  OFFICIAL_ENCODING_FAILED: ["无法可靠解码页面文字，请粘贴官方原文。", "The page text could not be decoded reliably. Paste official text."],
+  OFFICIAL_DYNAMIC_UNAVAILABLE: ["动态正文未能读取，当前结果仍需人工补充。", "Dynamic text could not be read. Manual input is still required."],
+  OFFICIAL_REQUESTED: ["已发起受控读取", "Controlled request started"],
+  OFFICIAL_RECEIVED: ["已收到页面响应，正文仍需解析", "Page response received; text still needs parsing"],
+  OFFICIAL_REDIRECT: ["页面返回重定向", "The page returned a redirect"],
+  OFFICIAL_CAPTURED: ["页面正文已读取", "Page text captured"],
+  OFFICIAL_PARTIAL_CAPTURE: ["部分官方来源未能读取；当前快照需要补充或重新获取。", "Some official sources could not be read. Supplement or refresh this snapshot."],
+  OFFICIAL_HTTP_EVIDENCE: ["部分证据经作者授权通过未加密 HTTP 获取，原文真实性需复核。", "Some evidence was fetched over unencrypted HTTP with author authorization. Verify the source's authenticity."],
+  OFFICIAL_CONSENT_REQUIRED: ["访问官方页面前需要作者本次明确授权。", "Explicit author authorization is required before accessing official pages."],
+  OFFICIAL_AUDIT_FAILED: ["无法保存或读取访问记录，请检查本地存储后重试。", "The access record could not be saved or read. Check local storage and retry."],
+};
+
 export function localizeBackendText(locale: Locale, value: string) {
+  const official = OFFICIAL_SOURCE_MESSAGES[value];
+  if (official) return official[locale === "zh-CN" ? 0 : 1];
   if (locale === "zh-CN" || value.trim() === "") return value;
   const exact = BACKEND_ENGLISH[value];
   if (exact) return exact;

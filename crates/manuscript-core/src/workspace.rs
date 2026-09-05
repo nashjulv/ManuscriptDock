@@ -2976,7 +2976,12 @@ impl WorkspaceStore {
         if documents.is_empty()
             || documents.iter().any(|document| {
                 let permitted_source = document.url.starts_with("https://")
-                    || (source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText
+                    || ((source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText
+                        || matches!(
+                            external_transmission,
+                            "author_confirmed_http_source_fetch"
+                                | "author_confirmed_http_source_fetch_partial"
+                        ))
                         && document.url.starts_with("http://"));
                 !permitted_source
                     || document.text.trim().chars().count() < 20
@@ -2998,8 +3003,13 @@ impl WorkspaceStore {
             .ok_or(WorkspaceError::SubmissionTargetNotFound)?;
         let captured_unix_ms = unix_time_ms()?;
         let (sources, requirements) = extract_journal_requirements(documents, captured_unix_ms);
-        let status = if requirements.is_empty() {
-            JournalRequirementStatus::RequiresManualReview
+        let partial_fetch = matches!(
+            external_transmission,
+            "author_confirmed_official_source_fetch_partial"
+                | "author_confirmed_http_source_fetch_partial"
+        );
+        let status = if requirements.is_empty() || partial_fetch {
+            crate::JournalRequirementStatus::RequiresManualReview
         } else if source_mode == JournalRequirementSourceMode::AuthorProvidedOfficialText {
             JournalRequirementStatus::AuthorAttestedOfficial
         } else {
@@ -3007,6 +3017,16 @@ impl WorkspaceStore {
         };
         let mut limitations =
             vec!["自动抽取只建立带来源的准备清单，不替代作者对官网原文的最终核对".to_owned()];
+        if partial_fetch {
+            limitations.push("OFFICIAL_PARTIAL_CAPTURE".into());
+        }
+        if source_mode == JournalRequirementSourceMode::OfficialNetworkFetch
+            && documents
+                .iter()
+                .any(|document| document.url.starts_with("http://"))
+        {
+            limitations.push("OFFICIAL_HTTP_EVIDENCE".into());
+        }
         if requirements.is_empty() {
             limitations
                 .push("已保存官方页面指纹，但未识别到明确投稿条目；请粘贴作者指南原文".to_owned());
@@ -3082,6 +3102,67 @@ impl WorkspaceStore {
             captured_unix_ms,
         )?;
         Ok(snapshot)
+    }
+
+    /// Persist the access decision before networking and its outcome afterwards. These
+    /// records contain public-source metadata only and never rewrite requirement snapshots.
+    pub fn record_journal_source_access(
+        &self,
+        workspace_id: &str,
+        target_selection_id: &str,
+        event: &str,
+        detail: &serde_json::Value,
+    ) -> Result<(), WorkspaceError> {
+        let (root, manifest) = self.workspace_for_management(workspace_id, false)?;
+        let plan = read_submission_target_plan(&root, workspace_id)?;
+        if !plan
+            .primary
+            .iter()
+            .chain(plan.backups.iter())
+            .any(|t| t.selection_id == target_selection_id)
+            || !matches!(event, "started" | "completed" | "cancelled")
+        {
+            return Err(WorkspaceError::SubmissionTargetNotFound);
+        }
+        let record = serde_json::json!({"schemaVersion": 1, "workspaceId": workspace_id,
+            "targetSelectionId": target_selection_id, "event": event, "occurredUnixMs": unix_time_ms()?, "detail": detail});
+        let directory = root
+            .join("targets")
+            .join(target_selection_id)
+            .join("source-access");
+        write_immutable_record(
+            &directory,
+            &Uuid::new_v4().to_string(),
+            "access.json",
+            &record,
+        )?;
+        if event == "completed" {
+            write_or_replace_json(&directory.join("current.json"), detail)?;
+        }
+        append_audit_event(
+            &root.join("audit.jsonl"),
+            &format!("journal_source_access_{event}"),
+            &manifest.workspace,
+            unix_time_ms()?,
+        )
+    }
+
+    pub fn latest_journal_source_access(
+        &self,
+        workspace_id: &str,
+        target_selection_id: &str,
+    ) -> Result<Option<serde_json::Value>, WorkspaceError> {
+        let (root, _) = self.workspace_for_management(workspace_id, false)?;
+        Uuid::parse_str(target_selection_id)
+            .map_err(|_| WorkspaceError::SubmissionTargetNotFound)?;
+        let path = root
+            .join("targets")
+            .join(target_selection_id)
+            .join("source-access/current.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        read_json(&path).map(Some)
     }
 
     pub fn journal_requirement_snapshot(
@@ -6367,10 +6448,11 @@ mod tests {
     use crate::{
         ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
         JournalProfileDiscoveryRecord, JournalRecommendationProfileInput,
-        JournalRequirementSourceDocument, JournalRequirementSourceMode, KnowledgeBodyError,
-        KnowledgeCandidateDecision, KnowledgeInquiryStance, KnowledgeInquiryTarget,
-        ManuscriptPurpose, ReadinessOutcome, RevisionApplication, RevisionChangeInput,
-        RevisionFieldKind, SubmissionMaterialKind, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
+        JournalRequirementSourceDocument, JournalRequirementSourceMode, JournalRequirementStatus,
+        KnowledgeBodyError, KnowledgeCandidateDecision, KnowledgeInquiryStance,
+        KnowledgeInquiryTarget, ManuscriptPurpose, ReadinessOutcome, RevisionApplication,
+        RevisionChangeInput, RevisionFieldKind, SubmissionMaterialKind,
+        JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
     };
     use std::{
         fs::{self, File},
@@ -6622,6 +6704,92 @@ mod tests {
         )
         .unwrap();
         assert!(audit.contains("submission_backup_removed"));
+        let http_snapshot = store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "http://journal.example/guide-for-authors".into(),
+                    title: "Synthetic HTTP guide".into(),
+                    text: "A separate title page is required.".into(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::OfficialNetworkFetch,
+                false,
+                "author_confirmed_http_source_fetch",
+            )
+            .unwrap();
+        assert_eq!(
+            http_snapshot.status,
+            JournalRequirementStatus::OfficialSourcesCaptured
+        );
+        assert!(http_snapshot.sources[0].url.starts_with("http://"));
+        let partial_snapshot = store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "http://journal.example/guide-for-authors".into(),
+                    title: "Synthetic guide".into(),
+                    text: "A separate title page is required.".into(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::OfficialNetworkFetch,
+                false,
+                "author_confirmed_http_source_fetch_partial",
+            )
+            .unwrap();
+        assert_eq!(
+            partial_snapshot.status,
+            JournalRequirementStatus::RequiresManualReview
+        );
+        assert!(partial_snapshot
+            .limitations
+            .iter()
+            .any(|value| value == "OFFICIAL_HTTP_EVIDENCE"));
+        assert!(partial_snapshot
+            .limitations
+            .iter()
+            .any(|value| value == "OFFICIAL_PARTIAL_CAPTURE"));
+        assert_eq!(
+            store
+                .journal_requirement_snapshot(&workspace.id, &target.selection_id)
+                .unwrap()
+                .unwrap()
+                .record_hash,
+            partial_snapshot.record_hash
+        );
+        let access_detail = serde_json::json!({"runId": "synthetic", "snapshotId": partial_snapshot.snapshot_id, "events": [{"code": "OFFICIAL_HTTP_STATUS", "detail": "403"}]});
+        for event in ["started", "completed", "cancelled"] {
+            store
+                .record_journal_source_access(
+                    &workspace.id,
+                    &target.selection_id,
+                    event,
+                    &access_detail,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .latest_journal_source_access(&workspace.id, &target.selection_id)
+                .unwrap(),
+            Some(access_detail)
+        );
+        assert!(store
+            .latest_journal_source_access(&workspace.id, "../../outside")
+            .is_err());
+        let audit = fs::read_to_string(
+            store
+                .projects_root()
+                .join(&workspace.id)
+                .join("audit.jsonl"),
+        )
+        .unwrap();
+        for event in ["started", "completed", "cancelled"] {
+            assert!(audit.contains(&format!("journal_source_access_{event}")));
+        }
+        let partial_bytes = serde_json::to_vec(&partial_snapshot).unwrap();
         let requirement_snapshot = store
             .save_journal_requirement_snapshot(
                 &workspace.id,
@@ -6638,6 +6806,21 @@ mod tests {
             )
             .unwrap();
         assert_eq!(requirement_snapshot.requirements.len(), 4);
+        let archived_partial: crate::JournalRequirementSnapshot = read_json(
+            &store
+                .projects_root()
+                .join(&workspace.id)
+                .join("targets")
+                .join(&target.selection_id)
+                .join("requirements")
+                .join(&partial_snapshot.snapshot_id)
+                .join("requirements.json"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&archived_partial).unwrap(),
+            partial_bytes
+        );
         assert!(requirement_snapshot
             .limitations
             .iter()

@@ -1,4 +1,9 @@
 mod model_service;
+mod official_sources;
+use official_sources::{
+    instruction_links as discover_instruction_links, same_host as hosts_share_official_site,
+    source_url as public_source_url, FetchOptions, FetchSession, PublicTransport,
+};
 
 use manuscript_core::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, discipline_catalog,
@@ -24,14 +29,12 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap},
-    net::IpAddr,
     path::PathBuf,
     sync::Mutex,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use url::Url;
 use uuid::Uuid;
 
 #[derive(Default)]
@@ -107,16 +110,6 @@ struct WorkspaceStorageSummary {
     source_policy: &'static str,
 }
 
-const MAX_OFFICIAL_PAGE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_OFFICIAL_SOURCE_PAGES: usize = 4;
-
-struct FetchedOfficialPage {
-    url: Url,
-    title: String,
-    html: String,
-    text: String,
-}
-
 fn html_attribute_value(tag: &str, attribute: &str) -> Option<String> {
     let lowercase = tag.to_ascii_lowercase();
     let mut cursor = 0;
@@ -189,6 +182,11 @@ fn instruction_page_hint(value: &str) -> bool {
     let lowercase = value.to_lowercase();
     [
         "guide-for-authors",
+        "guide for authors",
+        "author guide",
+        "author instructions",
+        "instructions for authors",
+        "submission guidelines",
         "guidelines-for-authors",
         "author-guideline",
         "author-instruction",
@@ -223,275 +221,6 @@ fn dynamic_news_content(bytes: &[u8]) -> Option<(Option<String>, String)> {
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     Some((title, text))
-}
-
-async fn hydrate_dynamic_news_page(client: &reqwest::Client, page: &mut FetchedOfficialPage) {
-    let Some(news_id) = html_input_value(&page.html, "newsId") else {
-        return;
-    };
-    if news_id.is_empty()
-        || !news_id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric())
-    {
-        return;
-    }
-    let base_path = html_input_value(&page.html, "basePath").unwrap_or_else(|| "/".to_owned());
-    let endpoint_path = format!("{}/data/news/newsData", base_path.trim_end_matches('/'));
-    let Ok(endpoint) = page.url.join(&endpoint_path) else {
-        return;
-    };
-    if !hosts_share_official_site(&page.url, &endpoint) {
-        return;
-    }
-    let Ok(mut response) = client.post(endpoint).form(&[("id", news_id)]).send().await else {
-        return;
-    };
-    if !response.status().is_success() {
-        return;
-    }
-    let mut bytes = Vec::new();
-    while let Ok(Some(chunk)) = response.chunk().await {
-        if bytes.len().saturating_add(chunk.len()) > MAX_OFFICIAL_PAGE_BYTES {
-            return;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let Some((title, text)) = dynamic_news_content(&bytes) else {
-        return;
-    };
-    page.text = text;
-    if let Some(title) = title {
-        page.title = title;
-    }
-}
-
-fn public_source_url(value: &str) -> Result<Url, String> {
-    let mut url = Url::parse(value).map_err(|_| "官方来源网址无效".to_owned())?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("官方来源网址只支持 HTTP 或 HTTPS".to_owned());
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err("官方来源网址不能包含用户名或密码".to_owned());
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "官方来源网址缺少域名".to_owned())?
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    if host == "localhost"
-        || host.ends_with(".localhost")
-        || host.ends_with(".local")
-        || host.ends_with(".internal")
-        || host.ends_with(".lan")
-    {
-        return Err("官方来源不能指向本机地址".to_owned());
-    }
-    if let Ok(address) = host.parse::<IpAddr>() {
-        let blocked = match address {
-            IpAddr::V4(value) => {
-                value.is_private()
-                    || value.is_loopback()
-                    || value.is_link_local()
-                    || value.is_broadcast()
-                    || value.is_unspecified()
-            }
-            IpAddr::V6(value) => {
-                value.to_ipv4_mapped().is_some_and(|mapped| {
-                    mapped.is_private()
-                        || mapped.is_loopback()
-                        || mapped.is_link_local()
-                        || mapped.is_unspecified()
-                }) || value.is_loopback()
-                    || value.is_unspecified()
-                    || value.is_unique_local()
-            }
-        };
-        if blocked {
-            return Err("官方来源不能指向本机或私有网络".to_owned());
-        }
-    }
-    url.set_fragment(None);
-    Ok(url)
-}
-
-fn public_https_url(value: &str) -> Result<Url, String> {
-    let url = public_source_url(value)?;
-    if url.scheme() != "https" {
-        return Err(
-            "该期刊官方来源仅提供 HTTP，无法安全自动读取；请粘贴官方作者指南原文".to_owned(),
-        );
-    }
-    Ok(url)
-}
-
-fn hosts_share_official_site(left: &Url, right: &Url) -> bool {
-    let Some(left) = left
-        .host_str()
-        .map(|value| value.trim_end_matches('.').to_ascii_lowercase())
-    else {
-        return false;
-    };
-    let Some(right) = right
-        .host_str()
-        .map(|value| value.trim_end_matches('.').to_ascii_lowercase())
-    else {
-        return false;
-    };
-    left == right || left.ends_with(&format!(".{right}")) || right.ends_with(&format!(".{left}"))
-}
-
-async fn fetch_official_page(
-    client: &reqwest::Client,
-    requested_url: Url,
-    official_seed: &Url,
-) -> Result<FetchedOfficialPage, String> {
-    let mut current = requested_url;
-    for _ in 0..=3 {
-        if !hosts_share_official_site(&current, official_seed) {
-            return Err("跳转目标不属于期刊官方站点，已停止访问".to_owned());
-        }
-        let mut response = client
-            .get(current.clone())
-            .send()
-            .await
-            .map_err(|error| format!("无法读取官方页面：{error}"))?;
-        if response.status().is_redirection() {
-            let location = response
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| "官方页面返回了无效跳转".to_owned())?;
-            current = public_https_url(
-                current
-                    .join(location)
-                    .map_err(|_| "官方页面跳转地址无效".to_owned())?
-                    .as_str(),
-            )?;
-            continue;
-        }
-        if !response.status().is_success() {
-            return Err(format!("官方页面返回 HTTP {}", response.status()));
-        }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if !(content_type.contains("text/html") || content_type.contains("text/plain")) {
-            return Err("官方来源不是可读取的网页；请改用手动粘贴官方原文".to_owned());
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|error| format!("官方页面读取中断：{error}"))?
-        {
-            if bytes.len().saturating_add(chunk.len()) > MAX_OFFICIAL_PAGE_BYTES {
-                return Err("官方页面超过 2 MB；请粘贴与投稿要求相关的官方原文".to_owned());
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        let html = String::from_utf8_lossy(&bytes).into_owned();
-        let text = html_to_plain_text(&html);
-        if text.chars().count() < 20 {
-            return Err("官方页面没有可读取正文，可能依赖脚本加载；请手动粘贴原文".to_owned());
-        }
-        return Ok(FetchedOfficialPage {
-            title: html_title(&html).unwrap_or_else(|| "Official journal page".to_owned()),
-            url: current,
-            html,
-            text,
-        });
-    }
-    Err("官方页面跳转次数过多，已停止访问".to_owned())
-}
-
-fn discover_instruction_links(base: &Url, html: &str) -> Vec<Url> {
-    let lowercase = html.to_ascii_lowercase();
-    let mut cursor = 0;
-    let mut links = Vec::new();
-    while let Some(relative) = lowercase[cursor..].find("href") {
-        let start = cursor + relative + 4;
-        let Some(equal_relative) = lowercase[start..].find('=') else {
-            break;
-        };
-        let mut value_start = start + equal_relative + 1;
-        while lowercase
-            .as_bytes()
-            .get(value_start)
-            .is_some_and(u8::is_ascii_whitespace)
-        {
-            value_start += 1;
-        }
-        let quote = lowercase.as_bytes().get(value_start).copied();
-        let (content_start, terminator) = if matches!(quote, Some(b'\'' | b'"')) {
-            (value_start + 1, quote.unwrap())
-        } else {
-            (value_start, b' ')
-        };
-        let mut value_end = content_start;
-        while let Some(byte) = html.as_bytes().get(value_end) {
-            if *byte == terminator
-                || (terminator == b' ' && (*byte == b'>' || byte.is_ascii_whitespace()))
-            {
-                break;
-            }
-            value_end += 1;
-        }
-        cursor = value_end.saturating_add(1);
-        let href = &html[content_start..value_end];
-        let tag_start = lowercase[..start].rfind('<').unwrap_or(start);
-        let tag_prefix = lowercase[tag_start..start]
-            .trim_start_matches('<')
-            .trim_start();
-        let mut tag_characters = tag_prefix.chars();
-        let is_anchor = tag_characters.next() == Some('a')
-            && tag_characters
-                .next()
-                .is_some_and(|character| character.is_ascii_whitespace() || character == '>');
-        let anchor_text = if is_anchor {
-            lowercase[value_end..]
-                .find('>')
-                .and_then(|relative| {
-                    let label_start = value_end + relative + 1;
-                    lowercase[label_start..].find("</a>").map(|label_end| {
-                        html_to_plain_text(&html[label_start..label_start + label_end])
-                    })
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        if !instruction_page_hint(href) && !instruction_page_hint(&anchor_text) {
-            continue;
-        }
-        let Ok(url) = base.join(href) else { continue };
-        let Ok(url) = public_https_url(url.as_str()) else {
-            continue;
-        };
-        if hosts_share_official_site(base, &url)
-            && !links
-                .iter()
-                .any(|existing: &Url| existing.as_str() == url.as_str())
-        {
-            links.push(url);
-            if links.len() >= MAX_OFFICIAL_SOURCE_PAGES - 1 {
-                break;
-            }
-        }
-    }
-    links
-}
-
-fn html_title(html: &str) -> Option<String> {
-    let lowercase = html.to_ascii_lowercase();
-    let start = lowercase.find("<title")?;
-    let content_start = lowercase[start..].find('>')? + start + 1;
-    let end = lowercase[content_start..].find("</title>")? + content_start;
-    let title = decode_html_entities(html[content_start..end].trim());
-    (!title.is_empty()).then_some(title)
 }
 
 fn html_to_plain_text(html: &str) -> String {
@@ -1272,75 +1001,164 @@ async fn get_journal_requirement_snapshots(
         .map_err(|error| error.to_string())
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficialFetchResult {
+    run_id: String,
+    snapshot: Option<JournalRequirementSnapshot>,
+    events: Vec<official_sources::AccessEvent>,
+    pending: Vec<official_sources::PendingAccess>,
+    partial: bool,
+    options: FetchOptions,
+}
+
 #[tauri::command]
 async fn discover_journal_requirements(
     workspace_id: String,
     target_selection_id: String,
     author_confirmed_external_transmission: bool,
+    options: FetchOptions,
     app: AppHandle,
-) -> Result<JournalRequirementSnapshot, String> {
+) -> Result<OfficialFetchResult, String> {
     if !author_confirmed_external_transmission {
-        return Err("联网前需要作者明确授权本次官方来源访问".to_owned());
+        return Err("OFFICIAL_CONSENT_REQUIRED".into());
     }
-    let root = workspace_root(&app)?;
-    let store = WorkspaceStore::new(root);
+    let store = WorkspaceStore::new(workspace_root(&app)?);
     let plan = store
         .submission_target_plan(&workspace_id)
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
     let target = plan
         .primary
         .iter()
         .chain(plan.backups.iter())
         .find(|target| target.selection_id == target_selection_id)
         .ok_or_else(|| "未找到需要查询的投稿目标".to_owned())?;
-    let seed = public_https_url(&target.homepage_url)?;
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(20))
-        .user_agent("ManuscriptDock/0.42 official-guideline-fetch")
-        .build()
-        .map_err(|error| format!("无法建立受控网络客户端：{error}"))?;
-    let homepage = fetch_official_page(&client, seed.clone(), &seed).await?;
-    let candidate_links = discover_instruction_links(&homepage.url, &homepage.html);
-    let homepage_is_instruction =
-        instruction_page_hint(homepage.url.as_str()) || instruction_page_hint(&homepage.title);
-    let mut homepage = Some(homepage);
-    let mut pages = Vec::new();
-    if homepage_is_instruction {
-        let mut homepage = homepage.take().expect("homepage is available");
-        hydrate_dynamic_news_page(&client, &mut homepage).await;
-        pages.push(homepage);
-    }
-    for link in candidate_links {
-        if let Ok(mut page) = fetch_official_page(&client, link, &seed).await {
-            hydrate_dynamic_news_page(&client, &mut page).await;
-            pages.push(page);
-        }
-    }
-    if pages.is_empty() {
-        pages
-            .push(homepage.expect("homepage remains available when it is not an instruction page"));
-    }
-    let documents = pages
-        .into_iter()
-        .map(|page| JournalRequirementSourceDocument {
-            url: page.url.to_string(),
-            title: page.title,
-            text: page.text,
-            official_host_matched: true,
-        })
-        .collect::<Vec<_>>();
+    let seed = public_source_url(&target.homepage_url)?;
+    let run_id = Uuid::new_v4().to_string();
     store
-        .save_journal_requirement_snapshot(
+        .record_journal_source_access(
             &workspace_id,
             &target_selection_id,
-            &documents,
-            JournalRequirementSourceMode::OfficialNetworkFetch,
-            false,
-            "author_confirmed_official_source_fetch",
+            "started",
+            &json!({"runId": run_id, "requestedUrl": seed.as_str(), "options": options}),
         )
-        .map_err(|error| error.to_string())
+        .map_err(|_| "OFFICIAL_AUDIT_FAILED")?;
+    let mut session = FetchSession::new(seed.clone(), options.clone(), PublicTransport)?;
+    let mut documents = Vec::new();
+    let mut partial = false;
+    if let Ok(mut homepage) = session.page(seed.clone()).await {
+        let captured_homepage_url = homepage.url.to_string();
+        let links = discover_instruction_links(&homepage.url, &homepage.html);
+        let is_guide =
+            instruction_page_hint(homepage.url.as_str()) || instruction_page_hint(&homepage.title);
+        let mut pages = Vec::new();
+        if is_guide {
+            partial |= !session.hydrate(&mut homepage).await;
+            pages.push(homepage);
+        }
+        for link in links {
+            match session.page(link).await {
+                Ok(mut page) => {
+                    partial |= !session.hydrate(&mut page).await;
+                    pages.push(page);
+                }
+                Err(_) => partial = true,
+            }
+        }
+        if pages.is_empty() {
+            partial = true;
+            session.events.push(official_sources::AccessEvent {
+                requested_url: seed.to_string(),
+                url: captured_homepage_url,
+                code: "OFFICIAL_GUIDE_NOT_FOUND".into(),
+                detail: None,
+            });
+        }
+        documents = pages
+            .into_iter()
+            .map(|page| JournalRequirementSourceDocument {
+                official_host_matched: hosts_share_official_site(&page.url, &seed),
+                url: page.url.to_string(),
+                title: page.title,
+                text: page.text,
+            })
+            .collect();
+    } else {
+        partial = true;
+    }
+    partial |= !session.pending.is_empty()
+        || session
+            .events
+            .iter()
+            .any(|event| event.code == "OFFICIAL_DYNAMIC_UNAVAILABLE");
+    let transmission = match (session.used_http, partial) {
+        (true, true) => "author_confirmed_http_source_fetch_partial",
+        (true, false) => "author_confirmed_http_source_fetch",
+        (false, true) => "author_confirmed_official_source_fetch_partial",
+        (false, false) => "author_confirmed_official_source_fetch",
+    };
+    let snapshot = if documents.is_empty() {
+        Ok(None)
+    } else {
+        store
+            .save_journal_requirement_snapshot(
+                &workspace_id,
+                &target_selection_id,
+                &documents,
+                JournalRequirementSourceMode::OfficialNetworkFetch,
+                false,
+                transmission,
+            )
+            .map(Some)
+    };
+    let result = OfficialFetchResult {
+        run_id,
+        snapshot: snapshot.as_ref().ok().cloned().flatten(),
+        events: session.events,
+        pending: session.pending,
+        partial,
+        options,
+    };
+    store
+        .record_journal_source_access(
+            &workspace_id,
+            &target_selection_id,
+            "completed",
+            &json!(result),
+        )
+        .map_err(|_| "OFFICIAL_AUDIT_FAILED")?;
+    snapshot.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+#[tauri::command]
+fn get_journal_source_access(
+    workspace_id: String,
+    target_selection_id: String,
+    app: AppHandle,
+) -> Result<Option<OfficialFetchResult>, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .latest_journal_source_access(&workspace_id, &target_selection_id)
+        .map_err(|_| "OFFICIAL_AUDIT_FAILED".to_owned())?
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| "OFFICIAL_AUDIT_FAILED".into())
+}
+
+#[tauri::command]
+fn cancel_journal_source_access(
+    workspace_id: String,
+    target_selection_id: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .record_journal_source_access(
+            &workspace_id,
+            &target_selection_id,
+            "cancelled",
+            &json!({"externalTransmission": "not_performed"}),
+        )
+        .map_err(|_| "OFFICIAL_AUDIT_FAILED".into())
 }
 
 #[tauri::command]
@@ -1692,9 +1510,9 @@ async fn extract_institution_requirements(
         .filter(|url| !url.is_empty());
     if source_url
         .as_ref()
-        .is_some_and(|url| !url.starts_with("https://") || url.chars().count() > 1_000)
+        .is_some_and(|url| public_source_url(url).is_err() || url.chars().count() > 1_000)
     {
-        return Err("学校要求来源必须是有效的 HTTPS 官方页面".to_owned());
+        return Err("OFFICIAL_INVALID_URL".to_owned());
     }
     let root = workspace_root(&app)?;
     let store = WorkspaceStore::new(&root);
@@ -2062,7 +1880,7 @@ async fn discover_journal_profile(
     let mut source_urls = candidate
         .source_urls
         .into_iter()
-        .filter_map(|url| candidate_public_https_url(&url))
+        .filter_map(|url| candidate_public_source_url(&url))
         .take(8)
         .collect::<Vec<_>>();
     if let Some(profile) = local_profile.as_ref() {
@@ -2075,7 +1893,7 @@ async fn discover_journal_profile(
             ]
             .into_iter()
             .flatten()
-            .filter_map(|url| candidate_public_https_url(&url)),
+            .filter_map(|url| candidate_public_source_url(&url)),
         );
     }
     source_urls.sort();
@@ -2147,7 +1965,7 @@ async fn discover_journal_profile(
                 candidate
                     .official_homepage_url
                     .as_deref()
-                    .and_then(candidate_public_https_url)
+                    .and_then(candidate_public_source_url)
             }),
         aims_scope_url: local_profile
             .as_ref()
@@ -2156,7 +1974,7 @@ async fn discover_journal_profile(
                 candidate
                     .aims_scope_url
                     .as_deref()
-                    .and_then(candidate_public_https_url)
+                    .and_then(candidate_public_source_url)
             }),
         author_instructions_url: local_profile
             .as_ref()
@@ -2165,7 +1983,7 @@ async fn discover_journal_profile(
                 candidate
                     .author_instructions_url
                     .as_deref()
-                    .and_then(candidate_public_https_url)
+                    .and_then(candidate_public_source_url)
             }),
         source_urls,
         missing_fields: Vec::new(),
@@ -2251,8 +2069,8 @@ fn bounded_candidate_text(value: Option<String>, max_chars: usize) -> Option<Str
         .filter(|value| !value.is_empty())
 }
 
-fn candidate_public_https_url(value: &str) -> Option<String> {
-    public_https_url(value.trim())
+fn candidate_public_source_url(value: &str) -> Option<String> {
+    public_source_url(value.trim())
         .ok()
         .map(|url| url.to_string())
 }
@@ -2369,6 +2187,8 @@ pub fn run() {
             get_submission_target_plan,
             get_journal_requirement_snapshots,
             discover_journal_requirements,
+            get_journal_source_access,
+            cancel_journal_source_access,
             save_manual_journal_requirements,
             export_target_submission_package,
             record_manual_submission,
@@ -2406,9 +2226,8 @@ mod tests {
         discover_instruction_links, dynamic_news_content, hosts_share_official_site,
         html_input_value, html_to_plain_text, institution_rule_model_projection,
         journal_profile_missing_fields, journal_profile_model_projection, normalize_rank_tiers,
-        parse_institution_rule_extraction, parse_journal_profile_candidate, public_https_url,
-        public_source_url, redact_private_values, PublicJournalDirectoryEvidence,
-        PublicJournalRecommendation,
+        parse_institution_rule_extraction, parse_journal_profile_candidate, public_source_url,
+        redact_private_values, PublicJournalDirectoryEvidence, PublicJournalRecommendation,
     };
     use manuscript_core::{
         ArticleTypePreference, JournalMetricScheme, JournalProfileDiscoveryRecord, JournalRegion,
@@ -2614,30 +2433,24 @@ mod tests {
     }
 
     #[test]
-    fn official_page_guard_rejects_private_networks_and_cross_site_links() {
-        assert_eq!(
-            public_https_url("http://journal.example/authors").unwrap_err(),
-            "该期刊官方来源仅提供 HTTP，无法安全自动读取；请粘贴官方作者指南原文"
-        );
-        assert_eq!(
-            public_source_url("https://account@journal.example/authors").unwrap_err(),
-            "官方来源网址不能包含用户名或密码"
-        );
+    fn source_records_preserve_http_but_reject_credentials() {
         assert!(public_source_url("http://journal.example/authors").is_ok());
-        assert!(public_https_url("https://127.0.0.1/authors").is_err());
-        let home = public_https_url("https://journal.example/home").unwrap();
-        let guide = public_https_url("https://www.journal.example/guide-for-authors").unwrap();
-        let unrelated = public_https_url("https://unrelated.example/guide-for-authors").unwrap();
-        assert!(hosts_share_official_site(&home, &guide));
-        assert!(!hosts_share_official_site(&home, &unrelated));
+        assert_eq!(
+            super::candidate_public_source_url(" HTTP://journal.example/authors "),
+            Some("http://journal.example/authors".into())
+        );
+        assert!(public_source_url("https://account@journal.example/authors").is_err());
+        let home = public_source_url("https://journal.example/home").unwrap();
+        let sibling = public_source_url("https://www.journal.example/guide-for-authors").unwrap();
+        assert!(!hosts_share_official_site(&home, &sibling));
     }
 
     #[test]
     fn discovers_same_site_author_guides_and_removes_scripts_from_text() {
-        let base = public_https_url("https://journal.example/home").unwrap();
+        let base = public_source_url("https://journal.example/home").unwrap();
         let html = r#"<html><head><title>Journal</title><script>cover letter required</script></head><body><a href='/guide-for-authors'>Guide</a><a href='https://tracker.example/author-instructions'>Tracker</a><p>A title page is required.</p></body></html>"#;
         let links = discover_instruction_links(&base, html);
-        assert_eq!(links.len(), 1);
+        assert_eq!(links.len(), 2);
         assert_eq!(
             links[0].as_str(),
             "https://journal.example/guide-for-authors"
@@ -2649,7 +2462,7 @@ mod tests {
 
     #[test]
     fn discovers_transliterated_and_anchor_labeled_author_guides() {
-        let base = public_https_url("https://journal.example/").unwrap();
+        let base = public_source_url("https://journal.example/").unwrap();
         let html = r#"<nav><a href='/tougaozhinan'>投稿须知</a><a href='/column/21'>作者指南</a><a href='/current'>摘要</a></nav>"#;
         let links = discover_instruction_links(&base, html);
 

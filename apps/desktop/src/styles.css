@@ -1310,3 +1310,9 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 @media (prefers-reduced-motion: reduce) {
   .material-view-switcher button, .preparation-progress i, .journal-target-point { transition: none; }
 }
+.network-consent.official-source-access { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.network-consent.official-source-access label { align-items: start; font-size: 12px; line-height: 1.6; }
+.official-source-access code { display: block; overflow-wrap: anywhere; white-space: normal; }
+.official-access-result { min-width: 0; grid-column: 1 / -1; margin-top: 12px; }
+.official-access-result ul { padding-left: 20px; }
+.official-access-result li { margin-block: 8px; overflow-wrap: anywhere; }

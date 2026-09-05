@@ -1,5 +1,18 @@
 # ManuscriptDock Development Log
 
+## 2026-09-05 — V0.43 controlled public-source compatibility
+
+- Separated HTTP/HTTPS provenance storage from network permission; retained HTTP model-discovery
+  leads and institution-policy URLs without fetching them.
+- Added HTTPS-first public reading, explicit per-request HTTP and exact-origin consent, validated
+  DNS pinning, IPv6/reserved-address rejection, and shared redirect/size/time/request limits.
+- Replaced link scanning with HTML parsing and added BOM/header/meta charset decoding, including
+  GBK/GB18030. Dynamic public text uses the same controlled GET path.
+- Persisted access outcomes and original/final URLs; incomplete fetches remain manual-review
+  snapshots, and existing immutable snapshots are preserved.
+- Added bilingual consent/error/result surfaces and deterministic network/storage/UI regression
+  coverage. Live public-site checks are separate from the default test suite.
+
 ## 2026-09-04 — V0.42 HTTP-only official-source continuation
 
 - Kept automatic journal-guide discovery HTTPS-only, while routing journals whose official sites

@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.42")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.42" }));
-    expect(brandStatement.getByText("V0.42")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.43")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.43" }));
+    expect(brandStatement.getByText("V0.43")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -127,11 +127,11 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: "打开 nlp-study.pdf" }));
     await user.click(within(screen.getByRole("navigation", { name: "投稿准备主任务" })).getByRole("button", { name: /目标期刊/ }));
-    expect(await screen.findByText("该期刊官网仅提供 HTTP，不能安全自动读取")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "获取官方投稿要求" })).not.toBeInTheDocument();
-    expect(screen.getByText("HTTP 网址只作为来源记录保存；ManuscriptDock 不会访问或上传任何论文资料到该网址。")).toBeVisible();
+    expect(await screen.findByText("当前记录使用 HTTP；授权后先尝试对应的 HTTPS 地址。")).toBeVisible();
+    expect(screen.getByRole("button", { name: "获取官方投稿要求" })).toBeDisabled();
+    expect(screen.getByText("手动粘贴时，HTTP 网址只作为本地来源记录保存，不触发联网。")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "EN" }));
-    expect(screen.getByText("This journal site only provides HTTP and cannot be fetched securely")).toBeVisible();
+    expect(screen.getByText("The recorded URL uses HTTP. After authorization, the corresponding HTTPS URL is tried first.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "中文" }));
 
     expect(screen.getByLabelText("官方来源网址")).toHaveValue(target.homepageUrl);
@@ -1048,7 +1048,7 @@ describe("App", () => {
       if (command === "add_backup_recommended_journal") { const journalId = (args as { journalId: string }).journalId; targetPlan = { ...targetPlan, backups: [...targetPlan.backups, makeTarget(journalId, "backup", targetPlan.backups.length + 1)] }; return Promise.resolve(targetPlan); }
       if (command === "remove_backup_target") { const selectionId = (args as { backupSelectionId: string }).backupSelectionId; targetPlan = { ...targetPlan, backups: targetPlan.backups.filter((target) => target.selectionId !== selectionId) }; return Promise.resolve(targetPlan); }
       if (command === "promote_backup_target") { const selectionId = (args as { backupSelectionId: string }).backupSelectionId; const backup = targetPlan.backups.find((target) => target.selectionId === selectionId); if (!backup) return Promise.reject(new Error("backup fixture missing")); const journalId = backup.journalId as string; targetPlan = { ...targetPlan, primary: makeTarget(journalId, "primary", 0), backups: targetPlan.backups.filter((target) => target.selectionId !== selectionId), updatedUnixMs: Date.UTC(2026,7,30) }; return Promise.resolve(targetPlan); }
-      if (command === "discover_journal_requirements") { const targetSelectionId = (args as { targetSelectionId: string }).targetSelectionId; const snapshot = { schemaVersion: 1, snapshotId: "requirements-1", workspaceId: workspace.id, targetSelectionId, journalId: "dr1", journalName: "国内期刊1", sourceMode: "official_network_fetch", status: "official_sources_captured", sources: [{ url: "https://example.test/journal/guide-for-authors", title: "Guide for authors", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026,7,30), officialHostMatched: true }], requirements: [{ id: "requirement-title-page", category: "title_page", label: "标题页", labelEn: "Title page", obligation: "required", detail: "官方原文含明确义务词", sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "A separate title page is required" }], limitations: [], capturedUnixMs: Date.UTC(2026,7,30), freshUntilUnixMs: Date.UTC(2026,10,30), recordHash: "b".repeat(64), externalTransmission: "author_confirmed_official_source_fetch" }; requirementSnapshots = [snapshot]; return Promise.resolve(snapshot); }
+      if (command === "discover_journal_requirements") { const targetSelectionId = (args as { targetSelectionId: string }).targetSelectionId; const snapshot = { schemaVersion: 1, snapshotId: "requirements-1", workspaceId: workspace.id, targetSelectionId, journalId: "dr1", journalName: "国内期刊1", sourceMode: "official_network_fetch", status: "official_sources_captured", sources: [{ url: "https://example.test/journal/guide-for-authors", title: "Guide for authors", contentHash: "a".repeat(64), capturedUnixMs: Date.UTC(2026,7,30), officialHostMatched: true }], requirements: [{ id: "requirement-title-page", category: "title_page", label: "标题页", labelEn: "Title page", obligation: "required", detail: "官方原文含明确义务词", sourceUrl: "https://example.test/journal/guide-for-authors", evidenceExcerpt: "A separate title page is required" }], limitations: [], capturedUnixMs: Date.UTC(2026,7,30), freshUntilUnixMs: Date.UTC(2026,10,30), recordHash: "b".repeat(64), externalTransmission: "author_confirmed_official_source_fetch" }; requirementSnapshots = [snapshot]; return Promise.resolve({ runId: "fetch-test", snapshot, events: [], pending: [], partial: false, options: { approvedOrigins: [], httpOrigins: [] } }); }
       if (command === "discover_journal_profile") { const targetSelectionId = (args as { targetSelectionId: string }).targetSelectionId; const record = { schemaVersion: 1, discoveryId: `jed-${"1".repeat(20)}`, workspaceId: workspace.id, targetSelectionId, journalId: "dr1", journalName: "国内期刊1", issn: "1234-5678", eissn: null, publisher: "Synthetic Society", scopeSummary: "Publishes computer vision and robotics research.", reportedPrintCirculation: null, averageReviewDays: null, submissionToPublicationDays: 120, publicationFrequency: "monthly", apcStatus: "unknown", openAccessStatus: "hybrid", officialHomepageUrl: "https://example.test/journal", aimsScopeUrl: null, authorInstructionsUrl: null, sourceUrls: ["https://example.test/journal"], missingFields: ["eissn", "reported_print_circulation", "average_review_days"], evidenceStatus: "candidate_requires_official_verification", sourceMode: "configured_model_candidate", providerLabel: "Synthetic AI", model: "synthetic-model", externalTransmission: "author_confirmed_public_journal_identity_only", createdUnixMs: Date.UTC(2026,7,30) }; profileDiscoveries = [record]; return Promise.resolve(record); }
       if (command === "list_journal_recommendations") return Promise.resolve(recommendationRuns);
       if (command === "save_journal_recommendation_profile") { const profile = (args as { profile: Record<string, string> }).profile; return Promise.resolve({ ...profile, schemaVersion: 1, profileId: `jmp-${"a".repeat(20)}`, profileVersion: runCount + 1, workspaceId: workspace.id, savedUnixMs: Date.UTC(2026,7,30), institutionRuleEvidence: { status: "search_required", ruleSetId: null, ruleSetVersion: null, sourceUrls: [], verifiedAt: null, recognizedRankTiers: [], blockedRankTiers: [] }, externalTransmission: "not_performed" }); }
@@ -1115,10 +1115,10 @@ describe("App", () => {
     await user.click(screen.getAllByRole("button", { name: "加入备选支线" })[0]);
     expect(await screen.findByRole("article", { name: /备选投稿支线/ })).toBeVisible();
     const refreshedPrimary = screen.getByRole("article", { name: /当前投稿主线/ });
-    await user.click(within(refreshedPrimary).getByLabelText(/仅本次允许后端访问/));
+    await user.click(within(refreshedPrimary).getByLabelText(/仅本次允许后端读取/));
     await user.click(within(refreshedPrimary).getByRole("button", { name: "获取官方投稿要求" }));
     expect(await within(refreshedPrimary).findByText("已建立期刊专属要求快照")).toBeVisible();
-    expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true });
+    expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true, options: { approvedOrigins: [], httpOrigins: [] } });
     await user.click(screen.getByRole("button", { name: "按要求准备投稿资料" }));
     expect(await screen.findByRole("heading", { name: "按目标期刊组织投稿资料" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "投稿包准备树" })).toBeVisible();

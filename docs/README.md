@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.42 文档
+# 投稿舱 ManuscriptDock V0.43 文档
 
 ## 使用指南
 
@@ -25,6 +25,8 @@
 - [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。
 
 ## 技术与体验
+
+- [官方来源读取与 HTTP 兼容](official-source-access.md)：HTTPS 优先、逐次 HTTP／跨域确认、网络防护、编码兼容及访问记录。
 
 - [仓库结构](repository-structure.md)：活跃源码和未来工具链边界。
 - [MVP 开发计划](mvp-development-plan.md)：可执行切片、里程碑、验收标准和工具链策略。
