@@ -1,5 +1,25 @@
 # ManuscriptDock Development Log
 
+## 2026-09-06 — V0.46 structured declaration requirements
+
+- Separate manuscript statements, attachments, submission-system entries, and author verification.
+  Track obligation, applicability, submission stage, file counts/formats, signatures/stamps, combined-file
+  permissions, source evidence and explicit template links. Retain distinct same-category instructions.
+- Add bilingual requirement editing, author-sourced additions, stage selection and explicit stored-file reuse.
+  Unknown delivery/stage/conditions require review; later-stage documents do not block initial submission.
+- Preserve legacy snapshot serialization and hashes. Store scoped author plans with immutable history;
+  changed requirements invalidate old bindings, and changed attachment content invalidates accuracy confirmation.
+- Enforce required files and official formats in Rust, including scanned declarations. Export preflight excludes
+  obsolete, later-stage and inapplicable files, and exports a scoped plan plus bilingual verification summary.
+- Validation uses synthetic files and sources: extraction, migration, explicit reuse, independent file counts,
+  format limits, combined-file permissions, replacement/deletion/exclusion, stage changes and real local export.
+  Frontend tests cover zh-CN/en editing, missing requirements, failures, uploads and command scope.
+- Computer Use verified the rendered form in English desktop and Chinese narrow layouts with synthetic UI data.
+  Native file-selection dialogs and publisher-side submission were not exercised by this UI fixture.
+- `npm run check` passed: 46 frontend tests, 92 core tests, 34 desktop tests (2 unrelated live-network tests
+  intentionally ignored), typecheck, production build, rustfmt and clippy with warnings denied.
+  `cargo build -p manuscriptdock-desktop` passed. No installer was published or installed.
+
 ## 2026-09-06 — V0.45 automatic journal URL compatibility
 
 - Read the URL's recorded protocol first; retry the alternate protocol once on connection or

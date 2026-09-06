@@ -80,6 +80,9 @@ pub struct JournalRequirementItem {
     pub detail: String,
     pub source_url: String,
     pub evidence_excerpt: String,
+    // Omission preserves the serialized hash of pre-structured immutable snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<crate::DeclarationRequirement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -327,6 +330,16 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
             "著作权转让",
             "修改说明",
             "作者协议",
+            "submission declaration",
+            "copyright transfer",
+            "funding statement",
+            "funding declaration",
+            "资金声明",
+            "ai 使用声明",
+            "ai使用声明",
+            "ai use",
+            "use of ai",
+            "generative ai",
         ],
     },
 ];
@@ -356,7 +369,7 @@ pub fn extract_journal_requirements(
             })
             .take(match pattern.category {
                 JournalRequirementCategory::LengthLimit => 12,
-                JournalRequirementCategory::OtherSupportingFiles => 8,
+                category if crate::declarations::is_declaration_category(category) => 32,
                 _ => 1,
             })
             .collect::<Vec<_>>();
@@ -367,7 +380,7 @@ pub fn extract_journal_requirements(
             } else {
                 (pattern.label.to_owned(), pattern.label_en.to_owned())
             };
-            requirements.push(JournalRequirementItem {
+            let mut item = JournalRequirementItem {
                 id: format!(
                     "requirement-{}{}",
                     category_slug(pattern.category),
@@ -384,10 +397,58 @@ pub fn extract_journal_requirements(
                 detail: obligation_detail(obligation).to_owned(),
                 source_url: document.url.clone(),
                 evidence_excerpt: excerpt,
-            });
+                declaration: None,
+            };
+            item.declaration = crate::declarations::declaration_requirement(&item);
+            if let Some(declaration) = item.declaration.as_mut() {
+                declaration.template_url =
+                    explicit_template_url(&document.text, &item.evidence_excerpt);
+            }
+            for item in crate::declarations::expand_declaration_items(item) {
+                if !requirements
+                    .iter()
+                    .any(|previous: &JournalRequirementItem| {
+                        previous.category == item.category
+                            && previous.label == item.label
+                            && previous.evidence_excerpt == item.evidence_excerpt
+                    })
+                {
+                    requirements.push(item);
+                }
+            }
         }
     }
     (sources, requirements)
+}
+
+fn explicit_template_url(text: &str, evidence: &str) -> Option<String> {
+    for line in text.lines() {
+        let normalized = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        let lower = normalized.to_lowercase();
+        if !normalized.contains(evidence) || !(lower.contains("template") || lower.contains("模板"))
+        {
+            continue;
+        }
+        let urls = normalized
+            .split_whitespace()
+            .filter_map(|token| {
+                let start = token.find("https://").or_else(|| token.find("http://"))?;
+                let url = token[start..].trim_end_matches([
+                    '.', ',', ';', ')', ']', '>', '"', '\'', '。', '，', '；', '）',
+                ]);
+                (url.len() < 2048
+                    && url
+                        .split("://")
+                        .nth(1)
+                        .is_some_and(|host| host.contains('.') && !host.starts_with('/')))
+                .then(|| url.to_owned())
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if urls.len() == 1 {
+            return urls.into_iter().next();
+        }
+    }
+    None
 }
 
 fn find_evidence_excerpts(text: &str, keywords: &[&str]) -> Vec<String> {
@@ -725,6 +786,44 @@ mod tests {
     }
 
     #[test]
+    fn retains_distinct_declaration_instructions_and_explicit_template_links() {
+        let text = "At submission authors must include a conflict of interest statement in the manuscript. After acceptance authors must upload a signed conflict of interest statement using the template https://publisher.example/coi.pdf\nAt submission authors must provide a funding declaration in the manuscript.";
+        let document = JournalRequirementSourceDocument {
+            url: "https://publisher.example/guide".into(),
+            title: "Synthetic instructions".into(),
+            text: text.into(),
+            official_host_matched: true,
+        };
+        let (_, requirements) = extract_journal_requirements(&[document.clone(), document], 1000);
+        let conflicts = requirements
+            .iter()
+            .filter(|item| item.category == JournalRequirementCategory::ConflictOfInterest)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            conflicts.len(),
+            2,
+            "retain distinct instructions, deduplicate repeated source text"
+        );
+        assert_eq!(
+            conflicts[1]
+                .declaration
+                .as_ref()
+                .unwrap()
+                .template_url
+                .as_deref(),
+            Some("https://publisher.example/coi.pdf")
+        );
+        assert_eq!(
+            conflicts[1].declaration.as_ref().unwrap().stage,
+            crate::SubmissionStage::Accepted
+        );
+        assert!(requirements
+            .iter()
+            .any(|item| item.label_en == "Funding statement"));
+        assert!(super::explicit_template_url("Authors must use the template at https://one.example/form and https://two.example/form", "Authors must use the template").is_none());
+    }
+
+    #[test]
     fn extracts_only_explicit_requirements_from_crad_author_guidance() {
         let documents = vec![JournalRequirementSourceDocument {
             url: "https://crad.example/tougaozhinan".to_owned(),
@@ -751,7 +850,7 @@ mod tests {
                 .iter()
                 .filter(|item| item.category == JournalRequirementCategory::OtherSupportingFiles)
                 .count(),
-            2
+            3
         );
         assert!(!requirements.iter().any(|item| matches!(
             item.category,

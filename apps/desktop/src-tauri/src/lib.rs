@@ -707,7 +707,10 @@ async fn add_submission_materials(
         ),
         SubmissionMaterialKind::Declaration => (
             "声明文件 / Declaration documents",
-            &["doc", "docx", "odt", "rtf", "tex", "pdf", "txt"],
+            &[
+                "doc", "docx", "odt", "rtf", "tex", "pdf", "txt", "png", "jpg", "jpeg", "tif",
+                "tiff",
+            ],
         ),
         SubmissionMaterialKind::Supplementary => (
             "补充材料 / Supplementary files",
@@ -915,6 +918,17 @@ async fn confirm_submission_requirement(
     let root = workspace_root(&app)?;
     WorkspaceStore::new(root)
         .confirm_submission_requirement(&workspace_id, &item_id, confirmed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_declaration_plan(
+    workspace_id: String,
+    update: manuscript_core::DeclarationPlanUpdate,
+    app: AppHandle,
+) -> Result<SubmissionMaterialCatalog, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .update_declaration_plan(&workspace_id, update)
         .map_err(|error| error.to_string())
 }
 
@@ -2203,6 +2217,7 @@ pub fn run() {
             get_submission_materials,
             get_target_submission_package_plan,
             confirm_submission_requirement,
+            update_declaration_plan,
             select_recommended_journal,
             add_backup_recommended_journal,
             remove_backup_target,

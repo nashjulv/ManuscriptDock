@@ -259,7 +259,38 @@ export const OFFICIAL_SOURCE_MESSAGES: Record<string, [string, string]> = {
   OFFICIAL_AUDIT_FAILED: ["无法保存或读取访问记录，请检查本地存储后重试。", "The access record could not be saved or read. Check local storage and retry."],
 };
 
+export const DECLARATION_MESSAGES: Record<string, [string, string]> = {
+  DECLARATION_TARGET_REQUIRED: ["请先核验当前稿件的目标期刊与官方要求。", "Verify the current manuscript's target journal and official requirements first."],
+  DECLARATION_INVALID_UPDATE: ["请填写完整的声明要求、有效来源地址和核验依据，并检查文件数量与格式。", "Complete the declaration, valid source URL, and verification note; check the file count and formats."],
+  DECLARATION_FORMAT_NOT_ALLOWED: ["文件格式不符合此项官方要求，请按限定格式重新选择。", "This file format does not meet this official requirement. Choose an allowed format."],
+  DECLARATION_SHARING_NOT_ALLOWED: ["此处需要独立文件。跨要求共用文件必须双方均明确允许合并；同一要求中的多个独立文件项不能重复使用相同内容。", "A distinct file is required. Sharing across requirements needs explicit combined-file permission from both; independent file slots within one requirement cannot reuse identical content."],
+  DECLARATION_SUPPORTED_FORMATS: ["声明支持 Word、PDF、文本及 PNG、JPG、TIFF 扫描件；具体格式以官方要求为准。", "Declarations support Word, PDF, text, and PNG, JPG, or TIFF scans; official format restrictions still apply."],
+  DECLARATION_ATTACHMENT: ["提供此项要求的独立附件；作者确认不能替代文件。", "Provide the required attachment; author confirmation does not replace the file."],
+  DECLARATION_MANUSCRIPT: ["核验当前主稿中已包含所需声明。", "Verify that the current manuscript contains the required statement."],
+  DECLARATION_SUBMISSION_SYSTEM: ["准备好投稿系统所需填写的声明内容，并按官方流程填写。", "Prepare the declaration content for entry in the publisher's submission system and follow its official workflow."],
+  DECLARATION_ATTESTATION: ["核验声明真实、完整，并检查要求的签字与盖章。", "Verify accuracy, completeness, and all required signatures and stamps."],
+  DECLARATION_REVIEW: ["提交方式、适用条件或阶段尚不明确，请在声明要求管理中补充核验。", "Delivery, applicability, or stage is unresolved. Verify it in Declaration requirements."],
+  DECLARATION_DELIVERY_MANUSCRIPT: ["写入正文", "In the manuscript"],
+  DECLARATION_DELIVERY_ATTACHMENT: ["独立附件", "Separate attachment"],
+  DECLARATION_DELIVERY_SUBMISSION_SYSTEM: ["投稿系统填写", "Submission system entry"],
+  DECLARATION_DELIVERY_UNKNOWN: ["待核验", "Needs verification"],
+  DECLARATION_STAGE_INITIAL: ["初次投稿", "Initial submission"],
+  DECLARATION_STAGE_REVISION: ["返修", "Revision"],
+  DECLARATION_STAGE_ACCEPTED: ["录用后", "After acceptance"],
+  DECLARATION_STAGE_UNKNOWN: ["待核验", "Needs verification"],
+};
+
 export function localizeBackendText(locale: Locale, value: string) {
+  if (value.startsWith("DECLARATION_CHECK:")) {
+    try {
+      const pair: unknown = JSON.parse(value.slice("DECLARATION_CHECK:".length));
+      if (Array.isArray(pair) && pair.length === 2 && pair.every(item => typeof item === "string")) return pair[locale === "zh-CN" ? 0 : 1] as string;
+    } catch { /* Malformed records use the regular fallback below. */ }
+  }
+  const declaration = DECLARATION_MESSAGES[value.replace(/^投稿材料无效：/, "")];
+  if (declaration) return declaration[locale === "zh-CN" ? 0 : 1];
+  const declarationWithFile = value.replace(/^投稿材料无效：/, "").match(/^(.*)：(DECLARATION_[A-Z_]+)$/);
+  if (declarationWithFile && DECLARATION_MESSAGES[declarationWithFile[2]]) return `${declarationWithFile[1]}: ${DECLARATION_MESSAGES[declarationWithFile[2]][locale === "zh-CN" ? 0 : 1]}`;
   const official = OFFICIAL_SOURCE_MESSAGES[value];
   if (official) return official[locale === "zh-CN" ? 0 : 1];
   if (locale === "zh-CN" || value.trim() === "") return value;

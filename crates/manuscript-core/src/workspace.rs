@@ -39,6 +39,10 @@ use crate::{
     RevisionChangeInput, RevisionDraft, RevisionError, RevisionSet, StructureReport,
     MAX_MANUSCRIPT_SIZE_BYTES,
 };
+use crate::{
+    DeclarationApplicability, DeclarationDelivery, DeclarationPlan, DeclarationPlanUpdate,
+    DeclarationRequirement, SubmissionStage,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -264,6 +268,9 @@ pub struct SubmissionMaterialChecklistItem {
     pub fresh_until_unix_ms: Option<u64>,
     pub required_count: usize,
     pub matched_material_ids: Vec<String>,
+    pub declaration: Option<DeclarationRequirement>,
+    pub declaration_requirement_id: Option<String>,
+    pub declaration_action: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -283,6 +290,7 @@ pub struct SubmissionMaterialCatalog {
     pub required_completed: usize,
     pub detected_figure_count: u32,
     pub detected_table_count: u32,
+    pub declaration_plan: Option<DeclarationPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -366,6 +374,8 @@ pub struct TargetSubmissionPackageFile {
     pub material_kind: Option<SubmissionMaterialKind>,
     pub checklist_item_id: Option<String>,
     pub checklist_label: Option<String>,
+    pub checklist_label_en: Option<String>,
+    pub inclusion_available: bool,
     pub required: bool,
     pub included: bool,
     pub size_bytes: u64,
@@ -671,6 +681,8 @@ struct StoredSubmissionMaterialCatalog {
     materials: Vec<StoredSubmissionMaterial>,
     #[serde(default)]
     confirmations: Vec<StoredSubmissionRequirementConfirmation>,
+    #[serde(default)]
+    declaration_plans: Vec<DeclarationPlan>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -2049,7 +2061,7 @@ impl WorkspaceStore {
             .checklist
             .iter()
             .filter(|item| item.blocking && item.status != "passed")
-            .map(|item| format!("{}：{}", item.label, item.detail))
+            .map(submission_checklist_message)
             .collect::<Vec<_>>();
         if target.selected_against_manuscript_version != manifest.workspace.snapshot_version {
             blockers.push("目标期刊不是基于当前稿件版本选择".to_owned());
@@ -2065,7 +2077,7 @@ impl WorkspaceStore {
             .checklist
             .iter()
             .filter(|item| !item.blocking && item.status != "passed")
-            .map(|item| format!("{}：{}", item.label, item.detail))
+            .map(submission_checklist_message)
             .collect::<Vec<_>>();
         let snapshot_id = requirement_snapshot
             .as_ref()
@@ -2102,6 +2114,8 @@ impl WorkspaceStore {
                 material_kind: None,
                 checklist_item_id: Some("main-manuscript".to_owned()),
                 checklist_label: Some("当前主稿".to_owned()),
+                checklist_label_en: Some("Current manuscript".to_owned()),
+                inclusion_available: false,
                 required: true,
                 included: true,
                 size_bytes: manifest.workspace.manuscript.size_bytes,
@@ -2145,6 +2159,36 @@ impl WorkspaceStore {
                 }
                 format!("submission/{category}/{exported_name}")
             };
+            let relative_path = if material.included
+                && checklist.is_some_and(|item| {
+                    !matches!(item.status.as_str(), "later" | "not_applicable")
+                        && item
+                            .declaration
+                            .as_ref()
+                            .is_some_and(|declaration| declaration.shared_file_allowed)
+                }) {
+                files
+                    .iter()
+                    .find(|file| {
+                        file.included
+                            && file.content_hash == material.content_hash
+                            && file
+                                .relative_path
+                                .ends_with(&format!(".{}", material.extension))
+                            && file
+                                .checklist_item_id
+                                .as_deref()
+                                .and_then(|id| checklist_by_id.get(id))
+                                .is_some_and(|item| {
+                                    item.declaration
+                                        .as_ref()
+                                        .is_some_and(|declaration| declaration.shared_file_allowed)
+                                })
+                    })
+                    .map_or(relative_path.clone(), |file| file.relative_path.clone())
+            } else {
+                relative_path
+            };
             for issue in &material.validation_issues {
                 warnings.push(format!("{}：{}", material.original_name, issue));
             }
@@ -2156,8 +2200,15 @@ impl WorkspaceStore {
                 material_kind: Some(material.kind),
                 checklist_item_id: material.checklist_item_id.clone(),
                 checklist_label: checklist.map(|item| item.label.clone()),
+                checklist_label_en: checklist.map(|item| item.label_en.clone()),
+                inclusion_available: checklist.is_some_and(|item| {
+                    !matches!(item.status.as_str(), "later" | "not_applicable")
+                }),
                 required: checklist.is_some_and(|item| item.blocking),
-                included: material.included,
+                included: material.included
+                    && checklist.is_some_and(|item| {
+                        !matches!(item.status.as_str(), "later" | "not_applicable")
+                    }),
                 size_bytes: material.size_bytes,
                 content_hash: material.content_hash.clone(),
                 validation_status: if material.validation_status.is_empty() {
@@ -2297,6 +2348,11 @@ impl WorkspaceStore {
         };
         let mut stored = read_stored_submission_materials(&workspace_root)?;
         let mut selected_names = BTreeSet::new();
+        let declaration = current_catalog
+            .checklist
+            .iter()
+            .find(|item| item.id == resolved_item_id)
+            .and_then(|item| item.declaration.as_ref());
         for path in paths {
             if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
                 let normalized = name.trim().to_lowercase();
@@ -2363,6 +2419,14 @@ impl WorkspaceStore {
                 .ok_or_else(|| {
                     WorkspaceError::InvalidSubmissionMaterial("文件缺少扩展名".to_owned())
                 })?;
+            if declaration.is_some_and(|declaration| {
+                !declaration.allowed_extensions.is_empty()
+                    && !declaration.allowed_extensions.contains(&extension)
+            }) {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_FORMAT_NOT_ALLOWED".into(),
+                ));
+            }
             if !is_allowed_submission_material_extension(&extension) {
                 return Err(WorkspaceError::InvalidSubmissionMaterial(format!(
                     "不支持 .{extension} 文件"
@@ -2391,6 +2455,40 @@ impl WorkspaceStore {
                     original_name,
                     validation.issues.join("；")
                 )));
+            }
+            if let Some(declaration) = declaration {
+                let incompatible = stored
+                    .materials
+                    .iter()
+                    .filter(|existing| {
+                        existing.material.content_hash == content_hash && existing.material.included
+                    })
+                    .any(|existing| {
+                        current_catalog.checklist.iter().any(|item| {
+                            item.id != resolved_item_id
+                                && item
+                                    .matched_material_ids
+                                    .contains(&existing.material.material_id)
+                                && item.declaration.as_ref().is_some_and(|other| {
+                                    !declaration.shared_file_allowed
+                                        || !other.shared_file_allowed
+                                        || current_catalog
+                                            .checklist
+                                            .iter()
+                                            .find(|target| target.id == resolved_item_id)
+                                            .is_some_and(|target| {
+                                                target.declaration_requirement_id
+                                                    == item.declaration_requirement_id
+                                            })
+                                })
+                        })
+                    });
+                if incompatible {
+                    let _ = fs::remove_file(&destination);
+                    return Err(WorkspaceError::InvalidSubmissionMaterial(
+                        "DECLARATION_SHARING_NOT_ALLOWED".into(),
+                    ));
+                }
             }
             if stored.materials.iter().any(|item| {
                 item.material.content_hash == content_hash
@@ -2577,6 +2675,200 @@ impl WorkspaceStore {
             "submission_material_deleted",
             &manifest.workspace,
             updated_unix_ms,
+        )?;
+        self.submission_materials(workspace_id)
+    }
+
+    pub fn update_declaration_plan(
+        &self,
+        workspace_id: &str,
+        update: DeclarationPlanUpdate,
+    ) -> Result<SubmissionMaterialCatalog, WorkspaceError> {
+        let (root, manifest) = self.workspace_for_management(workspace_id, false)?;
+        let catalog = self.submission_materials(workspace_id)?;
+        if !catalog.target_verified {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "DECLARATION_TARGET_REQUIRED".into(),
+            ));
+        }
+        let mut plan = catalog
+            .declaration_plan
+            .clone()
+            .ok_or(WorkspaceError::InvalidJournalRequirementSource)?;
+        if update.manuscript_version != plan.manuscript_version
+            || update.target_selection_id != plan.target_selection_id
+            || update.requirement_snapshot_id != plan.requirement_snapshot_id
+        {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "DECLARATION_TARGET_REQUIRED".into(),
+            ));
+        }
+        if let Some(material_id) = update.material_id {
+            if update.requirement.is_some() || update.stage.is_some() {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            }
+            let item_id = update.checklist_item_id.ok_or_else(|| {
+                WorkspaceError::InvalidSubmissionMaterial("DECLARATION_INVALID_UPDATE".into())
+            })?;
+            let destination = catalog
+                .checklist
+                .iter()
+                .find(|item| {
+                    item.id == item_id
+                        && item.declaration_action.as_deref() == Some("attachment")
+                        && item.status != "not_applicable"
+                })
+                .ok_or_else(|| {
+                    WorkspaceError::InvalidSubmissionMaterial("DECLARATION_INVALID_UPDATE".into())
+                })?;
+            let stored = read_stored_submission_materials(&root)?;
+            let source = stored
+                .materials
+                .iter()
+                .find(|item| item.material.material_id == material_id)
+                .ok_or_else(|| {
+                    WorkspaceError::InvalidSubmissionMaterial("DECLARATION_INVALID_UPDATE".into())
+                })?;
+            // Reuse is an explicit import into the current scope; history is never rebound in place.
+            let path = resolve_submission_material_path(&root, source)?;
+            return self.add_submission_materials_for_requirement(
+                workspace_id,
+                destination
+                    .material_kind
+                    .unwrap_or(SubmissionMaterialKind::Declaration),
+                Some(&destination.id),
+                &[path],
+            );
+        }
+        if update.checklist_item_id.is_some() {
+            return Err(WorkspaceError::InvalidSubmissionMaterial(
+                "DECLARATION_INVALID_UPDATE".into(),
+            ));
+        }
+        if let Some(stage) = update.stage {
+            if stage == SubmissionStage::Unknown {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            }
+            plan.stage = stage;
+        }
+        if let Some(mut requirement) = update.requirement {
+            let valid_url = |url: &str| {
+                (url.starts_with("https://") || url.starts_with("http://"))
+                    && url.len() <= 2048
+                    && !url.chars().any(char::is_whitespace)
+                    && url
+                        .split("://")
+                        .nth(1)
+                        .is_some_and(|host| !host.is_empty() && !host.starts_with('/'))
+            };
+            let Some(declaration) = requirement.declaration.as_mut() else {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            };
+            if requirement.label.trim().is_empty()
+                || requirement.label.len() > 240
+                || requirement.label_en.trim().is_empty()
+                || requirement.label_en.len() > 240
+                || !crate::declarations::is_declaration_category(requirement.category)
+                || !valid_url(&requirement.source_url)
+                || requirement.evidence_excerpt.trim().len() < 12
+                || requirement.evidence_excerpt.len() > 8000
+                || declaration
+                    .author_note
+                    .as_ref()
+                    .is_none_or(|note| note.trim().len() < 4 || note.len() > 4000)
+                || declaration
+                    .condition
+                    .as_ref()
+                    .is_some_and(|condition| condition.len() > 4000)
+                || declaration.delivery.is_empty()
+                || declaration.delivery.len() > 4
+                || declaration.file_count == 0
+                || declaration.file_count > 20
+                || declaration.allowed_extensions.len() > 12
+                || declaration.allowed_extensions.iter().any(|extension| {
+                    !is_allowed_submission_material_kind_extension(
+                        crate::declarations::declaration_material_kind(requirement.category),
+                        extension,
+                    )
+                })
+                || declaration
+                    .template_url
+                    .as_ref()
+                    .is_some_and(|url| !valid_url(url))
+            {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            }
+            let mut seen = Vec::new();
+            declaration.delivery.retain(|delivery| {
+                if seen.contains(delivery) {
+                    false
+                } else {
+                    seen.push(*delivery);
+                    true
+                }
+            });
+            if declaration.delivery.len() > 1
+                && declaration.delivery.contains(&DeclarationDelivery::Unknown)
+            {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            }
+            if requirement.id.is_empty() {
+                requirement.id = format!("requirement-manual-{}", Uuid::new_v4());
+            } else if !plan
+                .requirements
+                .iter()
+                .any(|previous| previous.id == requirement.id)
+            {
+                return Err(WorkspaceError::InvalidSubmissionMaterial(
+                    "DECLARATION_INVALID_UPDATE".into(),
+                ));
+            }
+            if let Some(previous) = plan
+                .requirements
+                .iter_mut()
+                .find(|previous| previous.id == requirement.id)
+            {
+                // Keep captured source evidence immutable. Author interpretation has its own note.
+                if !requirement.id.starts_with("requirement-manual-") {
+                    requirement.source_url = previous.source_url.clone();
+                    requirement.evidence_excerpt = previous.evidence_excerpt.clone();
+                }
+                *previous = requirement;
+            } else {
+                plan.requirements.push(requirement);
+            }
+        }
+        let mut stored = read_stored_submission_materials(&root)?;
+        stored.declaration_plans.retain(|previous| {
+            !(previous.manuscript_version == plan.manuscript_version
+                && previous.target_selection_id == plan.target_selection_id
+                && previous.requirement_snapshot_id == plan.requirement_snapshot_id)
+        });
+        let change_id = Uuid::new_v4().to_string();
+        write_immutable_record(
+            &root.join("materials").join("declaration-history"),
+            &change_id,
+            "plan.json",
+            &plan,
+        )?;
+        stored.declaration_plans.push(plan);
+        stored.updated_unix_ms = material_change_unix_ms(&root, &manifest.workspace)?;
+        write_or_replace_json(&root.join("materials").join("catalog.json"), &stored)?;
+        append_audit_event(
+            &root.join("audit.jsonl"),
+            "declaration_plan_updated",
+            &manifest.workspace,
+            stored.updated_unix_ms,
         )?;
         self.submission_materials(workspace_id)
     }
@@ -3470,6 +3762,7 @@ impl WorkspaceStore {
         fs::create_dir_all(&records_root)?;
         let warnings = package_plan.warnings.clone();
         let result = (|| {
+            let mut written_paths = BTreeSet::new();
             for planned_file in package_plan.files.iter().filter(|file| file.included) {
                 let source = if let Some(material_id) = planned_file.material_id.as_deref() {
                     let stored = stored_materials
@@ -3489,6 +3782,9 @@ impl WorkspaceStore {
                     verify_snapshot(&source, &manifest.workspace)?;
                     source
                 };
+                if !written_paths.insert(planned_file.relative_path.clone()) {
+                    continue;
+                }
                 let destination = temporary_root.join(&planned_file.relative_path);
                 if let Some(parent) = destination.parent() {
                     fs::create_dir_all(parent)?;
@@ -3519,6 +3815,30 @@ impl WorkspaceStore {
                 &records_root.join("package-manifest.json"),
                 &package_manifest,
             )?;
+            write_json(
+                &records_root.join("declaration-plan.json"),
+                &self.submission_materials(workspace_id)?.declaration_plan,
+            )?;
+            let declaration_catalog = self.submission_materials(workspace_id)?;
+            let stage = match declaration_catalog
+                .declaration_plan
+                .as_ref()
+                .map(|plan| plan.stage)
+            {
+                Some(SubmissionStage::Revision) => "返修 / Revision",
+                Some(SubmissionStage::Accepted) => "录用后 / After acceptance",
+                _ => "初次投稿 / Initial submission",
+            };
+            let mut summary = format!("声明要求核验记录 / Declaration verification record\n当前阶段 / Current stage: {stage}\n仅供本地留档，请按期刊要求提交文件。\nLocal record only; submit files according to the journal instructions.\n\n");
+            for item in declaration_catalog
+                .checklist
+                .iter()
+                .filter(|item| item.declaration.is_some())
+            {
+                summary.push_str(&declaration_check_summary(item).join("\n"));
+                summary.push_str(&format!("\n文件 / Files: {}/{}\n来源 / Source: {}\n原文 / Evidence: {}\n核验依据 / Verification note: {}\n\n", item.matched_material_ids.len(), item.required_count, item.source_url.as_deref().unwrap_or(""), item.evidence_excerpt.as_deref().unwrap_or(""), item.declaration.as_ref().and_then(|declaration| declaration.author_note.as_deref()).unwrap_or("")));
+            }
+            write_text(&records_root.join("declaration-summary.txt"), &summary)?;
             write_text(
                 &temporary_root.join("README.txt"),
                 &format!(
@@ -3537,6 +3857,8 @@ impl WorkspaceStore {
                 .iter()
                 .filter(|file| file.included)
                 .map(|file| file.relative_path.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect::<Vec<_>>();
             exported_files.push("records/target-selection.json".to_owned());
             if records_root.join("readiness-report.json").is_file() {
@@ -3546,6 +3868,8 @@ impl WorkspaceStore {
                 exported_files.push("records/journal-requirements.json".to_owned());
             }
             exported_files.push("records/package-manifest.json".to_owned());
+            exported_files.push("records/declaration-plan.json".to_owned());
+            exported_files.push("records/declaration-summary.txt".to_owned());
             exported_files.push("README.txt".to_owned());
             fs::rename(&temporary_root, &final_root)?;
             append_audit_event(
@@ -4917,9 +5241,22 @@ fn is_allowed_submission_material_kind_extension(
                     | "rtf"
             )
         }
-        SubmissionMaterialKind::CoverLetter
-        | SubmissionMaterialKind::TitlePage
-        | SubmissionMaterialKind::Declaration => {
+        SubmissionMaterialKind::Declaration => matches!(
+            extension,
+            "doc"
+                | "docx"
+                | "odt"
+                | "rtf"
+                | "tex"
+                | "pdf"
+                | "txt"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "tif"
+                | "tiff"
+        ),
+        SubmissionMaterialKind::CoverLetter | SubmissionMaterialKind::TitlePage => {
             matches!(
                 extension,
                 "doc" | "docx" | "odt" | "rtf" | "tex" | "pdf" | "txt"
@@ -4946,9 +5283,8 @@ fn submission_material_kind_extension_help(kind: SubmissionMaterialKind) -> &'st
         SubmissionMaterialKind::Bibliography => {
             "参考文献栏只接受 BIB、BBL、RIS、NBIB、ENW、XML、Word、RTF 或 TXT"
         }
-        SubmissionMaterialKind::CoverLetter
-        | SubmissionMaterialKind::TitlePage
-        | SubmissionMaterialKind::Declaration => {
+        SubmissionMaterialKind::Declaration => "DECLARATION_SUPPORTED_FORMATS",
+        SubmissionMaterialKind::CoverLetter | SubmissionMaterialKind::TitlePage => {
             "该文档栏只接受 DOC、DOCX、ODT、RTF、TEX、PDF 或 TXT"
         }
         SubmissionMaterialKind::Supplementary | SubmissionMaterialKind::Other => {
@@ -5251,6 +5587,7 @@ fn read_stored_submission_materials(
             updated_unix_ms: 0,
             materials: Vec::new(),
             confirmations: Vec::new(),
+            declaration_plans: Vec::new(),
         });
     }
     let catalog: StoredSubmissionMaterialCatalog = read_json(&path)?;
@@ -5519,6 +5856,42 @@ fn build_submission_material_catalog(
     recommendation_ready: bool,
     now_unix_ms: u64,
 ) -> SubmissionMaterialCatalog {
+    let declaration_plan = target.zip(journal_requirements).map(|(target, snapshot)| {
+        let saved = stored.declaration_plans.iter().rev().find(|plan| {
+            plan.manuscript_version == workspace.snapshot_version
+                && plan.target_selection_id == target.selection_id
+                && plan.requirement_snapshot_id == snapshot.snapshot_id
+        });
+        let mut requirements = snapshot
+            .requirements
+            .iter()
+            .filter_map(|item| {
+                let mut item = item.clone();
+                item.declaration = crate::declarations::declaration_requirement(&item);
+                item.declaration.as_ref()?;
+                Some(item)
+            })
+            .collect::<Vec<_>>();
+        if let Some(saved) = saved {
+            for item in &saved.requirements {
+                if let Some(previous) = requirements
+                    .iter_mut()
+                    .find(|previous| previous.id == item.id)
+                {
+                    *previous = item.clone();
+                } else {
+                    requirements.push(item.clone());
+                }
+            }
+        }
+        DeclarationPlan {
+            manuscript_version: workspace.snapshot_version,
+            target_selection_id: target.selection_id.clone(),
+            requirement_snapshot_id: snapshot.snapshot_id.clone(),
+            stage: saved.map_or(SubmissionStage::Initial, |plan| plan.stage),
+            requirements,
+        }
+    });
     let matching_material_ids = |item_id: &str, kind| {
         stored
             .materials
@@ -5621,6 +5994,9 @@ fn build_submission_material_catalog(
     }
     if let Some(snapshot) = journal_requirements.filter(|_| requirements_current) {
         for requirement in &snapshot.requirements {
+            if crate::declarations::is_declaration_category(requirement.category) {
+                continue;
+            }
             let id = format!(
                 "journal-{}",
                 requirement
@@ -5926,6 +6302,148 @@ fn build_submission_material_catalog(
             checklist.push(item);
         }
     }
+    if let (Some(plan), Some(snapshot)) = (
+        declaration_plan.as_ref().filter(|_| requirements_current),
+        journal_requirements,
+    ) {
+        for requirement in &plan.requirements {
+            let Some(declaration) = requirement.declaration.as_ref() else {
+                continue;
+            };
+            let fingerprint = hex::encode(Sha256::digest(
+                serde_json::to_vec(requirement).expect("serializable declaration"),
+            ));
+            let base = format!("declaration-{}-{}", requirement.id, &fingerprint[..12]);
+            let material_kind =
+                crate::declarations::declaration_material_kind(requirement.category);
+            let applicable = declaration.applicability != DeclarationApplicability::NotApplicable;
+            let due = declaration.stage.is_due(plan.stage);
+            let blocking = applicable
+                && due
+                && requirement.obligation != JournalRequirementObligation::Recommended;
+            let unresolved = declaration.applicability == DeclarationApplicability::NeedsReview
+                || requirement.obligation == JournalRequirementObligation::Verify
+                || declaration.stage == SubmissionStage::Unknown
+                || declaration.delivery.contains(&DeclarationDelivery::Unknown);
+            let mut actions = declaration
+                .delivery
+                .iter()
+                .map(|delivery| match delivery {
+                    DeclarationDelivery::Attachment => "attachment",
+                    DeclarationDelivery::Manuscript => "manuscript",
+                    DeclarationDelivery::SubmissionSystem => "submission_system",
+                    DeclarationDelivery::Unknown => "review",
+                })
+                .collect::<Vec<_>>();
+            if unresolved && !actions.contains(&"review") {
+                actions.push("review");
+            }
+            if !actions.contains(&"review") {
+                actions.push("attestation");
+            }
+            let attachment_id = |index: usize| {
+                if declaration.file_count == 1 {
+                    format!("{base}-attachment")
+                } else {
+                    format!("{base}-attachment-{index}")
+                }
+            };
+            let actions = actions.into_iter().flat_map(|action| {
+                if action == "attachment" {
+                    (1..=declaration.file_count)
+                        .map(|index| (action, index))
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![(action, 0)]
+                }
+            });
+            for (action, index) in actions {
+                let id = if action == "attestation"
+                    && declaration
+                        .delivery
+                        .contains(&DeclarationDelivery::Attachment)
+                {
+                    let ids = (1..=declaration.file_count)
+                        .flat_map(|index| {
+                            matching_material_ids(&attachment_id(index), material_kind)
+                        })
+                        .collect::<Vec<_>>();
+                    let mut hashes = stored
+                        .materials
+                        .iter()
+                        .filter(|item| ids.contains(&item.material.material_id))
+                        .map(|item| item.material.content_hash.as_str())
+                        .collect::<Vec<_>>();
+                    hashes.sort_unstable();
+                    let files_hash = hex::encode(Sha256::digest(hashes.join(":")));
+                    format!("{base}-{action}-{}", &files_hash[..12])
+                } else if action == "attachment" {
+                    attachment_id(index)
+                } else {
+                    format!("{base}-{action}")
+                };
+                let mut item = if action == "attachment" {
+                    let matched = matching_material_ids(&id, material_kind)
+                        .into_iter()
+                        .filter(|material_id| {
+                            stored.materials.iter().any(|stored| {
+                                stored.material.material_id == *material_id
+                                    && (declaration.allowed_extensions.is_empty()
+                                        || declaration
+                                            .allowed_extensions
+                                            .contains(&stored.material.extension))
+                            })
+                        })
+                        .collect();
+                    file_submission_checklist_item(
+                        &id,
+                        &requirement.label,
+                        "declarations",
+                        blocking,
+                        matched,
+                        1,
+                        material_kind,
+                        "DECLARATION_ATTACHMENT".into(),
+                        Some(requirement),
+                        Some(snapshot),
+                    )
+                } else {
+                    let mut item = confirmable_submission_checklist_item(
+                        &id,
+                        &requirement.label,
+                        "declarations",
+                        blocking,
+                        confirmed(&id),
+                        format!("DECLARATION_{}", action.to_uppercase()),
+                        "author",
+                        requirement,
+                        snapshot,
+                    );
+                    item.confirmable = action != "review" && applicable && due;
+                    if action == "review" {
+                        item.verification = "manual".into();
+                        item.status = "manual_verification".into();
+                    }
+                    item
+                };
+                if !applicable {
+                    item.status = "not_applicable".into();
+                    item.confirmable = false;
+                } else if !due {
+                    item.status = "later".into();
+                    item.confirmable = false;
+                }
+                item.declaration = Some(declaration.clone());
+                if action == "attachment" && declaration.file_count > 1 {
+                    item.label = format!("{} · 文件 {index}", requirement.label);
+                    item.label_en = format!("{} · File {index}", requirement.label_en);
+                }
+                item.declaration_requirement_id = Some(requirement.id.clone());
+                item.declaration_action = Some(action.into());
+                checklist.push(item);
+            }
+        }
+    }
     let required_total = checklist.iter().filter(|item| item.blocking).count();
     let required_completed = checklist
         .iter()
@@ -5970,6 +6488,46 @@ fn build_submission_material_catalog(
         required_completed,
         detected_figure_count: structure.map_or(0, |report| report.figure_count),
         detected_table_count: structure.map_or(0, |report| report.table_count),
+        declaration_plan,
+    }
+}
+
+fn declaration_check_summary(item: &SubmissionMaterialChecklistItem) -> [String; 2] {
+    let action = match item.declaration_action.as_deref() {
+        Some("attachment") => ["独立附件", "Separate attachment"],
+        Some("manuscript") => ["正文声明", "Manuscript statement"],
+        Some("submission_system") => ["投稿系统填写", "Submission system entry"],
+        Some("attestation") => [
+            "真实性、签字与盖章核验",
+            "Accuracy, signatures and stamp verification",
+        ],
+        _ => [
+            "核验提交方式、条件与阶段",
+            "Verify delivery, applicability and stage",
+        ],
+    };
+    let status = match item.status.as_str() {
+        "passed" => ["已完成", "Complete"],
+        "later" => ["后续阶段", "Later stage"],
+        "not_applicable" => ["不适用", "Not applicable"],
+        "missing" => ["缺少文件", "Files missing"],
+        "recommended" => ["按需准备", "Prepare as needed"],
+        _ => ["待核验", "Needs verification"],
+    };
+    [
+        format!("{}：{} · {}", item.label, action[0], status[0]),
+        format!("{}: {} · {}", item.label_en, action[1], status[1]),
+    ]
+}
+
+fn submission_checklist_message(item: &SubmissionMaterialChecklistItem) -> String {
+    if item.declaration.is_some() {
+        format!(
+            "DECLARATION_CHECK:{}",
+            serde_json::to_string(&declaration_check_summary(item)).expect("serializable message")
+        )
+    } else {
+        format!("{}：{}", item.label, item.detail)
     }
 }
 
@@ -6004,6 +6562,9 @@ fn static_submission_checklist_item(
         fresh_until_unix_ms: None,
         required_count: 0,
         matched_material_ids: Vec::new(),
+        declaration: None,
+        declaration_requirement_id: None,
+        declaration_action: None,
     }
 }
 
@@ -6150,6 +6711,9 @@ fn submission_checklist_item(
         fresh_until_unix_ms: snapshot.map(|item| item.fresh_until_unix_ms),
         required_count: 0,
         matched_material_ids: Vec::new(),
+        declaration: None,
+        declaration_requirement_id: None,
+        declaration_action: None,
     }
 }
 
@@ -6470,6 +7034,10 @@ mod tests {
         read_stored_submission_materials, write_json, DecompositionManifest,
         SubmissionTargetSelection, VersionCreation, VersionOrigin, WorkspaceError, WorkspaceStore,
     };
+    use crate::{
+        DeclarationApplicability, DeclarationDelivery, DeclarationPlanUpdate,
+        SubmissionMaterialCatalog, SubmissionStage, WorkspaceSummary,
+    };
 
     use crate::{
         ElementState, InstitutionRuleEvidence, InstitutionRuleStatus, JournalMatchPreferences,
@@ -6573,6 +7141,500 @@ mod tests {
             .select_recommended_journal(workspace_id, &run.run_id, &journal_id)
             .unwrap();
         (target, run.run_id, journal_id, backup_journal_id)
+    }
+
+    fn declaration_fixture(text: &str) -> (SyntheticDirectory, WorkspaceStore, WorkspaceSummary) {
+        let temporary = SyntheticDirectory::create();
+        let source = temporary.path().join("Synthetic declarations.tex");
+        fs::write(&source, "\\section{Introduction}\nSynthetic declaration study.\\section{Methods}\nSynthetic methods.").unwrap();
+        let store = WorkspaceStore::new(temporary.path().join("store"));
+        let workspace = store.create_from_source(&source).unwrap();
+        let (target, _, _, _) = select_synthetic_target(&store, &workspace.id);
+        store
+            .save_journal_requirement_snapshot(
+                &workspace.id,
+                &target.selection_id,
+                &[JournalRequirementSourceDocument {
+                    url: "https://journal.example/authors".into(),
+                    title: "Synthetic guide".into(),
+                    text: text.into(),
+                    official_host_matched: true,
+                }],
+                JournalRequirementSourceMode::AuthorProvidedOfficialText,
+                true,
+                "not_performed",
+            )
+            .unwrap();
+        (temporary, store, workspace)
+    }
+
+    fn declaration_update(catalog: &SubmissionMaterialCatalog) -> DeclarationPlanUpdate {
+        let plan = catalog.declaration_plan.as_ref().unwrap();
+        DeclarationPlanUpdate {
+            manuscript_version: plan.manuscript_version,
+            target_selection_id: plan.target_selection_id.clone(),
+            requirement_snapshot_id: plan.requirement_snapshot_id.clone(),
+            requirement: None,
+            stage: None,
+            material_id: None,
+            checklist_item_id: None,
+        }
+    }
+
+    #[test]
+    fn declaration_files_and_confirmations_gate_export_independently_and_follow_stage() {
+        for evidence in [
+            "At submission, authors must include a conflict of interest statement in the manuscript and upload a signed attachment in TXT format. After acceptance authors must upload a data availability statement.",
+            "投稿时必须在正文提供利益冲突声明并上传签字附件，格式为 TXT。录用后必须上传数据可用性声明。",
+        ] {
+            let (temporary, store, workspace) = declaration_fixture(evidence);
+            let mut catalog = store.submission_materials(&workspace.id).unwrap();
+            let attachment = catalog.checklist.iter().find(|item| item.declaration_action.as_deref() == Some("attachment") && item.blocking).unwrap().clone();
+            assert!(!attachment.confirmable);
+            assert!(store.confirm_submission_requirement(&workspace.id, &attachment.id, true).is_err());
+            for item in catalog.checklist.iter().filter(|item| item.confirmable && item.blocking) {
+                store.confirm_submission_requirement(&workspace.id, &item.id, true).unwrap();
+            }
+            assert!(!store.submission_materials(&workspace.id).unwrap().required_complete);
+            assert!(store.export_target_submission_package(&workspace.id, temporary.path()).is_err());
+            let wrong = temporary.path().join("statement.png");
+            fs::write(&wrong, b"\x89PNG\r\n\x1a\nSynthetic scan").unwrap();
+            assert!(store.add_submission_materials_for_requirement(&workspace.id, SubmissionMaterialKind::Declaration, Some(&attachment.id), &[wrong]).unwrap_err().to_string().contains("DECLARATION_FORMAT_NOT_ALLOWED"));
+            let file = temporary.path().join("statement.txt");
+            fs::write(&file, "Synthetic signed declaration").unwrap();
+            catalog = store.add_submission_materials_for_requirement(&workspace.id, SubmissionMaterialKind::Declaration, Some(&attachment.id), std::slice::from_ref(&file)).unwrap();
+            let material_id = catalog.materials.iter().find(|item| item.checklist_item_id.as_deref() == Some(&attachment.id)).unwrap().material_id.clone();
+            let project = temporary.path().join("project.zip");
+            let refreshed = store.submission_materials(&workspace.id).unwrap();
+            let attestation = refreshed.checklist.iter().find(|item| item.declaration_action.as_deref() == Some("attestation") && item.blocking).unwrap();
+            assert_ne!(attestation.status, "passed", "a new file must invalidate the old accuracy confirmation");
+            store.confirm_submission_requirement(&workspace.id, &attestation.id, true).unwrap();
+            write_synthetic_zip(&project, &[("main.tex", b"Synthetic source")]);
+            store.add_submission_materials_for_requirement(&workspace.id, SubmissionMaterialKind::SourceProject, Some("latex-project"), &[project]).unwrap();
+            store.evaluate_readiness(&workspace.id, &[]).unwrap();
+            assert!(store.target_submission_package_plan(&workspace.id).unwrap().ready);
+            let export = store.export_target_submission_package(&workspace.id, temporary.path()).unwrap();
+            assert!(export.files.contains(&"records/declaration-plan.json".to_owned()));
+            let summary = fs::read_to_string(temporary.path().join(&export.package_name).join("records/declaration-summary.txt")).unwrap();
+            assert!(summary.contains("独立附件") && summary.contains("Separate attachment"));
+            assert!(!summary.contains("DECLARATION_"));
+            let excluded = store.set_submission_material_included(&workspace.id, &material_id, false).unwrap();
+            assert_eq!(excluded.checklist.iter().find(|item| item.id == attachment.id).unwrap().status, "missing");
+            assert!(!store.target_submission_package_plan(&workspace.id).unwrap().ready);
+            store.set_submission_material_included(&workspace.id, &material_id, true).unwrap();
+            fs::write(&file, "Synthetic replacement declaration").unwrap();
+            catalog = store.replace_submission_materials_for_requirement(&workspace.id, SubmissionMaterialKind::Declaration, Some(&attachment.id), &[file]).unwrap();
+            let replacement = catalog.materials.iter().find(|item| item.checklist_item_id.as_deref() == Some(&attachment.id)).unwrap().material_id.clone();
+            assert_ne!(material_id, replacement);
+            assert!(catalog.checklist.iter().any(|item| item.declaration_action.as_deref() == Some("attestation") && item.blocking && item.status != "passed"));
+            catalog = store.delete_submission_material(&workspace.id, &replacement, true).unwrap();
+            assert_eq!(catalog.checklist.iter().find(|item| item.id == attachment.id).unwrap().status, "missing");
+            let later = catalog.checklist.iter().find(|item| item.status == "later" && item.declaration_action.as_deref() == Some("attachment")).unwrap().id.clone();
+            let mut update = declaration_update(&catalog); update.stage = Some(SubmissionStage::Accepted);
+            catalog = store.update_declaration_plan(&workspace.id, update).unwrap();
+            assert!(catalog.checklist.iter().any(|item| item.id == later && item.blocking && item.status == "missing"));
+        }
+    }
+
+    #[test]
+    fn declaration_review_preserves_snapshots_and_requires_explicit_rebinding() {
+        let (temporary, store, workspace) = declaration_fixture(
+            "Authors must provide a conflict of interest statement if applicable.",
+        );
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        let root = store.projects_root().join(&workspace.id);
+        let plan = catalog.declaration_plan.as_ref().unwrap();
+        let snapshot_path = root
+            .join("targets")
+            .join(&plan.target_selection_id)
+            .join("requirements/current.json");
+        let snapshot_before = fs::read(&snapshot_path).unwrap();
+        let review = catalog
+            .checklist
+            .iter()
+            .find(|item| item.declaration_action.as_deref() == Some("review"))
+            .unwrap();
+        assert!(!review.confirmable);
+        assert!(store
+            .confirm_submission_requirement(&workspace.id, &review.id, true)
+            .is_err());
+        let file = temporary.path().join("prior.txt");
+        fs::write(&file, "Synthetic reusable declaration").unwrap();
+        let catalog = store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::Declaration,
+                Some("common-declaration-files"),
+                &[file],
+            )
+            .unwrap();
+        let material_id = catalog.materials[0].material_id.clone();
+        let mut requirement = plan.requirements[0].clone();
+        let declaration = requirement.declaration.as_mut().unwrap();
+        declaration.delivery = vec![DeclarationDelivery::Attachment];
+        declaration.stage = SubmissionStage::Initial;
+        declaration.applicability = DeclarationApplicability::Applicable;
+        declaration.author_note =
+            Some("Author checked the official attachment instructions".into());
+        declaration.file_count = 2;
+        declaration.shared_file_allowed = true;
+        let mut update = declaration_update(&catalog);
+        update.requirement = Some(requirement.clone());
+        let catalog = store
+            .update_declaration_plan(&workspace.id, update)
+            .unwrap();
+        let attachment = catalog
+            .checklist
+            .iter()
+            .find(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .unwrap();
+        assert_eq!(attachment.matched_material_ids.len(), 0);
+        let mut reuse = declaration_update(&catalog);
+        reuse.material_id = Some(material_id);
+        reuse.checklist_item_id = Some(attachment.id.clone());
+        let catalog = store.update_declaration_plan(&workspace.id, reuse).unwrap();
+        let attachment = catalog
+            .checklist
+            .iter()
+            .find(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .unwrap();
+        assert_eq!(attachment.matched_material_ids.len(), 1);
+        assert_eq!(attachment.status, "passed");
+        assert_eq!(
+            catalog
+                .checklist
+                .iter()
+                .filter(|item| item.declaration_action.as_deref() == Some("attachment"))
+                .count(),
+            2
+        );
+        let second_slot = catalog
+            .checklist
+            .iter()
+            .find(|item| {
+                item.declaration_action.as_deref() == Some("attachment") && item.status == "missing"
+            })
+            .unwrap()
+            .id
+            .clone();
+        let mut duplicate = declaration_update(&catalog);
+        duplicate.material_id = Some(catalog.materials[0].material_id.clone());
+        duplicate.checklist_item_id = Some(second_slot.clone());
+        assert!(store
+            .update_declaration_plan(&workspace.id, duplicate)
+            .unwrap_err()
+            .to_string()
+            .contains("DECLARATION_SHARING_NOT_ALLOWED"));
+        let second = temporary.path().join("second.txt");
+        fs::write(&second, "Second distinct synthetic declaration").unwrap();
+        let catalog = store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::Declaration,
+                Some(&second_slot),
+                &[second],
+            )
+            .unwrap();
+        assert!(catalog
+            .checklist
+            .iter()
+            .filter(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .all(|item| item.status == "passed"));
+        let mut update = declaration_update(&catalog);
+        requirement.declaration.as_mut().unwrap().applicability =
+            DeclarationApplicability::NotApplicable;
+        update.requirement = Some(requirement);
+        let catalog = store
+            .update_declaration_plan(&workspace.id, update)
+            .unwrap();
+        assert!(catalog
+            .checklist
+            .iter()
+            .filter(|item| item.declaration.is_some())
+            .all(|item| !item.blocking && item.status == "not_applicable"));
+        assert!(store
+            .target_submission_package_plan(&workspace.id)
+            .unwrap()
+            .files
+            .iter()
+            .filter(|file| file
+                .checklist_item_id
+                .as_ref()
+                .is_some_and(|id| id.starts_with("declaration-")))
+            .all(|file| !file.included));
+        assert_eq!(fs::read(snapshot_path).unwrap(), snapshot_before);
+        assert_eq!(
+            fs::read_dir(root.join("materials/declaration-history"))
+                .unwrap()
+                .count(),
+            2
+        );
+        let mut stale = declaration_update(&catalog);
+        stale.manuscript_version += 1;
+        stale.stage = Some(SubmissionStage::Accepted);
+        assert!(store.update_declaration_plan(&workspace.id, stale).is_err());
+    }
+
+    #[test]
+    fn declaration_scans_and_combined_files_require_explicit_permissions() {
+        let (temporary, store, workspace) = declaration_fixture("At submission authors must upload a conflict of interest statement. At submission authors must upload a data availability statement.");
+        let mut catalog = store.submission_materials(&workspace.id).unwrap();
+        let file = temporary.path().join("signed.png");
+        fs::write(&file, b"\x89PNG\r\n\x1a\nSynthetic scan").unwrap();
+        let slots = catalog
+            .checklist
+            .iter()
+            .filter(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(slots.len(), 2);
+        store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::Declaration,
+                Some(&slots[0]),
+                std::slice::from_ref(&file),
+            )
+            .unwrap();
+        assert!(store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::Declaration,
+                Some(&slots[1]),
+                std::slice::from_ref(&file)
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("DECLARATION_SHARING_NOT_ALLOWED"));
+        for mut requirement in catalog
+            .declaration_plan
+            .as_ref()
+            .unwrap()
+            .requirements
+            .clone()
+        {
+            requirement
+                .declaration
+                .as_mut()
+                .unwrap()
+                .shared_file_allowed = true;
+            requirement.declaration.as_mut().unwrap().author_note =
+                Some("Official guide allows a combined declaration file".into());
+            let mut update = declaration_update(&catalog);
+            update.requirement = Some(requirement);
+            catalog = store
+                .update_declaration_plan(&workspace.id, update)
+                .unwrap();
+        }
+        for slot in catalog
+            .checklist
+            .iter()
+            .filter(|item| item.declaration_action.as_deref() == Some("attachment"))
+        {
+            store
+                .add_submission_materials_for_requirement(
+                    &workspace.id,
+                    SubmissionMaterialKind::Declaration,
+                    Some(&slot.id),
+                    std::slice::from_ref(&file),
+                )
+                .unwrap();
+        }
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        assert!(catalog
+            .checklist
+            .iter()
+            .filter(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .all(|item| item.status == "passed"));
+        let package_plan = store.target_submission_package_plan(&workspace.id).unwrap();
+        let combined = package_plan
+            .files
+            .iter()
+            .filter(|file| {
+                file.included && file.material_kind == Some(SubmissionMaterialKind::Declaration)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            combined.len(),
+            2,
+            "manifest retains both requirement bindings"
+        );
+        assert_eq!(
+            combined[0].relative_path, combined[1].relative_path,
+            "a permitted combined document has one export path"
+        );
+        for item in catalog
+            .checklist
+            .iter()
+            .filter(|item| item.confirmable && item.blocking)
+        {
+            store
+                .confirm_submission_requirement(&workspace.id, &item.id, true)
+                .unwrap();
+        }
+        let project = temporary.path().join("project.zip");
+        write_synthetic_zip(&project, &[("main.tex", b"Synthetic source")]);
+        store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::SourceProject,
+                Some("latex-project"),
+                &[project],
+            )
+            .unwrap();
+        store.evaluate_readiness(&workspace.id, &[]).unwrap();
+        let exported = store
+            .export_target_submission_package(&workspace.id, temporary.path())
+            .unwrap();
+        assert_eq!(
+            exported
+                .files
+                .iter()
+                .filter(|path| path.ends_with(".png"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            fs::read_dir(
+                temporary
+                    .path()
+                    .join(&exported.package_name)
+                    .join("submission/declarations")
+            )
+            .unwrap()
+            .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn declaration_later_files_stay_out_of_the_current_submission_package() {
+        let (temporary, store, workspace) = declaration_fixture(
+            "After acceptance authors must upload a conflict of interest statement.",
+        );
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        let slot = catalog
+            .checklist
+            .iter()
+            .find(|item| item.declaration_action.as_deref() == Some("attachment"))
+            .unwrap()
+            .id
+            .clone();
+        let file = temporary.path().join("later.txt");
+        fs::write(&file, "Synthetic later-stage statement").unwrap();
+        let catalog = store
+            .add_submission_materials_for_requirement(
+                &workspace.id,
+                SubmissionMaterialKind::Declaration,
+                Some(&slot),
+                &[file],
+            )
+            .unwrap();
+        let plan = store.target_submission_package_plan(&workspace.id).unwrap();
+        assert!(
+            !plan
+                .files
+                .iter()
+                .find(|file| file.checklist_item_id.as_deref() == Some(&slot))
+                .unwrap()
+                .included
+        );
+        let mut update = declaration_update(&catalog);
+        update.stage = Some(SubmissionStage::Accepted);
+        store
+            .update_declaration_plan(&workspace.id, update)
+            .unwrap();
+        assert!(
+            store
+                .target_submission_package_plan(&workspace.id)
+                .unwrap()
+                .files
+                .iter()
+                .find(|file| file.checklist_item_id.as_deref() == Some(&slot))
+                .unwrap()
+                .included
+        );
+    }
+
+    #[test]
+    fn declaration_legacy_hashes_and_author_added_requirements_remain_traceable() {
+        let (_temporary, store, workspace) = declaration_fixture(
+            "At submission authors must upload a conflict of interest statement.",
+        );
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        let plan = catalog.declaration_plan.as_ref().unwrap();
+        let root = store.projects_root().join(&workspace.id);
+        let path = root
+            .join("targets")
+            .join(&plan.target_selection_id)
+            .join("requirements/current.json");
+        let mut snapshot: crate::JournalRequirementSnapshot = read_json(&path).unwrap();
+        for item in &mut snapshot.requirements {
+            item.declaration = None;
+        }
+        let payload = super::JournalRequirementSnapshotPayload {
+            schema_version: snapshot.schema_version,
+            snapshot_id: &snapshot.snapshot_id,
+            workspace_id: &snapshot.workspace_id,
+            target_selection_id: &snapshot.target_selection_id,
+            journal_id: &snapshot.journal_id,
+            journal_name: &snapshot.journal_name,
+            source_mode: snapshot.source_mode,
+            status: snapshot.status,
+            sources: &snapshot.sources,
+            requirements: &snapshot.requirements,
+            limitations: &snapshot.limitations,
+            captured_unix_ms: snapshot.captured_unix_ms,
+            fresh_until_unix_ms: snapshot.fresh_until_unix_ms,
+            external_transmission: &snapshot.external_transmission,
+        };
+        snapshot.record_hash = super::hash_serializable(&payload).unwrap();
+        write_json(&path, &snapshot).unwrap();
+        let legacy_bytes = fs::read(&path).unwrap();
+        assert!(!String::from_utf8_lossy(&legacy_bytes).contains("\"declaration\""));
+        let catalog = store.submission_materials(&workspace.id).unwrap();
+        assert!(catalog
+            .checklist
+            .iter()
+            .any(|item| item.declaration_action.as_deref() == Some("attachment") && item.blocking));
+        let mut added = catalog.declaration_plan.as_ref().unwrap().requirements[0].clone();
+        added.id.clear();
+        added.label = "资金声明".into();
+        added.label_en = "Funding declaration".into();
+        added.category = crate::JournalRequirementCategory::OtherSupportingFiles;
+        added.source_url = "https://publisher.example/funding".into();
+        added.evidence_excerpt =
+            "At revision, authors must complete the funding statement in an online form.".into();
+        added.declaration = Some(crate::declarations::infer_declaration(
+            &added.evidence_excerpt,
+        ));
+        added.declaration.as_mut().unwrap().author_note =
+            Some("Verified against the publisher's official funding instructions".into());
+        let mut update = declaration_update(&catalog);
+        update.requirement = Some(added);
+        let catalog = store
+            .update_declaration_plan(&workspace.id, update)
+            .unwrap();
+        assert_eq!(
+            catalog
+                .declaration_plan
+                .as_ref()
+                .unwrap()
+                .requirements
+                .len(),
+            2
+        );
+        assert!(catalog
+            .checklist
+            .iter()
+            .any(|item| item.label_en == "Funding declaration"
+                && item.status == "later"
+                && item.declaration_action.as_deref() == Some("submission_system")));
+        assert_eq!(fs::read(path).unwrap(), legacy_bytes);
+        let reloaded = WorkspaceStore::new(store.root.clone())
+            .submission_materials(&workspace.id)
+            .unwrap();
+        assert_eq!(catalog.declaration_plan, reloaded.declaration_plan);
     }
 
     #[test]

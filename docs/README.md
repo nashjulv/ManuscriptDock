@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.45 文档
+# 投稿舱 ManuscriptDock V0.46 文档
 
 ## 使用指南
 

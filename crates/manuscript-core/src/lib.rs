@@ -1,3 +1,4 @@
+mod declarations;
 mod dialogue;
 mod journal_directory;
 mod journal_match;
@@ -8,6 +9,10 @@ mod revision;
 mod structure;
 mod workspace;
 
+pub use declarations::{
+    DeclarationApplicability, DeclarationDelivery, DeclarationPlan, DeclarationPlanUpdate,
+    DeclarationRequirement, SubmissionStage,
+};
 pub use dialogue::{
     KnowledgeAnswerRecord, KnowledgeDialogueItem, KnowledgeDialogueLedger, KnowledgeInquiryOrigin,
     KnowledgeInquiryRecord, KnowledgeInquiryStance, KnowledgeInquiryTarget,

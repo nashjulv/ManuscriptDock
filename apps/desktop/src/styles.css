@@ -1316,3 +1316,20 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
 .official-access-result { min-width: 0; grid-column: 1 / -1; margin-top: 12px; }
 .official-access-result ul { padding-left: 20px; }
 .official-access-result li { margin-block: 8px; overflow-wrap: anywhere; }
+.declaration-requirements { margin: 20px 0; padding: 20px; border: 1px solid var(--line, #dedbd4); border-radius: 12px; }
+.declaration-requirements header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.declaration-requirements label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
+.declaration-requirements select, .declaration-editor input:not([type="checkbox"]), .declaration-editor textarea { width: 100%; min-width: 0; padding: 9px; border: 1px solid #ccc8bf; border-radius: 6px; background: #fff; color: #262623; font: inherit; }
+.declaration-summary-list { display: grid; gap: 12px; margin: 18px 0; }
+.declaration-summary-list article { padding: 14px; border: 1px solid #e1ded7; border-radius: 8px; min-width: 0; }
+.declaration-summary-list blockquote { margin: 10px 0; font-size: 13px; color: #615e56; white-space: pre-wrap; overflow-wrap: anywhere; }
+.declaration-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; padding: 18px; background: #f6f5f0; border-radius: 8px; }
+.declaration-editor h4, .declaration-editor fieldset, .declaration-editor > p, .declaration-editor > div { grid-column: 1 / -1; }
+.declaration-editor fieldset { display: flex; flex-wrap: wrap; gap: 14px; padding: 12px; border: 1px solid #d5d1c7; }
+.declaration-editor label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
+.declaration-details { display: grid; gap: 5px; margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.declaration-details > strong { display: none; }
+.declaration-reuse { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 10px; }
+.declaration-reuse label { flex: 1; min-width: 180px; }
+.declaration-requirements [role="alert"] { color: #9b302a; }
+@media (max-width: 700px) { .declaration-editor { grid-template-columns: 1fr; padding: 12px; } .declaration-requirements { padding: 12px; } }
