@@ -1,5 +1,20 @@
 # ManuscriptDock Development Log
 
+## 2026-09-06 — V0.45 automatic journal URL compatibility
+
+- Read the URL's recorded protocol first; retry the alternate protocol once on connection or
+  response failure. HTTP no longer adds consent steps, explanatory banners, or an expanded manual form.
+- Recover virtual system DNS through bounded, bootstrapped Cloudflare DoH, then validate and pin
+  real public addresses. Private addresses, mixed private answers, unsafe redirects, and limits stay blocked.
+- Correct verified CJC, JOS and PRAI catalog entry URLs at access time for old primary/backup
+  selections too, preserving immutable records and saving correction provenance in the access audit.
+- Recognize legacy Chinese guide navigation, cautiously infer omitted Chinese charsets, and decode
+  unlabelled gzip with independent encoded/decoded size limits. Live CJC guide capture passed.
+- Show response/decoding/body outcomes and final failures; keep DNS, protocol changes and recovered
+  intermediate errors in local diagnostics. Technical access scope remains collapsed.
+- Check all 17 built-in entries separately from deterministic tests; record site restrictions in the
+  dated URL audit. Review zh-CN/en interactions with unit tests and rendered Computer Use checks.
+
 ## 2026-09-05 — V0.44 complete attachment-upload routing
 
 - Fixed an upload-view filter that exposed only figure/table slots and `common-*` optional slots.

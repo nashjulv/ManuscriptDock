@@ -21,8 +21,9 @@ pub use journal_directory::{
     JOURNAL_DIRECTORY_SCHEMA_VERSION, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
 };
 pub use journal_match::{
-    deadline_days_remaining, recommend_journals, recommend_journals_with_directory,
-    ArticleTypePreference, InstitutionRuleEvidence, InstitutionRuleStatus, JournalFitScores,
+    bundled_journal_homepages, deadline_days_remaining, journal_homepage_correction,
+    recommend_journals, recommend_journals_with_directory, ArticleTypePreference,
+    InstitutionRuleEvidence, InstitutionRuleStatus, JournalFitScores, JournalHomepageCorrection,
     JournalMatchPreferences, JournalRecommendation, JournalRecommendationPortfolio,
     JournalRecommendationProfile, JournalRecommendationProfileInput,
     JournalRecommendationProfileSummary, JournalRecommendationRun, JournalRegion,

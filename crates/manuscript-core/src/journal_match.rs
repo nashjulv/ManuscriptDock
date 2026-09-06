@@ -6,8 +6,48 @@ use sha2::{Digest, Sha256};
 
 pub const JOURNAL_MATCH_SCHEMA_VERSION: u32 = 6;
 pub const JOURNAL_MATCH_ALGORITHM_VERSION: &str = "local-fit-v1.6";
-pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2025.1";
+pub const JOURNAL_CATALOG_VERSION: &str = "computer-ai-2026.2";
 pub const JOURNAL_PROFILE_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalHomepageCorrection {
+    pub url: &'static str,
+    pub authority_url: &'static str,
+    pub verified_on: &'static str,
+}
+
+/// Apply verified URL corrections at access time, including old saved selections and
+/// discovered candidates. Do not rewrite immutable recommendation/selection records.
+pub fn journal_homepage_correction(recorded_url: &str) -> Option<JournalHomepageCorrection> {
+    match recorded_url.trim().trim_end_matches('/') {
+        "https://cjc.ict.ac.cn" | "http://cjc.ict.ac.cn" => Some(JournalHomepageCorrection {
+            url: "http://cjc.ict.ac.cn/",
+            authority_url: "https://www.ict.cas.cn/xscbw/jsjxb/",
+            verified_on: "2026-09-06",
+        }),
+        "https://jos.org.cn" | "http://jos.org.cn" => Some(JournalHomepageCorrection {
+            url: "https://www.jos.org.cn/",
+            authority_url:
+                "https://www.jos.org.cn/jos/site/menu/20210909102616001?id=20210909102616001",
+            verified_on: "2026-09-06",
+        }),
+        "https://prai.hfcas.ac.cn" | "http://prai.hfcas.ac.cn" => Some(JournalHomepageCorrection {
+            url: "http://prai.hfcas.ac.cn/",
+            authority_url: "https://www.caa.org.cn/Content/61.html",
+            verified_on: "2026-09-06",
+        }),
+        _ => None,
+    }
+}
+
+/// Public catalog endpoints for explicit live diagnostics; no network access on listing.
+pub fn bundled_journal_homepages() -> Vec<(&'static str, &'static str)> {
+    CANDIDATES
+        .iter()
+        .map(|candidate| (candidate.id, candidate.homepage))
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -371,7 +411,7 @@ const CANDIDATES: &[Candidate] = &[
             ArticleTypePreference::Review,
         ],
         oa: "verify",
-        homepage: "https://cjc.ict.ac.cn/",
+        homepage: "http://cjc.ict.ac.cn/",
     },
     Candidate {
         id: "crad",
@@ -413,7 +453,7 @@ const CANDIDATES: &[Candidate] = &[
             ArticleTypePreference::Review,
         ],
         oa: "open",
-        homepage: "https://jos.org.cn/",
+        homepage: "https://www.jos.org.cn/",
     },
     Candidate {
         id: "aau",
@@ -475,7 +515,7 @@ const CANDIDATES: &[Candidate] = &[
             ArticleTypePreference::Application,
         ],
         oa: "verify",
-        homepage: "https://prai.hfcas.ac.cn/",
+        homepage: "http://prai.hfcas.ac.cn/",
     },
     Candidate {
         id: "cjig",
@@ -1583,6 +1623,26 @@ fn is_leap_year(year: i32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_corrections_are_precise_and_cover_legacy_catalog_urls() {
+        let old = "https://cjc.ict.ac.cn/";
+        let corrected = super::journal_homepage_correction(old).unwrap();
+        assert_eq!(corrected.url, "http://cjc.ict.ac.cn/");
+        assert_eq!(
+            super::bundled_journal_homepages()
+                .iter()
+                .find(|(id, _)| *id == "cjc")
+                .unwrap()
+                .1,
+            corrected.url
+        );
+        assert!(super::journal_homepage_correction("https://cjc.ict.ac.cn/guide").is_none());
+        assert!(
+            super::journal_homepage_correction("https://cjc.ict.ac.cn.attacker.example/").is_none()
+        );
+        assert!(super::journal_homepage_correction("https://jmlr.org/").is_none());
+        assert_eq!(super::bundled_journal_homepages().len(), 17);
+    }
     use super::*;
     use crate::{AnalysisQuality, SectionSummary};
     const EVALUATED_AT: u64 = 1_788_048_000_000;

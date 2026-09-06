@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     future::Future,
+    io::Read,
     net::{IpAddr, SocketAddr},
     time::Duration,
 };
@@ -19,7 +20,8 @@ const MAX_REQUESTS: usize = 24;
 pub struct FetchOptions {
     #[serde(default)]
     pub approved_origins: Vec<String>,
-    #[serde(default)]
+    // Read legacy access records; this field no longer grants or gates HTTP access.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub http_origins: Vec<String>,
 }
 
@@ -150,14 +152,143 @@ fn checked_addresses(addresses: Vec<SocketAddr>) -> Result<Vec<SocketAddr>, Fetc
     Ok(addresses)
 }
 
+fn virtual_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.octets()[0] == 198 && matches!(ip.octets()[1], 18 | 19),
+        IpAddr::V6(ip) => ip.to_ipv4_mapped().is_some_and(|ip| virtual_ip(ip.into())),
+    }
+}
+
+fn needs_encrypted_dns(addresses: &[SocketAddr]) -> Result<bool, FetchError> {
+    // A mixed private/virtual answer must not use the resolver as an escape hatch.
+    if addresses
+        .iter()
+        .any(|a| !public_ip(a.ip()) && !virtual_ip(a.ip()))
+    {
+        return Err(FetchError::new("OFFICIAL_PRIVATE_ADDRESS"));
+    }
+    Ok(addresses.iter().any(|a| virtual_ip(a.ip())))
+}
+
+#[derive(Deserialize)]
+struct DnsAnswer {
+    #[serde(rename = "type")]
+    kind: u16,
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct DnsResponse {
+    #[serde(rename = "Status")]
+    status: u16,
+    #[serde(rename = "TC", default)]
+    truncated: bool,
+    #[serde(rename = "Answer", default)]
+    answers: Vec<DnsAnswer>,
+}
+
+fn dns_addresses(bytes: &[u8], port: u16) -> Result<Vec<SocketAddr>, FetchError> {
+    let response: DnsResponse = serde_json::from_slice(bytes)
+        .map_err(|_| FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"))?;
+    if response.status != 0 || response.truncated {
+        return Err(FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"));
+    }
+    let mut addresses = Vec::new();
+    for answer in response.answers {
+        if matches!(answer.kind, 1 | 28) {
+            let ip: IpAddr = answer
+                .data
+                .parse()
+                .map_err(|_| FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"))?;
+            if (answer.kind == 1) != ip.is_ipv4() {
+                return Err(FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"));
+            }
+            addresses.push(SocketAddr::new(ip, port));
+        }
+    }
+    // Empty AAAA answers are normal; validate the combined A + AAAA result later.
+    if !addresses.is_empty() {
+        checked_addresses(addresses.clone())?;
+    }
+    Ok(addresses)
+}
+
+async fn encrypted_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>, FetchError> {
+    // Bootstrap independently of system DNS. TLS still authenticates the resolver hostname.
+    let bootstrap = [
+        "1.1.1.1:443".parse().unwrap(),
+        "1.0.0.1:443".parse().unwrap(),
+    ];
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .referer(false)
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs("cloudflare-dns.com", &bootstrap)
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|_| FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"))?;
+    let query = |kind: &'static str| {
+        let client = &client;
+        async move {
+            let mut response = client
+                .get("https://cloudflare-dns.com/dns-query")
+                .query(&[("name", host), ("type", kind)])
+                .header("Accept", "application/dns-json")
+                .send()
+                .await
+                .map_err(|_| FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"))?;
+            if !response.status().is_success() {
+                return Err(FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"));
+            }
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"))?
+            {
+                if bytes.len().saturating_add(chunk.len()) > 32 * 1024 {
+                    return Err(FetchError::new("OFFICIAL_ENCRYPTED_DNS_FAILED"));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            dns_addresses(&bytes, port)
+        }
+    };
+    let (a, aaaa) = tokio::join!(query("A"), query("AAAA"));
+    let mut addresses = a?;
+    addresses.extend(aaaa?);
+    checked_addresses(addresses)
+}
+
 pub struct RawPage {
     pub status: u16,
     pub location: Option<String>,
     pub content_type: String,
     pub bytes: Vec<u8>,
 }
+
+fn decompress_page(bytes: Vec<u8>) -> Result<(Vec<u8>, bool), FetchError> {
+    // Some public sites send gzip bytes even for identity, without Content-Encoding.
+    if !bytes.starts_with(&[0x1f, 0x8b]) {
+        return Ok((bytes, false));
+    }
+    let mut decoded = Vec::new();
+    flate2::read::MultiGzDecoder::new(bytes.as_slice())
+        .take(MAX_BYTES as u64 + 1)
+        .read_to_end(&mut decoded)
+        .map_err(|_| FetchError::new("OFFICIAL_COMPRESSION_FAILED"))?;
+    if decoded.len() > MAX_BYTES {
+        return Err(FetchError::new("OFFICIAL_TOO_LARGE"));
+    }
+    Ok((decoded, true))
+}
 pub trait Transport {
-    fn get(&self, url: &Url) -> impl Future<Output = Result<RawPage, FetchError>> + Send;
+    fn get(
+        &self,
+        url: &Url,
+        events: &mut Vec<AccessEvent>,
+    ) -> impl Future<Output = Result<RawPage, FetchError>> + Send;
 }
 pub struct PublicTransport;
 
@@ -178,7 +309,7 @@ fn request_error(error: reqwest::Error) -> FetchError {
 }
 
 impl Transport for PublicTransport {
-    async fn get(&self, url: &Url) -> Result<RawPage, FetchError> {
+    async fn get(&self, url: &Url, events: &mut Vec<AccessEvent>) -> Result<RawPage, FetchError> {
         validate_network_url(url)?;
         let host = url
             .host_str()
@@ -198,7 +329,24 @@ impl Transport for PublicTransport {
             .map_err(|_| FetchError::new("OFFICIAL_DNS_FAILED"))?
             .collect(),
         };
-        let addresses = checked_addresses(addresses)?;
+        let addresses = if needs_encrypted_dns(&addresses)? {
+            events.push(AccessEvent {
+                requested_url: url.to_string(),
+                url: url.to_string(),
+                code: "OFFICIAL_VIRTUAL_DNS".into(),
+                detail: None,
+            });
+            let addresses = encrypted_addresses(host, port).await?;
+            events.push(AccessEvent {
+                requested_url: url.to_string(),
+                url: url.to_string(),
+                code: "OFFICIAL_DNS_RECOVERED".into(),
+                detail: None,
+            });
+            addresses
+        } else {
+            checked_addresses(addresses)?
+        };
         // A fresh client per hop pins every connection to validated DNS results. No proxy,
         // automatic redirect, referer, cookies, credentials or reusable cross-host connection.
         let client = reqwest::Client::builder()
@@ -247,6 +395,15 @@ impl Transport for PublicTransport {
                 }
                 bytes.extend_from_slice(&chunk);
             }
+        }
+        let (bytes, compressed) = decompress_page(bytes)?;
+        if compressed {
+            events.push(AccessEvent {
+                requested_url: url.to_string(),
+                url: url.to_string(),
+                code: "OFFICIAL_GZIP_DECODED".into(),
+                detail: None,
+            });
         }
         Ok(RawPage {
             status,
@@ -328,17 +485,14 @@ impl<T: Transport> FetchSession<T> {
                 self.event(requested, &current, error.code, error.detail.clone());
                 return Err(error);
             }
-            let origin = current.origin().ascii_serialization();
-            if !same_host(&self.seed, &current) && !self.options.approved_origins.contains(&origin)
+            if !same_host(&self.seed, &current)
+                && !self.options.approved_origins.iter().any(|origin| {
+                    source_url(origin).is_ok_and(|approved| same_host(&approved, &current))
+                })
             {
                 self.pending(&current, "origin");
                 self.event(requested, &current, "OFFICIAL_ORIGIN_CONFIRMATION", None);
                 return Err(FetchError::new("OFFICIAL_ORIGIN_CONFIRMATION"));
-            }
-            if current.scheme() == "http" && !self.options.http_origins.contains(&origin) {
-                self.pending(&current, "http");
-                self.event(requested, &current, "OFFICIAL_HTTP_CONFIRMATION", None);
-                return Err(FetchError::new("OFFICIAL_HTTP_CONFIRMATION"));
             }
             if !seen.insert(current.to_string()) {
                 return Err(FetchError::new("OFFICIAL_REDIRECT_LIMIT"));
@@ -348,18 +502,27 @@ impl<T: Transport> FetchSession<T> {
             }
             self.requests += 1;
             self.used_http |= current.scheme() == "http";
+            if current.scheme() == "http" {
+                self.event(requested, &current, "OFFICIAL_HTTP_USED", None);
+            }
             self.event(requested, &current, "OFFICIAL_REQUESTED", None);
-            let response =
-                match tokio::time::timeout_at(self.deadline, self.transport.get(&current))
-                    .await
-                    .unwrap_or_else(|_| Err(FetchError::new("OFFICIAL_TIMEOUT")))
-                {
-                    Ok(response) => response,
-                    Err(error) => {
-                        self.event(requested, &current, error.code, error.detail.clone());
-                        return Err(error);
-                    }
-                };
+            let mut transport_events = Vec::new();
+            let response = tokio::time::timeout_at(
+                self.deadline,
+                self.transport.get(&current, &mut transport_events),
+            )
+            .await
+            .unwrap_or_else(|_| Err(FetchError::new("OFFICIAL_TIMEOUT")));
+            for event in transport_events {
+                self.event(requested, &current, &event.code, event.detail);
+            }
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    self.event(requested, &current, error.code, error.detail.clone());
+                    return Err(error);
+                }
+            };
             if [301, 302, 303, 307, 308].contains(&response.status) {
                 self.event(
                     requested,
@@ -396,14 +559,7 @@ impl<T: Transport> FetchSession<T> {
 
     async fn raw(&mut self, requested: &Url) -> Result<(Url, RawPage), FetchError> {
         validate_network_url(requested)?;
-        if requested.scheme() != "http" {
-            return self.chain(requested, requested.clone()).await;
-        }
-        let mut secure = requested.clone();
-        secure
-            .set_scheme("https")
-            .map_err(|_| FetchError::new("OFFICIAL_INVALID_URL"))?;
-        match self.chain(requested, secure).await {
+        match self.chain(requested, requested.clone()).await {
             Ok(page) => Ok(page),
             Err(error)
                 if matches!(
@@ -415,7 +571,15 @@ impl<T: Transport> FetchSession<T> {
                         | "OFFICIAL_DNS_FAILED"
                 ) =>
             {
-                self.chain(requested, requested.clone()).await
+                let mut alternate = requested.clone();
+                alternate
+                    .set_scheme(if requested.scheme() == "http" {
+                        "https"
+                    } else {
+                        "http"
+                    })
+                    .map_err(|_| FetchError::new("OFFICIAL_INVALID_URL"))?;
+                self.chain(requested, alternate).await
             }
             Err(error) => Err(error),
         }
@@ -424,7 +588,13 @@ impl<T: Transport> FetchSession<T> {
     pub async fn page(&mut self, requested: Url) -> Result<Page, FetchError> {
         let result = self.page_inner(&requested).await;
         if let Err(error) = &result {
-            self.event(&requested, &requested, error.code, error.detail.clone());
+            if !self.events.last().is_some_and(|event| {
+                event.requested_url == requested.as_str()
+                    && event.code == error.code
+                    && event.detail == error.detail
+            }) {
+                self.event(&requested, &requested, error.code, error.detail.clone());
+            }
         }
         result
     }
@@ -444,7 +614,10 @@ impl<T: Transport> FetchSession<T> {
         ) {
             return Err(FetchError::new("OFFICIAL_UNSUPPORTED_FORMAT"));
         }
-        let html = decode_page(&raw.bytes, &raw.content_type)?;
+        let (html, inferred_encoding) = decode_page_with_notice(&raw.bytes, &raw.content_type)?;
+        if inferred_encoding {
+            self.event(requested, &url, "OFFICIAL_ENCODING_INFERRED", None);
+        }
         let text = if mime == "text/plain" {
             html.clone()
         } else {
@@ -526,31 +699,58 @@ fn charset(value: &str) -> Option<&'static Encoding> {
     })
 }
 
+#[cfg(test)]
 fn decode_page(bytes: &[u8], content_type: &str) -> Result<String, FetchError> {
+    decode_page_with_notice(bytes, content_type).map(|(text, _)| text)
+}
+
+fn decode_page_with_notice(bytes: &[u8], content_type: &str) -> Result<(String, bool), FetchError> {
     if bytes.len() > MAX_BYTES {
         return Err(FetchError::new("OFFICIAL_TOO_LARGE"));
     }
     let bom = Encoding::for_bom(bytes).map(|(encoding, _)| encoding);
-    let encoding = bom
-        .or_else(|| charset(content_type))
-        .or_else(|| {
-            let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
-            let document = Html::parse_document(&prefix);
-            document
-                .select(&Selector::parse("meta").expect("static selector"))
-                .find_map(|meta| {
-                    meta.value()
-                        .attr("charset")
-                        .and_then(|v| Encoding::for_label(v.as_bytes()))
-                        .or_else(|| meta.value().attr("content").and_then(charset))
-                })
-        })
-        .unwrap_or(UTF_8);
-    let (decoded, _, malformed) = encoding.decode(bytes);
+    let encoding = bom.or_else(|| charset(content_type)).or_else(|| {
+        let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+        let document = Html::parse_document(&prefix);
+        document
+            .select(&Selector::parse("meta").expect("static selector"))
+            .find_map(|meta| {
+                meta.value()
+                    .attr("charset")
+                    .and_then(|v| Encoding::for_label(v.as_bytes()))
+                    .or_else(|| meta.value().attr("content").and_then(charset))
+            })
+    });
+    let (decoded, _, malformed) = encoding.unwrap_or(UTF_8).decode(bytes);
     if malformed {
+        // Legacy Chinese sites sometimes omit charset on child pages. Only infer GB18030
+        // with an explicit Chinese language hint, no conflicting charset, and a lossless decode.
+        let document =
+            Html::parse_document(&String::from_utf8_lossy(&bytes[..bytes.len().min(8192)]));
+        let chinese = document
+            .select(&Selector::parse("html[lang], meta[http-equiv]").expect("static selector"))
+            .any(|node| {
+                node.value()
+                    .attr("lang")
+                    .is_some_and(|lang| lang.to_ascii_lowercase().starts_with("zh"))
+                    || (node
+                        .value()
+                        .attr("http-equiv")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("content-language"))
+                        && node
+                            .value()
+                            .attr("content")
+                            .is_some_and(|lang| lang.to_ascii_lowercase().starts_with("zh")))
+            });
+        if encoding.is_none() && chinese {
+            let (text, _, malformed) = encoding_rs::GB18030.decode(bytes);
+            if !malformed {
+                return Ok((text.into_owned(), true));
+            }
+        }
         return Err(FetchError::new("OFFICIAL_ENCODING_FAILED"));
     }
-    Ok(decoded.into_owned())
+    Ok((decoded.into_owned(), false))
 }
 
 pub fn instruction_links(base: &Url, html: &str) -> Vec<Url> {
@@ -565,6 +765,10 @@ pub fn instruction_links(base: &Url, html: &str) -> Vec<Url> {
         let href = node.value().attr("href").unwrap_or("");
         if !super::instruction_page_hint(href)
             && !super::instruction_page_hint(&node.text().collect::<String>())
+            && !super::instruction_page_hint(node.value().attr("title").unwrap_or(""))
+            && !node
+                .select(&Selector::parse("img[alt]").expect("static selector"))
+                .any(|image| super::instruction_page_hint(image.value().attr("alt").unwrap_or("")))
         {
             continue;
         }
@@ -602,7 +806,11 @@ mod tests {
         }
     }
     impl Transport for FixtureTransport {
-        async fn get(&self, url: &Url) -> Result<RawPage, FetchError> {
+        async fn get(
+            &self,
+            url: &Url,
+            _events: &mut Vec<AccessEvent>,
+        ) -> Result<RawPage, FetchError> {
             self.urls.lock().unwrap().push(url.to_string());
             self.replies
                 .lock()
@@ -695,54 +903,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upgrades_http_and_keeps_original_and_final_urls() {
-        let url = source_url("http://journal.example/guide").unwrap();
-        let mut s = session(url.as_str(), FetchOptions::default(), vec![html()]);
-        let page = s.page(url.clone()).await.unwrap();
-        assert_eq!(page.url.scheme(), "https");
-        assert!(!s.used_http);
-        assert_eq!(s.events.last().unwrap().requested_url, url.as_str());
-        assert_eq!(
-            s.events.last().unwrap().url,
-            "https://journal.example/guide"
-        );
+    async fn successful_requests_use_the_recorded_protocol_without_probing() {
+        for scheme in ["http", "https"] {
+            let input = format!("{scheme}://journal.example/guide?lang=zh");
+            let mut s = session(&input, FetchOptions::default(), vec![html()]);
+            let page = s.page(source_url(&input).unwrap()).await.unwrap();
+            assert_eq!(page.url.as_str(), input);
+            assert_eq!(*s.transport.urls.lock().unwrap(), vec![input]);
+            assert_eq!(s.used_http, scheme == "http");
+            assert!(s.pending.is_empty());
+        }
     }
 
     #[tokio::test]
-    async fn https_failure_never_silently_downgrades_or_reuses_consent() {
-        let input = "http://journal.example/guide";
-        let mut s = session(
-            input,
-            FetchOptions::default(),
-            vec![Err(FetchError::new("OFFICIAL_TLS_FAILED"))],
-        );
-        assert_eq!(
-            s.page(source_url(input).unwrap()).await.err().unwrap().code,
-            "OFFICIAL_HTTP_CONFIRMATION"
-        );
-        assert_eq!(s.transport.urls.lock().unwrap().len(), 1);
-        assert_eq!(s.pending[0].origin, "http://journal.example");
-        let mut allowed = session(
-            input,
-            FetchOptions {
-                http_origins: vec!["http://journal.example".into()],
-                ..Default::default()
-            },
-            vec![Err(FetchError::new("OFFICIAL_TLS_FAILED")), html()],
-        );
-        assert_eq!(
-            allowed
-                .page(source_url(input).unwrap())
-                .await
-                .unwrap()
-                .url
-                .scheme(),
-            "http"
-        );
-        assert!(allowed.used_http);
-        // A new invocation has no access to the previous invocation's grants.
-        let fresh = session(input, FetchOptions::default(), vec![]);
-        assert!(fresh.options.http_origins.is_empty());
+    async fn either_protocol_falls_back_once_without_extra_consent() {
+        for (first, second) in [("http", "https"), ("https", "http")] {
+            for code in [
+                "OFFICIAL_CONNECTION_FAILED",
+                "OFFICIAL_TLS_FAILED",
+                "OFFICIAL_TIMEOUT",
+                "OFFICIAL_HTTP_STATUS",
+                "OFFICIAL_DNS_FAILED",
+            ] {
+                let input = format!("{first}://journal.example/guide?lang=zh");
+                let alternate = format!("{second}://journal.example/guide?lang=zh");
+                let mut s = session(
+                    &input,
+                    FetchOptions::default(),
+                    vec![Err(FetchError::new(code)), html()],
+                );
+                let page = s.page(source_url(&input).unwrap()).await.unwrap();
+                assert_eq!(page.url.as_str(), alternate);
+                assert_eq!(
+                    *s.transport.urls.lock().unwrap(),
+                    vec![input.clone(), alternate]
+                );
+                assert!(s.pending.is_empty());
+                let mut failed = session(
+                    &input,
+                    FetchOptions::default(),
+                    vec![Err(FetchError::new(code)), Err(FetchError::new(code))],
+                );
+                assert!(failed.page(source_url(&input).unwrap()).await.is_err());
+                assert_eq!(failed.transport.urls.lock().unwrap().len(), 2);
+            }
+        }
     }
 
     #[tokio::test]
@@ -790,17 +995,18 @@ mod tests {
         let mut downgrade = session(
             seed,
             FetchOptions::default(),
-            vec![redirect("http://journal.example/guide")],
+            vec![redirect("http://journal.example/guide"), html()],
         );
         assert_eq!(
             downgrade
                 .page(source_url(seed).unwrap())
                 .await
-                .err()
                 .unwrap()
-                .code,
-            "OFFICIAL_HTTP_CONFIRMATION"
+                .url
+                .scheme(),
+            "http"
         );
+        assert!(downgrade.pending.is_empty());
         let mut looping = session(seed, FetchOptions::default(), vec![redirect(seed)]);
         assert_eq!(
             looping
@@ -841,6 +1047,13 @@ mod tests {
         bom.extend_from_slice(text.as_bytes());
         assert_eq!(decode_page(&bom, "text/html; charset=gbk").unwrap(), text);
         assert!(decode_page(&[0xff, 0xfe, 0x01], "text/plain").is_err());
+        let legacy = format!("<meta http-equiv='Content-Language' content='zh-cn'><p>{text}</p>");
+        let (bytes, _, _) = encoding_rs::GBK.encode(&legacy);
+        let (decoded, inferred) = decode_page_with_notice(&bytes, "text/html").unwrap();
+        assert!(inferred);
+        assert!(decoded.contains(text));
+        assert!(decode_page(&bytes, "text/html; charset=utf-8").is_err());
+        assert!(decode_page(&[0x81], "text/html").is_err());
     }
 
     #[test]
@@ -853,6 +1066,9 @@ mod tests {
             "https://journal.example/docs/guide?id=1&lang=zh"
         );
         assert_eq!(links[1].scheme(), "http");
+        let links = instruction_links(&base, "<a href='wltg/zgjz.htm'><font>征稿指南</font></a><a href='policy.htm'><img alt='投稿须知' src='nav.jpg'></a><a href='rules.htm' title='Author guide'></a>");
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].path(), "/wltg/zgjz.htm");
     }
 
     #[tokio::test]
@@ -861,12 +1077,10 @@ mod tests {
         let mut denied = session(
             seed,
             FetchOptions::default(),
-            vec![Ok(RawPage {
-                status: 403,
-                location: None,
-                content_type: String::new(),
-                bytes: vec![],
-            })],
+            vec![
+                Err(FetchError::detail("OFFICIAL_HTTP_STATUS", 403)),
+                Err(FetchError::detail("OFFICIAL_HTTP_STATUS", 403)),
+            ],
         );
         assert_eq!(
             denied
@@ -899,7 +1113,10 @@ mod tests {
         let mut s = session(
             seed,
             FetchOptions::default(),
-            vec![Err(FetchError::new("OFFICIAL_CONNECTION_FAILED"))],
+            vec![
+                Err(FetchError::new("OFFICIAL_CONNECTION_FAILED")),
+                Err(FetchError::new("OFFICIAL_CONNECTION_FAILED")),
+            ],
         );
         let mut page = Page {
             url: source_url(seed).unwrap(),
@@ -917,15 +1134,163 @@ mod tests {
     #[tokio::test]
     #[ignore = "Live public-site smoke check; run explicitly, separate from deterministic tests"]
     async fn live_public_journal_https_probe() {
-        for input in ["http://jcip.cipsc.org.cn/", "https://crad.ict.ac.cn/"] {
+        for (id, input) in manuscript_core::bundled_journal_homepages() {
             let seed = source_url(input).unwrap();
             let mut session =
                 FetchSession::new(seed.clone(), FetchOptions::default(), PublicTransport).unwrap();
             let page = session.page(seed).await;
+            let links = page
+                .as_ref()
+                .map(|page| instruction_links(&page.url, &page.html))
+                .unwrap_or_default();
             println!(
                 "{}",
-                serde_json::json!({"requestedUrl": input, "captured": page.is_ok(), "events": session.events, "pending": session.pending})
+                serde_json::json!({"id": id, "requestedUrl": input, "captured": page.is_ok(), "guideCandidates": links.iter().map(Url::as_str).collect::<Vec<_>>(), "events": session.events, "pending": session.pending})
             );
         }
+    }
+
+    #[test]
+    fn encrypted_dns_never_allows_private_or_malformed_results() {
+        let fake = "198.18.3.68:443".parse().unwrap();
+        assert!(needs_encrypted_dns(&[fake]).unwrap());
+        assert!(!needs_encrypted_dns(&["8.8.8.8:443".parse().unwrap()]).unwrap());
+        assert!(needs_encrypted_dns(&[fake, "127.0.0.1:443".parse().unwrap()]).is_err());
+        assert!(checked_addresses(vec![fake]).is_err());
+        let parse = |body: serde_json::Value| dns_addresses(body.to_string().as_bytes(), 80);
+        for ip in [
+            "127.0.0.1",
+            "198.18.2.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "not-an-ip",
+        ] {
+            assert!(
+                parse(serde_json::json!({"Status":0,"Answer":[{"type":1,"data":ip}]})).is_err()
+            );
+        }
+        for body in [
+            serde_json::json!({"Status":2}),
+            serde_json::json!({"Status":0,"TC":true}),
+            serde_json::json!({"Status":0,"Answer":[{"type":28,"data":"::ffff:127.0.0.1"}]}),
+            serde_json::json!({"Status":0,"Answer":[{"type":1,"data":"8.8.8.8"},{"type":1,"data":"10.1.1.1"}]}),
+        ] {
+            assert!(parse(body).is_err());
+        }
+        assert_eq!(parse(serde_json::json!({"Status":0,"Answer":[{"type":5,"data":"alias.example"},{"type":1,"data":"8.8.8.8"}]})).unwrap(), vec!["8.8.8.8:80".parse::<SocketAddr>().unwrap()]);
+        assert!(parse(serde_json::json!({"Status":0})).unwrap().is_empty());
+    }
+
+    #[test]
+    fn compressed_pages_enforce_decoded_size_and_integrity() {
+        use std::io::Write;
+        let gzip = |text: &[u8]| {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            encoder.write_all(text).unwrap();
+            encoder.finish().unwrap()
+        };
+        let text = b"<p>A separate title page is required.</p>";
+        assert_eq!(decompress_page(gzip(text)).unwrap(), (text.to_vec(), true));
+        assert_eq!(
+            decompress_page(text.to_vec()).unwrap(),
+            (text.to_vec(), false)
+        );
+        assert_eq!(
+            decompress_page(gzip(&vec![b'a'; MAX_BYTES + 1]))
+                .err()
+                .unwrap()
+                .code,
+            "OFFICIAL_TOO_LARGE"
+        );
+        assert_eq!(
+            decompress_page(vec![0x1f, 0x8b, 0]).err().unwrap().code,
+            "OFFICIAL_COMPRESSION_FAILED"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_does_not_bypass_security_and_failures_are_not_duplicated() {
+        for code in ["OFFICIAL_PRIVATE_ADDRESS", "OFFICIAL_ENCRYPTED_DNS_FAILED"] {
+            let input = source_url("http://journal.example/guide").unwrap();
+            let mut s = session(
+                input.as_str(),
+                FetchOptions::default(),
+                vec![Err(FetchError::new(code))],
+            );
+            assert_eq!(s.page(input).await.err().unwrap().code, code);
+            assert_eq!(s.transport.urls.lock().unwrap().len(), 1);
+            assert_eq!(
+                s.events.iter().filter(|event| event.code == code).count(),
+                1
+            );
+            assert!(s.pending.is_empty());
+        }
+        let input = source_url("http://journal.example/guide").unwrap();
+        let mut s = session(
+            input.as_str(),
+            FetchOptions::default(),
+            vec![redirect("http://198.18.1.1/guide")],
+        );
+        assert_eq!(
+            s.page(input).await.err().unwrap().code,
+            "OFFICIAL_PRIVATE_ADDRESS"
+        );
+        assert_eq!(s.transport.urls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn approved_domain_uses_both_protocols_but_does_not_allow_siblings() {
+        let input = source_url("http://authors.publisher.example/guide").unwrap();
+        let mut s = session(
+            "https://journal.example",
+            FetchOptions {
+                approved_origins: vec!["http://authors.publisher.example".into()],
+                ..Default::default()
+            },
+            vec![Err(FetchError::new("OFFICIAL_TLS_FAILED")), html()],
+        );
+        assert!(s.page(input).await.is_ok());
+        assert!(s.pending.is_empty());
+        assert_eq!(
+            s.page(source_url("https://other.publisher.example/guide").unwrap())
+                .await
+                .err()
+                .unwrap()
+                .code,
+            "OFFICIAL_ORIGIN_CONFIRMATION"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "Live CJC author-guide capture with verified correction for a legacy saved URL"]
+    async fn live_cjc_legacy_source_capture() {
+        let recorded = "https://cjc.ict.ac.cn/";
+        let correction = manuscript_core::journal_homepage_correction(recorded).unwrap();
+        let seed = source_url(correction.url).unwrap();
+        let mut session =
+            FetchSession::new(seed.clone(), FetchOptions::default(), PublicTransport).unwrap();
+        let homepage = session.page(seed).await.unwrap();
+        let links = instruction_links(&homepage.url, &homepage.html);
+        let mut captured = 0;
+        for link in links {
+            if let Ok(page) = session.page(link).await {
+                println!(
+                    "guide: {} ({} characters)",
+                    page.url,
+                    page.text.chars().count()
+                );
+                captured += 1;
+            }
+        }
+        println!(
+            "{}",
+            serde_json::json!({"events":session.events,"pending":session.pending})
+        );
+        assert!(
+            captured > 0,
+            "must capture an actual author-guide body, not just the homepage"
+        );
+        assert!(session.pending.is_empty());
     }
 }

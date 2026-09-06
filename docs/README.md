@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.44 文档
+# 投稿舱 ManuscriptDock V0.45 文档
 
 ## 使用指南
 
@@ -26,7 +26,8 @@
 
 ## 技术与体验
 
-- [官方来源读取与 HTTP 兼容](official-source-access.md)：HTTPS 优先、逐次 HTTP／跨域确认、网络防护、编码兼容及访问记录。
+- [官方来源读取与 HTTP 兼容](official-source-access.md)：HTTP 无额外确认、虚拟 DNS 恢复、来源修正、网络防护与访问记录。
+- [期刊网址核验记录](journal-url-audit-2026-09-06.md)：17 条内置期刊入口检查与剩余站点限制。
 
 - [仓库结构](repository-structure.md)：活跃源码和未来工具链边界。
 - [MVP 开发计划](mvp-development-plan.md)：可执行切片、里程碑、验收标准和工具链策略。

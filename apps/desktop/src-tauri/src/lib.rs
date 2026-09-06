@@ -199,6 +199,9 @@ fn instruction_page_hint(value: &str) -> bool {
         "投稿指南",
         "投稿要求",
         "征稿简则",
+        "征稿指南",
+        "征稿须知",
+        "投稿细则",
         "作者指南",
     ]
     .iter()
@@ -1013,6 +1016,13 @@ struct OfficialFetchResult {
 }
 
 #[tauri::command]
+fn get_journal_homepage_correction(
+    homepage_url: String,
+) -> Option<manuscript_core::JournalHomepageCorrection> {
+    manuscript_core::journal_homepage_correction(&homepage_url)
+}
+
+#[tauri::command]
 async fn discover_journal_requirements(
     workspace_id: String,
     target_selection_id: String,
@@ -1033,17 +1043,31 @@ async fn discover_journal_requirements(
         .chain(plan.backups.iter())
         .find(|target| target.selection_id == target_selection_id)
         .ok_or_else(|| "未找到需要查询的投稿目标".to_owned())?;
-    let seed = public_source_url(&target.homepage_url)?;
+    let correction = manuscript_core::journal_homepage_correction(&target.homepage_url);
+    let seed = public_source_url(
+        correction
+            .as_ref()
+            .map_or(target.homepage_url.as_str(), |source| source.url),
+    )?;
     let run_id = Uuid::new_v4().to_string();
     store
         .record_journal_source_access(
             &workspace_id,
             &target_selection_id,
             "started",
-            &json!({"runId": run_id, "requestedUrl": seed.as_str(), "options": options}),
+            &json!({"runId": run_id, "requestedUrl": target.homepage_url, "effectiveUrl": seed.as_str(), "sourceCorrection": correction, "options": options,
+                "networkPolicy": "public-http-https-encrypted-dns-v2", "dnsRecoveryProvider": "https://cloudflare-dns.com/dns-query"}),
         )
         .map_err(|_| "OFFICIAL_AUDIT_FAILED")?;
     let mut session = FetchSession::new(seed.clone(), options.clone(), PublicTransport)?;
+    if let Some(source) = correction.filter(|_| seed.as_str() != target.homepage_url) {
+        session.events.push(official_sources::AccessEvent {
+            requested_url: target.homepage_url.clone(),
+            url: seed.to_string(),
+            code: "OFFICIAL_SOURCE_CORRECTED".into(),
+            detail: Some(format!("{} · {}", source.authority_url, source.verified_on)),
+        });
+    }
     let mut documents = Vec::new();
     let mut partial = false;
     if let Ok(mut homepage) = session.page(seed.clone()).await {
@@ -2187,6 +2211,7 @@ pub fn run() {
             get_submission_target_plan,
             get_journal_requirement_snapshots,
             discover_journal_requirements,
+            get_journal_homepage_correction,
             get_journal_source_access,
             cancel_journal_source_access,
             save_manual_journal_requirements,

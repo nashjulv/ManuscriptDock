@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.44")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.44" }));
-    expect(brandStatement.getByText("V0.44")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.45")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.45" }));
+    expect(brandStatement.getByText("V0.45")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -127,11 +127,14 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: "打开 nlp-study.pdf" }));
     await user.click(within(screen.getByRole("navigation", { name: "投稿准备主任务" })).getByRole("button", { name: /目标期刊/ }));
-    expect(await screen.findByText("当前记录使用 HTTP；授权后先尝试对应的 HTTPS 地址。")).toBeVisible();
+    expect(screen.queryByText("优先使用 HTTPS，必要时自动使用公开 HTTP 页面，无需再次确认。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "获取官方投稿要求" })).toBeDisabled();
-    expect(screen.getByText("手动粘贴时，HTTP 网址只作为本地来源记录保存，不触发联网。")).toBeVisible();
+    const manualToggle = screen.getByText("网页无法读取？粘贴官方原文");
+    expect(manualToggle.closest("details")).not.toHaveAttribute("open");
+    await user.click(manualToggle);
+    expect(screen.queryByText("手动粘贴时，HTTP 网址只作为本地来源记录保存，不触发联网。")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "EN" }));
-    expect(screen.getByText("The recorded URL uses HTTP. After authorization, the corresponding HTTPS URL is tried first.")).toBeVisible();
+    expect(screen.queryByText("HTTPS is preferred; public HTTP pages are used automatically when needed, without another confirmation.")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "中文" }));
 
     expect(screen.getByLabelText("官方来源网址")).toHaveValue(target.homepageUrl);
@@ -1123,7 +1126,7 @@ describe("App", () => {
     await user.click(within(refreshedPrimary).getByLabelText(/仅本次允许后端读取/));
     await user.click(within(refreshedPrimary).getByRole("button", { name: "获取官方投稿要求" }));
     expect(await within(refreshedPrimary).findByText("已建立期刊专属要求快照")).toBeVisible();
-    expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true, options: { approvedOrigins: [], httpOrigins: [] } });
+    expect(invokeMock).toHaveBeenCalledWith("discover_journal_requirements", { workspaceId: workspace.id, targetSelectionId: "selection-dr1-primary", authorConfirmedExternalTransmission: true, options: { approvedOrigins: [] } });
     await user.click(screen.getByRole("button", { name: "按要求准备投稿资料" }));
     expect(await screen.findByRole("heading", { name: "按目标期刊组织投稿资料" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "投稿包准备树" })).toBeVisible();
