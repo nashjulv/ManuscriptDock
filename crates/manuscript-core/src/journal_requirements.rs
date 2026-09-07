@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const JOURNAL_REQUIREMENT_SCHEMA_VERSION: u32 = 2;
+pub const JOURNAL_REQUIREMENT_SCHEMA_VERSION: u32 = 3;
 pub const JOURNAL_REQUIREMENT_FRESHNESS_DAYS: u64 = 90;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -37,6 +37,7 @@ pub enum JournalRequirementCategory {
     Abstract,
     Keywords,
     LengthLimit,
+    SubmissionDeadline,
     Figures,
     Tables,
     SupplementaryFiles,
@@ -72,6 +73,8 @@ pub struct JournalRequirementSource {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalRequirementItem {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_evidence: Vec<RequirementEvidence>,
     pub id: String,
     pub category: JournalRequirementCategory,
     pub label: String,
@@ -83,6 +86,13 @@ pub struct JournalRequirementItem {
     // Omission preserves the serialized hash of pre-structured immutable snapshots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declaration: Option<crate::DeclarationRequirement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequirementEvidence {
+    pub source_url: String,
+    pub excerpt: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -113,6 +123,20 @@ struct RequirementPattern {
 }
 
 const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
+    RequirementPattern {
+        category: JournalRequirementCategory::SubmissionDeadline,
+        label: "注册与提交时限",
+        label_en: "Registration and submission deadline",
+        keywords: &[
+            "天内",
+            "小时内",
+            "不超过",
+            "deadline",
+            "within",
+            "no more than",
+            "not exceed",
+        ],
+    },
     RequirementPattern {
         category: JournalRequirementCategory::ManuscriptFile,
         label: "主稿文件与格式",
@@ -202,6 +226,7 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
         label_en: "Figures and resolution",
         keywords: &[
             "figure",
+            "figures",
             "artwork",
             "dpi",
             "tiff",
@@ -215,7 +240,7 @@ const REQUIREMENT_PATTERNS: &[RequirementPattern] = &[
         category: JournalRequirementCategory::Tables,
         label: "表格",
         label_en: "Tables",
-        keywords: &["table", "表格"],
+        keywords: &["table", "tables", "表格"],
     },
     RequirementPattern {
         category: JournalRequirementCategory::SupplementaryFiles,
@@ -365,10 +390,18 @@ pub fn extract_journal_requirements(
             .flat_map(|document| {
                 find_evidence_excerpts(&document.text, pattern.keywords)
                     .into_iter()
+                    .filter(move |excerpt| match pattern.category {
+                        JournalRequirementCategory::LengthLimit => is_length_constraint(excerpt),
+                        JournalRequirementCategory::SubmissionDeadline => {
+                            is_submission_deadline(excerpt)
+                        }
+                        _ => true,
+                    })
                     .map(move |excerpt| (document, excerpt))
             })
             .take(match pattern.category {
-                JournalRequirementCategory::LengthLimit => 12,
+                JournalRequirementCategory::LengthLimit
+                | JournalRequirementCategory::SubmissionDeadline => 12,
                 category if crate::declarations::is_declaration_category(category) => 32,
                 _ => 1,
             })
@@ -381,6 +414,7 @@ pub fn extract_journal_requirements(
                 (pattern.label.to_owned(), pattern.label_en.to_owned())
             };
             let mut item = JournalRequirementItem {
+                additional_evidence: Vec::new(),
                 id: format!(
                     "requirement-{}{}",
                     category_slug(pattern.category),
@@ -405,6 +439,26 @@ pub fn extract_journal_requirements(
                     explicit_template_url(&document.text, &item.evidence_excerpt);
             }
             for item in crate::declarations::expand_declaration_items(item) {
+                if let Some(previous) =
+                    requirements
+                        .iter_mut()
+                        .find(|previous: &&mut JournalRequirementItem| {
+                            previous.category == item.category
+                                && previous.label == item.label
+                                && semantic_requirement_key(previous)
+                                    == semantic_requirement_key(&item)
+                        })
+                {
+                    if previous.evidence_excerpt != item.evidence_excerpt
+                        || previous.source_url != item.source_url
+                    {
+                        previous.additional_evidence.push(RequirementEvidence {
+                            source_url: item.source_url.clone(),
+                            excerpt: item.evidence_excerpt.clone(),
+                        });
+                    }
+                    continue;
+                }
                 if !requirements
                     .iter()
                     .any(|previous: &JournalRequirementItem| {
@@ -419,6 +473,114 @@ pub fn extract_journal_requirements(
         }
     }
     (sources, requirements)
+}
+
+#[cfg(test)]
+mod remediation_tests {
+    use super::*;
+    #[test]
+    fn deadlines_are_not_length_limits_and_duplicate_deadlines_keep_both_sources() {
+        let docs = vec![JournalRequirementSourceDocument { url: "https://example.test/guide".into(), title: "Synthetic".into(), official_host_matched: true, text: "在注册稿件编号后最迟不超过1天内提交论文。网上注册登记与稿件提交应同步，时间相差不超过1天。论文篇幅有基本要求，但请注意并非越长越好。摘要字数必须不超过200个字。".into() }];
+        let (_, items) = extract_journal_requirements(&docs, 1);
+        let deadlines: Vec<_> = items
+            .iter()
+            .filter(|item| item.category == JournalRequirementCategory::SubmissionDeadline)
+            .collect();
+        assert_eq!(deadlines.len(), 1);
+        assert_eq!(deadlines[0].additional_evidence.len(), 1);
+        assert!(items
+            .iter()
+            .filter(|item| item.category == JournalRequirementCategory::LengthLimit)
+            .all(|item| !item.evidence_excerpt.contains("1天")));
+        assert!(items.iter().any(|item| item.label == "摘要篇幅限制"));
+    }
+    #[test]
+    fn english_time_and_page_constraints_remain_separate() {
+        let docs = vec![JournalRequirementSourceDocument { url: "https://example.test/guide".into(), title: "Synthetic".into(), official_host_matched: true, text: "Authors must submit within 2 days of registration. The manuscript must not exceed 12 pages. Abstract word count must not exceed 250 words.".into() }];
+        let (_, items) = extract_journal_requirements(&docs, 1);
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.category == JournalRequirementCategory::SubmissionDeadline)
+                .count(),
+            1
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.category == JournalRequirementCategory::LengthLimit)
+                .count(),
+            2
+        );
+    }
+}
+
+fn is_submission_deadline(text: &str) -> bool {
+    let text = text.to_lowercase();
+    [
+        "提交",
+        "注册",
+        "submission",
+        "submit",
+        "register",
+        "registration",
+    ]
+    .iter()
+    .any(|v| text.contains(v))
+        && ["天", "小时", " day", " hour", "deadline"]
+            .iter()
+            .any(|v| text.contains(v))
+}
+
+fn is_length_constraint(text: &str) -> bool {
+    let text = text.to_lowercase();
+    [
+        "篇幅",
+        "字数",
+        "页数",
+        "个字",
+        "字以内",
+        " word",
+        "character",
+        " page",
+        "maximum length",
+    ]
+    .iter()
+    .any(|v| text.contains(v))
+        || (text.contains('页') && text.chars().any(|v| v.is_ascii_digit()))
+}
+
+fn semantic_requirement_key(item: &JournalRequirementItem) -> String {
+    if item.category == JournalRequirementCategory::SubmissionDeadline {
+        let text = &item.evidence_excerpt;
+        // Only merge the known semantic form: registration -> submission, same upper bound.
+        if (text.contains("注册") || text.to_lowercase().contains("registration"))
+            && (text.contains("提交") || text.to_lowercase().contains("submission"))
+            && (text.contains("不超过") || text.to_lowercase().contains("within"))
+        {
+            let bound = text.split("不超过").nth(1).unwrap_or(text).trim();
+            let number: String = bound
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            let unit = if text.contains("小时") || text.contains("hour") {
+                "hours"
+            } else {
+                "days"
+            };
+            if !number.is_empty() {
+                return format!(
+                    "registration-to-submission:maximum:{number}:{unit}:{:?}",
+                    item.obligation
+                );
+            }
+        }
+    }
+    item.evidence_excerpt
+        .split_whitespace()
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn explicit_template_url(text: &str, evidence: &str) -> Option<String> {
@@ -624,6 +786,96 @@ fn keyword_matches(value: &str, keyword: &str) -> bool {
     })
 }
 
+pub(crate) fn allows_applicability_review(excerpt: &str) -> bool {
+    let text = excerpt.trim().to_lowercase();
+    // Conditional scope can refer to article type, research participants, or a
+    // submission stage, not just the literal phrase "if applicable".
+    if ["regardless of", "不论"]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return false;
+    }
+    let conditional = (text.starts_with("for ") && !text.starts_with("for submission"))
+        || [
+            "if ",
+            "when ",
+            "where ",
+            "for review",
+            "for research",
+            "for clinical",
+            "review articles",
+            "research articles",
+            "clinical studies",
+            "case reports",
+            "studies involving",
+            "articles reporting",
+            "only ",
+            "如",
+            "若",
+            "涉及",
+            "针对",
+            "对于",
+            "仅",
+            "时，",
+            "时需",
+            "类文章",
+            "类稿件",
+            "综述文章",
+            "临床研究",
+            "病例报告",
+        ]
+        .iter()
+        .any(|marker| text.contains(marker));
+    if conditional {
+        return true;
+    }
+    // Unknown applicability can be reviewed with a recorded basis. Explicit,
+    // unconditional obligations cannot be waived through this control.
+    ![
+        "must",
+        "required",
+        "mandatory",
+        "shall",
+        "all manuscripts",
+        "every submission",
+        "必须",
+        "须",
+        "一律",
+        "所有稿件",
+        "不得",
+        "不超过",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+pub(crate) fn presence_only_requirement(item: &JournalRequirementItem) -> bool {
+    let text = item
+        .evidence_excerpt
+        .trim()
+        .trim_end_matches(['.', '。'])
+        .to_lowercase();
+    match item.category {
+        JournalRequirementCategory::Abstract => [
+            "an abstract is required",
+            "the abstract is required",
+            "the manuscript must include an abstract",
+            "必须包含摘要",
+            "稿件须包含摘要",
+        ]
+        .contains(&text.as_str()),
+        JournalRequirementCategory::Keywords => [
+            "keywords are required",
+            "the manuscript must include keywords",
+            "必须包含关键词",
+            "稿件须包含关键词",
+        ]
+        .contains(&text.as_str()),
+        _ => false,
+    }
+}
+
 fn detect_obligation(excerpt: &str) -> JournalRequirementObligation {
     let lowercase = excerpt.to_lowercase();
     if [
@@ -714,6 +966,7 @@ fn category_slug(category: JournalRequirementCategory) -> &'static str {
         JournalRequirementCategory::Abstract => "abstract",
         JournalRequirementCategory::Keywords => "keywords",
         JournalRequirementCategory::LengthLimit => "length-limit",
+        JournalRequirementCategory::SubmissionDeadline => "submission-deadline",
         JournalRequirementCategory::Figures => "figures",
         JournalRequirementCategory::Tables => "tables",
         JournalRequirementCategory::SupplementaryFiles => "supplementary-files",

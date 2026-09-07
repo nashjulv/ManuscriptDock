@@ -1,5 +1,11 @@
 # ManuscriptDock 产品设计总纲
 
+## V0.50 更新
+
+V0.50 的主流程为：导入后可立即做基础检查；再核验目标、逐项准备、重查当前材料、预检导出。状态由 Rust 统一投影。识别纠错、PDF 源稿关联和旧版材料沿用均保留来源，不隐式替作者确认。
+
+当前验收及未完成细项见[修复验证记录](first-use-flow-v050-validation.md)；来源与状态合同见 [ADR 0009](adr/0009-evidence-bound-preparation-and-linked-source.md)。下文保留背景与既有能力说明，与本节冲突时以本节为准。
+
 - 状态：0.1 / 产品定义与体验基线
 - 日期：2026-08-24
 - 产品名：ManuscriptDock V0.49（安装标识保持 `ManuscriptDock`）

@@ -5,6 +5,8 @@ mod journal_match;
 mod journal_requirements;
 mod knowledge;
 mod readiness;
+mod recognition;
+pub use recognition::{RecognitionObject, StructureReviewInput};
 mod revision;
 mod structure;
 mod workspace;
@@ -27,14 +29,14 @@ pub use journal_directory::{
 };
 pub use journal_match::{
     bundled_journal_homepages, deadline_days_remaining, journal_homepage_correction,
-    recommend_journals, recommend_journals_with_directory, ArticleTypePreference,
-    InstitutionRuleEvidence, InstitutionRuleStatus, JournalFitScores, JournalHomepageCorrection,
-    JournalMatchPreferences, JournalRecommendation, JournalRecommendationPortfolio,
-    JournalRecommendationProfile, JournalRecommendationProfileInput,
-    JournalRecommendationProfileSummary, JournalRecommendationRun, JournalRegion,
-    ManuscriptPurpose, OpenAccessPreference, PublicationLanguagePreference, ResearchTopic,
-    TargetStrategy, JOURNAL_CATALOG_VERSION, JOURNAL_MATCH_ALGORITHM_VERSION,
-    JOURNAL_MATCH_SCHEMA_VERSION, JOURNAL_PROFILE_SCHEMA_VERSION,
+    public_journal_scope, recommend_journals, recommend_journals_with_directory,
+    ArticleTypePreference, InstitutionRuleEvidence, InstitutionRuleStatus, JournalFitScores,
+    JournalHomepageCorrection, JournalMatchPreferences, JournalRecommendation,
+    JournalRecommendationPortfolio, JournalRecommendationProfile,
+    JournalRecommendationProfileInput, JournalRecommendationProfileSummary,
+    JournalRecommendationRun, JournalRegion, ManuscriptPurpose, OpenAccessPreference,
+    PublicationLanguagePreference, ResearchTopic, TargetStrategy, JOURNAL_CATALOG_VERSION,
+    JOURNAL_MATCH_ALGORITHM_VERSION, JOURNAL_MATCH_SCHEMA_VERSION, JOURNAL_PROFILE_SCHEMA_VERSION,
 };
 pub use journal_requirements::{
     extract_journal_requirements, JournalRequirementCategory, JournalRequirementItem,
@@ -72,13 +74,14 @@ pub use structure::{
     StructureError, StructureReport,
 };
 pub use workspace::{
-    KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, SubmissionExport,
-    SubmissionMaterial, SubmissionMaterialCatalog, SubmissionMaterialChecklistItem,
-    SubmissionMaterialKind, SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection,
-    SubmissionTargetTransition, TargetSubmissionExport, TargetSubmissionPackageFile,
-    TargetSubmissionPackagePlan, VersionComparison, VersionCreation, VersionHistory, VersionOrigin,
-    WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation, WorkspaceError, WorkspaceLifecycle,
-    WorkspaceStore, WorkspaceSummary,
+    KnowledgeBodyRecord, LocalAttestation, ManuscriptVersionSummary, PackageExportStatus,
+    SubmissionExport, SubmissionMaterial, SubmissionMaterialCatalog,
+    SubmissionMaterialChecklistItem, SubmissionMaterialKind, SubmissionRecord,
+    SubmissionTargetPlan, SubmissionTargetSelection, SubmissionTargetTransition,
+    TargetSubmissionExport, TargetSubmissionPackageFile, TargetSubmissionPackagePlan,
+    VersionComparison, VersionCreation, VersionHistory, VersionOrigin, WorkspaceCatalog,
+    WorkspaceCopyExport, WorkspaceCreation, WorkspaceError, WorkspaceImportMatch,
+    WorkspaceLifecycle, WorkspaceSourceLink, WorkspaceStore, WorkspaceSummary,
 };
 
 use serde::{Deserialize, Serialize};

@@ -40,10 +40,13 @@ describe("structured declaration requirements", () => {
       await user.click(button); expect(add).toHaveBeenCalledWith("declaration", "declaration-attachment");
       await user.click(screen.getByRole("tab", { name: en ? /Requirements/ : /要求清单/ }));
       expect(screen.getAllByText(en ? "Official formats: PDF" : "官方限定格式：PDF")).toHaveLength(1);
-      expect(screen.getByRole("button", { name: en ? /Continue after required materials/ : /完成必需材料后继续/ })).toBeDisabled();
-      const confirmations = screen.getAllByRole("button", { name: en ? "I confirm this is accurate and applicable" : "我已确认内容真实且适用" });
+      expect(screen.getByRole("button", { name: en ? /Run local basic checks/ : /运行本地基础检查/ })).toBeEnabled();
+      const confirmations = screen.getAllByLabelText(en ? "Review outcome" : "核验结果");
       expect(confirmations).toHaveLength(2);
-      await user.click(confirmations[0]); expect(confirm).toHaveBeenCalledWith("declaration-manuscript", true);
+      await user.selectOptions(confirmations[0], "compliant");
+      invokeMock.mockResolvedValueOnce(catalog);
+      await user.click(screen.getAllByRole("button", { name: en ? "Save review" : "保存核验结果" })[0]);
+      expect(invokeMock).toHaveBeenCalledWith("decide_submission_requirement", expect.objectContaining({ itemId: "declaration-manuscript", decision: "compliant" }));
       invokeMock.mockResolvedValueOnce(catalog);
       await user.selectOptions(screen.getByLabelText(en ? "Link a stored file" : "关联已有文件"), "stored");
       await user.click(screen.getByRole("button", { name: en ? "Link to this requirement" : "关联到此要求" }));

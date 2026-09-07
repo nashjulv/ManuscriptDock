@@ -1,3 +1,4 @@
+import { GuidedButton, type PrerequisiteCheck } from "./ActionGuidance";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { localizeBackendText, useI18n } from "./i18n";
@@ -38,7 +39,7 @@ export function DeclarationDetails({ item }: { item: SubmissionMaterialChecklist
   </div>;
 }
 
-export function DeclarationRequirements({ catalog, disabled, onUpdated }: { catalog: SubmissionMaterialCatalog; disabled: boolean; onUpdated: (catalog: SubmissionMaterialCatalog) => void }) {
+export function DeclarationRequirements({ catalog, disabled, prerequisite, onUpdated }: { catalog: SubmissionMaterialCatalog; disabled: boolean; prerequisite?: PrerequisiteCheck; onUpdated: (catalog: SubmissionMaterialCatalog) => void }) {
   const { text, locale } = useI18n();
   const [editing, setEditing] = useState<JournalRequirementItem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +49,8 @@ export function DeclarationRequirements({ catalog, disabled, onUpdated }: { cata
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const plan = catalog.declarationPlan;
-  if (!plan) return null;
+  const missing = typeof prerequisite === "function" ? prerequisite() : prerequisite;
+  if (!plan) return <section className="declaration-requirements"><p>{missing ? text("声明清单尚未生成，请先核验目标期刊与官方要求。", "The declaration plan is not ready. Verify the target journal and official requirements first.") : text("当前没有声明要求，请核对官方原文确认是否需要补充。", "There are no declaration requirements. Review the official source to check whether any are missing.")}</p>{missing ? <GuidedButton className="secondary-button" disabled={disabled} prerequisite={prerequisite}>{text("核验声明要求", "Review declaration requirements")}</GuidedButton> : null}</section>;
   async function save(update: DeclarationPlanUpdate) {
     if (busy || disabled) return;
     setBusy(true); setError(null);
@@ -62,8 +64,8 @@ export function DeclarationRequirements({ catalog, disabled, onUpdated }: { cata
   const patchDeclaration = (change: Partial<DeclarationRequirement>) => setEditing(current => current ? { ...current, declaration: { ...(current.declaration ?? EMPTY_DECLARATION), ...change } } : null);
   const locked = disabled || busy;
   return <section className="declaration-requirements" aria-label={text("声明要求管理", "Declaration requirements")}>
-    <header><h3>{text("声明与支持文件要求", "Declarations and supporting documents")}</h3>
-      <label>{text("当前投稿阶段", "Current submission stage")}<select disabled={locked} value={plan.stage} onChange={event => void save({ stage: event.target.value as SubmissionStage })}>
+    <header><h3>{text("声明与支持文件要求", "Declarations and supporting documents")}</h3>{missing ? <GuidedButton className="text-button" prerequisite={prerequisite}>{text("先核验目标与要求", "Verify target and requirements first")}</GuidedButton> : null}
+      <label>{text("当前投稿阶段", "Current submission stage")}<select disabled={locked || Boolean(missing)} value={plan.stage} onChange={event => void save({ stage: event.target.value as SubmissionStage })}>
         <option value="initial">{text("初次投稿", "Initial submission")}</option><option value="revision">{text("返修", "Revision")}</option><option value="accepted">{text("录用后", "After acceptance")}</option>
       </select></label>
     </header>
@@ -73,13 +75,13 @@ export function DeclarationRequirements({ catalog, disabled, onUpdated }: { cata
       const attachment = attachments.find(item => item.id === reuseSlots[requirement.id]) ?? attachments[0];
       return <article key={requirement.id}><strong>{locale === "en" ? requirement.labelEn : requirement.label}</strong><blockquote>{requirement.evidenceExcerpt}</blockquote>
         {requirement.declaration?.authorNote ? <p>{text("作者核验依据：", "Author verification note: ")}{requirement.declaration.authorNote}</p> : null}
-        <button type="button" className="text-button" disabled={locked} onClick={() => { setEditing(structuredClone(requirement)); setError(null); }}>{text("核验或调整要求", "Verify or adjust requirement")}</button>
-        {attachment && attachment.status !== "not_applicable" && catalog.materials.length > 0 ? <div className="declaration-reuse">{attachments.length > 1 ? <label>{text("关联目标文件项", "Destination file slot")}<select disabled={locked} value={attachment.id} onChange={event => setReuseSlots(current => ({ ...current, [requirement.id]: event.target.value }))}>{attachments.map(item => <option key={item.id} value={item.id}>{locale === "en" ? item.labelEn : item.label}</option>)}</select></label> : null}<label>{text("关联已有文件", "Link a stored file")}<select disabled={locked} value={reuse[requirement.id] ?? ""} onChange={event => setReuse(current => ({ ...current, [requirement.id]: event.target.value }))}>
+        <GuidedButton type="button" className="text-button" disabled={locked} prerequisite={prerequisite} onClick={() => { setEditing(structuredClone(requirement)); setError(null); }}>{text("核验或调整要求", "Verify or adjust requirement")}</GuidedButton>
+        {attachment && attachment.status !== "not_applicable" && catalog.materials.length > 0 ? <div className="declaration-reuse">{attachments.length > 1 ? <label>{text("关联目标文件项", "Destination file slot")}<select disabled={locked} value={attachment.id} onChange={event => setReuseSlots(current => ({ ...current, [requirement.id]: event.target.value }))}>{attachments.map(item => <option key={item.id} value={item.id}>{locale === "en" ? item.labelEn : item.label}</option>)}</select></label> : null}<label>{text("关联已有文件", "Link a stored file")}<select disabled={locked} data-reuse-file value={reuse[requirement.id] ?? ""} onChange={event => setReuse(current => ({ ...current, [requirement.id]: event.target.value }))}>
           <option value="">{text("选择文件（含历史材料）", "Choose a file (including history)")}</option>{catalog.materials.filter(material => material.kind === "declaration" || material.kind === "other").map(material => <option key={material.materialId} value={material.materialId}>{material.originalName} · v{material.manuscriptVersion}</option>)}
-        </select></label><button className="secondary-button" type="button" disabled={locked || !reuse[requirement.id]} onClick={() => void save({ materialId: reuse[requirement.id], checklistItemId: attachment.id })}>{text("关联到此要求", "Link to this requirement")}</button></div> : null}
+        </select></label><GuidedButton className="secondary-button" type="button" disabled={locked} prerequisite={() => (typeof prerequisite === "function" ? prerequisite() : prerequisite) || (!reuse[requirement.id] && { message: catalog.materials.some(material => material.kind === "declaration" || material.kind === "other") ? text("请先选择要关联的已有文件。", "Choose the stored file to link first.") : text("尚无可关联的声明文件，请到上传资料中添加。", "No eligible declaration file is available. Add one in Upload."), scope: catalog.materials.some(material => material.kind === "declaration" || material.kind === "other") ? ".declaration-reuse" : undefined, target: catalog.materials.some(material => material.kind === "declaration" || material.kind === "other") ? "[data-reuse-file]" : "#material-panel-upload", prepare: catalog.materials.some(material => material.kind === "declaration" || material.kind === "other") ? undefined : () => document.getElementById("material-view-upload")?.click(), actionLabel: text("前往上传资料", "Go to Upload") })} onClick={() => void save({ materialId: reuse[requirement.id], checklistItemId: attachment.id })}>{text("关联到此要求", "Link to this requirement")}</GuidedButton></div> : null}
       </article>;
     })}</div>
-    <button className="secondary-button" type="button" disabled={locked} onClick={() => setEditing({ id: "", category: "other_supporting_files", label: "", labelEn: "", obligation: "required", detail: "", sourceUrl: "", evidenceExcerpt: "", declaration: { ...EMPTY_DECLARATION } })}>{text("补充遗漏的声明要求", "Add a missing declaration requirement")}</button>
+    <GuidedButton className="secondary-button" type="button" disabled={locked} prerequisite={prerequisite} onClick={() => setEditing({ id: "", category: "other_supporting_files", label: "", labelEn: "", obligation: "required", detail: "", sourceUrl: "", evidenceExcerpt: "", declaration: { ...EMPTY_DECLARATION } })}>{text("补充遗漏的声明要求", "Add a missing declaration requirement")}</GuidedButton>
     {editing ? <form className="declaration-editor" aria-label={text("编辑声明要求", "Edit declaration requirement")} onSubmit={event => { event.preventDefault(); void save({ requirement: editing }); }}>
       <h4>{text("依据官方原文核验", "Verify against official text")}</h4>
       <label>{text("中文名称", "Chinese label")}<input required maxLength={100} value={editing.label} onChange={event => patch({ label: event.target.value })} /></label>
@@ -100,7 +102,7 @@ export function DeclarationRequirements({ catalog, disabled, onUpdated }: { cata
       <label>{text("官方模板地址（可选）", "Official template URL (optional)")}<input type="url" value={editing.declaration?.templateUrl ?? ""} onChange={event => patchDeclaration({ templateUrl: event.target.value || null })} /></label>
       <label>{text("核验依据与调整说明", "Verification basis and adjustment note")}<textarea required minLength={4} value={editing.declaration?.authorNote ?? ""} onChange={event => patchDeclaration({ authorNote: event.target.value })} /></label>
       <p>{text("保存后相关材料和确认状态将重新核对，原文件与历史记录保留。", "Saving rechecks the affected materials and confirmations. Original files and history are retained.")}</p>
-      <div><button type="submit" className="primary-button" disabled={locked}>{busy ? text("正在保存…", "Saving…") : text("保存核验结果", "Save verification")}</button><button type="button" className="text-button" disabled={busy} onClick={() => setEditing(null)}>{text("取消", "Cancel")}</button></div>
+      <div><GuidedButton type="submit" className="primary-button" disabled={locked} prerequisite={prerequisite}>{busy ? text("正在保存…", "Saving…") : text("保存核验结果", "Save verification")}</GuidedButton><button type="button" className="text-button" disabled={busy} onClick={() => setEditing(null)}>{text("取消", "Cancel")}</button></div>
     </form> : null}
     {error ? <p role="alert">{localizeBackendText(locale, error)}</p> : null}
   </section>;

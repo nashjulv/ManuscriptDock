@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { OfficialSourceAccess, visibleAccessEvents, type OfficialFetchResult } from "./OfficialSourceAccess";
@@ -7,6 +7,61 @@ import { I18nProvider, localizeBackendText, OFFICIAL_SOURCE_MESSAGES } from "./i
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 beforeEach(() => { window.localStorage.clear(); invokeMock.mockReset(); invokeMock.mockResolvedValue(null); });
+
+for (const locale of ["zh-CN", "en"] as const) {
+  const en = locale === "en";
+  it.each(["success", "partial", "handled-failure", "rejection"])(`keeps consent checked while pending and consumes it after %s in ${locale}`, async (outcome) => {
+    window.localStorage.setItem("manuscriptdock.locale", locale);
+    const saved: OfficialFetchResult = { runId: "saved", snapshot: null, partial: true, options: { approvedOrigins: [] }, pending: [{ kind: "origin", origin: "https://authors.publisher.example" }], events: [] };
+    invokeMock.mockImplementation(async command => command === "get_journal_source_access" ? saved : null);
+    let resolve!: (result: OfficialFetchResult | undefined) => void;
+    let reject!: (error: Error) => void;
+    const onDiscover = vi.fn(() => new Promise<OfficialFetchResult | undefined>((yes, no) => { resolve = yes; reject = no; }));
+    const user = userEvent.setup();
+    render(<I18nProvider><OfficialSourceAccess workspaceId="workspace" selectionId="selection" homepageUrl="https://journal.example" busy={false} onDiscover={onDiscover} /></I18nProvider>);
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
+    for (const checkbox of screen.getAllByRole("checkbox")) await user.click(checkbox);
+    await user.click(screen.getByRole("button", { name: en ? "Capture official requirements" : "获取官方投稿要求" }));
+    for (const checkbox of screen.getAllByRole("checkbox")) { expect(checkbox).toBeChecked(); expect(checkbox).toBeDisabled(); }
+    expect(screen.getByText(en ? "Authorized for this request. Reading in progress." : "本次已授权，正在读取。")).toBeVisible();
+    const reading = screen.getByRole("button", { name: en ? "Reading official pages…" : "正在读取官方页面…" });
+    expect(reading).toBeDisabled(); await user.click(reading);
+    expect(onDiscover).toHaveBeenCalledTimes(1);
+    expect(onDiscover).toHaveBeenCalledWith({ approvedOrigins: ["https://authors.publisher.example"] });
+    expect(screen.queryByText(en ? "Capture incomplete · confirmation or official text is still needed" : "获取未完成 · 仍需确认或补充官方原文")).not.toBeInTheDocument();
+    await act(async () => {
+      if (outcome === "rejection") reject(new Error("Synthetic failure"));
+      else resolve(outcome === "handled-failure" ? undefined : { ...saved, runId: "new", partial: outcome === "partial" });
+    });
+    expect(screen.getByText(en ? "Authorization for this request has ended. Authorize again to fetch another time." : "本次授权已结束，再次获取需重新授权。")).toBeVisible();
+    for (const checkbox of screen.getAllByRole("checkbox")) { expect(checkbox).not.toBeChecked(); expect(checkbox).toBeEnabled(); }
+    const retry = screen.getByRole("button", { name: en ? "Capture official requirements" : "获取官方投稿要求" });
+    expect(retry).toBeEnabled();
+    await user.click(retry);
+    expect(onDiscover).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("checkbox")[0]).toHaveFocus();
+    if (outcome === "rejection") expect(screen.getByRole("alert")).toHaveTextContent(localizeBackendText(locale, "OFFICIAL_SOURCE_UNAVAILABLE"));
+    await user.click(screen.getAllByRole("checkbox")[0]);
+    expect(screen.queryByText(en ? "Authorization for this request has ended. Authorize again to fetch another time." : "本次授权已结束，再次获取需重新授权。")).not.toBeInTheDocument();
+  });
+
+  it(`does not let an old request clear a new target's active consent in ${locale}`, async () => {
+    window.localStorage.setItem("manuscriptdock.locale", locale);
+    const resolvers: Array<(result: OfficialFetchResult | undefined) => void> = [];
+    const onDiscover = vi.fn(() => new Promise<OfficialFetchResult | undefined>(resolve => resolvers.push(resolve)));
+    const view = (selectionId: string) => <I18nProvider><OfficialSourceAccess workspaceId="workspace" selectionId={selectionId} homepageUrl="https://journal.example" busy={false} onDiscover={onDiscover} /></I18nProvider>;
+    const { rerender } = render(view("one")); const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox")); await user.click(screen.getByRole("button"));
+    rerender(view("two"));
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox")); await user.click(screen.getByRole("button"));
+    await act(async () => resolvers[0](undefined));
+    expect(screen.getByRole("checkbox")).toBeChecked(); expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.queryByText(en ? "Authorization for this request has ended. Authorize again to fetch another time." : "本次授权已结束，再次获取需重新授权。")).not.toBeInTheDocument();
+    await act(async () => resolvers[1](undefined));
+    expect(screen.getByRole("checkbox")).not.toBeChecked(); expect(screen.getByRole("checkbox")).toBeEnabled();
+  });
+}
 
 it.each(["zh-CN", "en"] as const)("ignores legacy HTTP gates and only confirms additional domains in %s", async (locale) => {
   window.localStorage.setItem("manuscriptdock.locale", locale);
@@ -19,12 +74,15 @@ it.each(["zh-CN", "en"] as const)("ignores legacy HTTP gates and only confirms a
   const onDiscover = vi.fn().mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, pending: [], options: { approvedOrigins: ["https://authors.publisher.example"], httpOrigins: ["http://journal.example"] } });
   render(<I18nProvider><OfficialSourceAccess workspaceId="workspace" selectionId="selection" homepageUrl="http://journal.example/guide" busy={false} onDiscover={onDiscover} /></I18nProvider>);
   const button = screen.getByRole("button", { name: locale === "en" ? "Capture official requirements" : "获取官方投稿要求" });
-  expect(button).toBeDisabled();
+  expect(button).toBeEnabled();
+  await user.click(button);
+  expect(onDiscover).not.toHaveBeenCalled();
+  expect(screen.getByRole("checkbox")).toHaveFocus();
   await user.click(screen.getByRole("checkbox"));
   await user.click(button);
   await waitFor(() => expect(onDiscover).toHaveBeenCalledWith({ approvedOrigins: [] }));
   expect(await screen.findByText(localizeBackendText(locale, "OFFICIAL_TLS_FAILED"))).toBeInTheDocument();
-  expect(button).toBeDisabled();
+  expect(button).toBeEnabled();
   const boxes = screen.getAllByRole("checkbox");
   expect(boxes).toHaveLength(2);
   for (const box of boxes) expect(box).not.toBeChecked();
@@ -33,7 +91,7 @@ it.each(["zh-CN", "en"] as const)("ignores legacy HTTP gates and only confirms a
   await user.click(button);
   await waitFor(() => expect(onDiscover).toHaveBeenLastCalledWith({ approvedOrigins: ["https://authors.publisher.example"] }));
   for (const box of screen.getAllByRole("checkbox")) expect(box).not.toBeChecked();
-  expect(button).toBeDisabled();
+  expect(button).toBeEnabled();
 });
 
 it.each(["zh-CN", "en"] as const)("records cancellation without fetching and localizes failures in %s", async (locale) => {

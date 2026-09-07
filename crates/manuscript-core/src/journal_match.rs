@@ -724,6 +724,30 @@ const CANDIDATES: &[Candidate] = &[
     },
 ];
 
+/// Public catalog descriptors, deliberately excluding ranking inputs and scores.
+pub fn public_journal_scope(journal_id: &str) -> Option<[String; 2]> {
+    let candidate = CANDIDATES
+        .iter()
+        .find(|candidate| candidate.id == journal_id)?;
+    let labels: Vec<_> = candidate
+        .topics
+        .iter()
+        .map(|topic| match topic {
+            ResearchTopic::Auto => ["综合", "General"],
+            ResearchTopic::GeneralAi => ["人工智能", "Artificial intelligence"],
+            ResearchTopic::MachineLearning => ["机器学习", "Machine learning"],
+            ResearchTopic::ComputerVision => ["计算机视觉", "Computer vision"],
+            ResearchTopic::NaturalLanguageProcessing => {
+                ["自然语言处理", "Natural language processing"]
+            }
+            ResearchTopic::DataMining => ["数据挖掘", "Data mining"],
+            ResearchTopic::SoftwareSystems => ["软件与系统", "Software and systems"],
+            ResearchTopic::RoboticsControl => ["机器人与控制", "Robotics and control"],
+        })
+        .collect();
+    Some([format!("本地目录的覆盖方向：{}。请与本文研究主题和官网最新范围对照。", labels.iter().map(|label| label[0]).collect::<Vec<_>>().join("、")), format!("Local catalog scope: {}. Compare these areas with your manuscript and the journal's current official scope.", labels.iter().map(|label| label[1]).collect::<Vec<_>>().join(", "))])
+}
+
 pub fn recommend_journals(
     report: &StructureReport,
     profile: JournalRecommendationProfile,
@@ -1159,9 +1183,17 @@ fn infer_article_type(report: &StructureReport) -> ArticleTypePreference {
         report.abstract_text.as_deref().unwrap_or("")
     )
     .to_lowercase();
-    if ["review", "survey", "综述", "述评"]
-        .iter()
-        .any(|v| text.contains(v))
+    if [
+        "review",
+        "survey",
+        "综述",
+        "述评",
+        "现状、挑战与趋势",
+        "structured overview",
+        "comprehensive analysis",
+    ]
+    .iter()
+    .any(|v| text.contains(v))
     {
         ArticleTypePreference::Review
     } else if [
@@ -1691,6 +1723,8 @@ mod tests {
             source_fragments: Vec::new(),
             extraction_coverage: Default::default(),
             pdf_processing: None,
+            recognitions: Vec::new(),
+            review_id: None,
             warnings: vec![],
         }
     }

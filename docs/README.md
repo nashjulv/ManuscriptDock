@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.49 文档
+# 投稿舱 ManuscriptDock V0.52 文档
 
 ## 使用指南
 
@@ -6,6 +6,11 @@
 
 ## 产品设计
 
+- [V0.51 投稿包导出状态修复](package-export-status.md)：持久化导出记录，统一状态，区分导出与投稿登记，记录验证与兼容边界。
+
+- [V0.50 修复与验证记录](first-use-flow-v050-validation.md)：本轮代码、真实 PDF 复测、导出验证和剩余范围。
+
+- [首次使用与投稿主流程修复方案](first-use-flow-remediation-plan.md)：V0.50 已实施主要工作包，验收与后续细项见执行记录；依据 V0.49 原生实测，对识别正确性、官方要求、检查与导出闭环、源稿恢复和新手引导进行优先级排序，并定义逐批验收标准。
 - [版本规则](versioning-policy.md)：当前版本、每次更新递增 `0.01`、界面显示与安装包 SemVer 的同步约定。
 - [产品设计总纲](product-design-overview.md)：品牌、用户、价值主张、信息架构和 MVP 边界。
 - [投稿规则系统](submission-rule-system.md)：统一论文模型、分层规则包、覆盖等级和维护机制。
@@ -25,6 +30,8 @@
 - [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。
 
 ## 技术与体验
+
+- [操作前置条件与点击引导盘点](action-prerequisite-guidance-audit.md)：保留 V0.51 来源追溯，记录 22 组操作的统一引导实现与中英文验证。
 
 - [多显示器窗口恢复与适配方案](multi-monitor-window-state-design.md)：已实施的逻辑尺寸、跨屏与断屏保护、每屏偏好、旧记录迁移，以及验证结果和待测硬件矩阵。
 

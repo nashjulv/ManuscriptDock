@@ -150,7 +150,7 @@ body, button, input, select, textarea {
 @media (max-width: 980px) {
   .workspace-shell .workbench { grid-template-columns: 176px minmax(0, 1fr); }
   .primary-task-nav button > span, .advanced-nav button { font-size: var(--type-body); line-height: var(--leading-body); }
-  .workspace-shell .operation-pane { padding: 24px; }
+  .workspace-shell .operation-pane { padding: 24px var(--workspace-gutter); }
   .submission-flow-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .submission-flow-rail li small { display: none; }
 }
@@ -180,7 +180,7 @@ body, button, input, select, textarea {
   .text-size-popover { position: fixed; top: 124px; right: 12px; }
   .workspace-shell .workbench { grid-template-columns: minmax(0, 1fr); }
   .workspace-sidebar { max-height: 180px; }
-  .workspace-shell .operation-pane { padding: 20px 16px; }
+  .workspace-shell .operation-pane { padding: 20px var(--workspace-gutter); }
   .service-layer-node, .service-layer-knowledge { width: auto; }
   .knowledge-space-visual { min-height: 0; }
 }

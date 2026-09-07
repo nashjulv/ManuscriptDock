@@ -1701,6 +1701,8 @@ mod tests {
                 figure_fragments: 0,
             },
             pdf_processing: None,
+            recognitions: Vec::new(),
+            review_id: None,
             warnings: Vec::new(),
         };
 

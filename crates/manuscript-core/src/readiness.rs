@@ -3,7 +3,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt};
 
-pub const READINESS_REPORT_VERSION: u32 = 2;
+pub const READINESS_REPORT_VERSION: u32 = 3;
 pub const OUTPUT_SNAPSHOT_VERSION: u32 = 2;
 
 const RULE_PACK_PUBLIC_KEYS_HEX: &[&str] = &[
@@ -176,6 +176,8 @@ pub enum ExternalTransmission {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadinessReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_hash: Option<String>,
     pub report_version: u32,
     pub report_id: String,
     pub workspace_id: String,
@@ -324,8 +326,18 @@ pub(crate) fn evaluate_readiness(
                 rule_pack_id: verified.pack.id.clone(),
                 classification: rule.classification,
                 status: finding_status(rule.classification, passed),
-                message: rule.message.clone(),
-                message_en: rule.message_en.clone(),
+                message: if passed {
+                    format!("本规则检查通过：{}", field_label(&rule.field).0)
+                } else {
+                    rule.message.clone()
+                },
+                message_en: if passed {
+                    format!("Rule check passed: {}", field_label(&rule.field).1)
+                } else if rule.message_en.is_empty() {
+                    legacy_rule_message_en(&rule.id).to_owned()
+                } else {
+                    rule.message_en.clone()
+                },
                 source_location: source_location(&rule.field).to_owned(),
             });
         }
@@ -344,6 +356,7 @@ pub(crate) fn evaluate_readiness(
     };
 
     Ok(ReadinessReport {
+        context_hash: None,
         report_version: READINESS_REPORT_VERSION,
         report_id,
         workspace_id: structure.workspace_id.clone(),
@@ -814,6 +827,43 @@ fn count_status(findings: &[RuleFinding], status: FindingStatus) -> u32 {
     .unwrap_or(u32::MAX)
 }
 
+fn field_label(field: &str) -> (&str, &str) {
+    match field {
+        "title" => ("论文标题", "Manuscript title"),
+        "abstract" => ("摘要", "Abstract"),
+        "keywords" => ("关键词", "Keywords"),
+        "references" => ("参考文献", "References"),
+        "sections" => ("章节结构", "Section structure"),
+        "analysis_quality" => ("提取质量", "Extraction quality"),
+        field if field.starts_with("declaration.") => ("声明", "Declaration"),
+        field if field.starts_with("section.") => ("章节", "Section"),
+        _ => ("稿件内容", "Manuscript content"),
+    }
+}
+
+// Legacy signed packs predate paired text. Keep their signed bytes intact.
+fn legacy_rule_message_en(id: &str) -> &str {
+    match id {
+        "core.title.required" => "A manuscript title is required.",
+        "core.abstract.required" => "An abstract is required.",
+        "core.references.required" => "References are required.",
+        "initial.keywords.recommended" => "Add keywords for indexing and submission forms.",
+        "initial.sections.minimum" => {
+            "Too few sections were detected. Review the source and extraction."
+        }
+        "initial.conflict.confirm" => {
+            "Confirm whether a conflict-of-interest statement is required."
+        }
+        "initial.data.confirm" => {
+            "Confirm whether the target journal requires a data-availability statement."
+        }
+        "initial.pdf.confirm" => {
+            "PDF extraction is layout-limited; review the results against the source."
+        }
+        _ => "Review this requirement against the cited rule and manuscript source.",
+    }
+}
+
 fn source_location(field: &str) -> &'static str {
     match field {
         "title" => "document.title",
@@ -1085,6 +1135,8 @@ mod tests {
             source_fragments: Vec::new(),
             extraction_coverage: Default::default(),
             pdf_processing: None,
+            recognitions: Vec::new(),
+            review_id: None,
             warnings: Vec::new(),
         }
     }

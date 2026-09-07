@@ -20,3 +20,4 @@ Each ADR contains status, context, decision, consequences, and links to supersed
 - [0006 — Local lifecycle records and seven-step state machine](0006-local-lifecycle-records.md)
 - [0007 — Author-controlled model routing and knowledge-body dialogue](0007-author-controlled-model-routing.md)
 - [0008 — Workspace archive and permanent-delete boundary](0008-workspace-archive-and-delete.md)
+- [0009 — Evidence-bound preparation and linked sources](0009-evidence-bound-preparation-and-linked-source.md)

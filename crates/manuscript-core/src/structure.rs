@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs::File, io::Read, path::Path};
 use zip::ZipArchive;
 
-pub const STRUCTURE_ANALYSIS_VERSION: u32 = 8;
+pub const STRUCTURE_ANALYSIS_VERSION: u32 = 9;
 pub const DECOMPOSITION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -84,6 +84,10 @@ pub struct PdfProcessingSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructureReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recognitions: Vec<crate::RecognitionObject>,
     pub analysis_version: u32,
     pub workspace_id: String,
     pub source_content_hash: String,
@@ -170,6 +174,7 @@ impl From<std::io::Error> for StructureError {
 
 #[derive(Default)]
 struct ExtractedStructure {
+    recognitions: Vec<crate::RecognitionObject>,
     quality: Option<AnalysisQuality>,
     title: Option<String>,
     authors: Vec<String>,
@@ -222,11 +227,19 @@ pub(crate) fn extract_structure(
     content_hash: &str,
     snapshot_version: u32,
 ) -> Result<StructureReport, StructureError> {
-    let extracted = match manuscript.kind {
+    let mut extracted = match manuscript.kind {
         ManuscriptKind::Latex => extract_tex(snapshot_path)?,
         ManuscriptKind::Word => extract_docx(snapshot_path)?,
         ManuscriptKind::Pdf => extract_pdf(snapshot_path)?,
     };
+    for object in &mut extracted.recognitions {
+        object.id = object.id.replacen(
+            "recognition:0:",
+            &format!("recognition:{snapshot_version}:"),
+            1,
+        );
+        object.source_version = snapshot_version;
+    }
 
     let (mut semantic_candidates, extraction_coverage) = derive_semantic_candidates(&extracted);
     let mut source_fragments = Vec::new();
@@ -265,6 +278,8 @@ pub(crate) fn extract_structure(
     }
 
     Ok(StructureReport {
+        review_id: None,
+        recognitions: extracted.recognitions,
         analysis_version: STRUCTURE_ANALYSIS_VERSION,
         workspace_id: workspace_id.to_owned(),
         source_content_hash: content_hash.to_owned(),
@@ -351,6 +366,10 @@ fn extract_tex(path: &Path) -> Result<ExtractedStructure, StructureError> {
         text.find(&format!("{{{}}}", section.heading))
             .unwrap_or(usize::MAX)
     });
+    extracted.references_present |= extracted
+        .sections
+        .iter()
+        .any(|section| is_reference_heading(&section.heading));
     extracted.declarations = declaration_types(
         extracted
             .sections
@@ -556,8 +575,34 @@ fn extract_pdf(path: &Path) -> Result<ExtractedStructure, StructureError> {
         _ => infer_from_plain_text(&pdf_text.text),
     };
     extracted.title = choose_pdf_title(metadata_title, extracted.title.take());
-    for author in metadata_authors {
-        push_unique(&mut extracted.authors, &author);
+    if extracted.authors.is_empty() {
+        extracted.authors = metadata_authors;
+    }
+    if let Some(items) =
+        std::panic::catch_unwind(|| pdf_inspector::extract_text_with_positions(path))
+            .ok()
+            .and_then(Result::ok)
+    {
+        extracted.recognitions = crate::recognition::pdf_objects(&items, 0);
+        let visible: Vec<_> = extracted
+            .recognitions
+            .iter()
+            .filter(|object| object.kind == "author")
+            .map(|object| object.label.clone())
+            .collect();
+        if !visible.is_empty() {
+            extracted.authors = visible;
+        }
+        extracted.figure_count = extracted
+            .recognitions
+            .iter()
+            .filter(|object| object.kind == "figure" && object.status == "detected")
+            .count() as u32;
+        extracted.table_count = extracted
+            .recognitions
+            .iter()
+            .filter(|object| object.kind == "table" && object.status == "detected")
+            .count() as u32;
     }
     let outline_sections = pdf_outline_sections(&document);
     let used_outline = !outline_sections.is_empty();
@@ -808,7 +853,7 @@ fn infer_from_inspector_markdown(markdown: &str) -> ExtractedStructure {
     if !structural_headings.is_empty() {
         extracted.sections = structural_headings;
     }
-    extracted.table_count = extracted.table_count.max(count_markdown_tables(markdown));
+    // Markdown tables are layout candidates, not numbered manuscript tables.
     for (index, line) in markdown.lines().enumerate() {
         let trimmed = line.trim();
         let is_figure = trimmed.starts_with("![") || trimmed.starts_with("<figure");
@@ -839,23 +884,6 @@ fn infer_from_inspector_markdown(markdown: &str) -> ExtractedStructure {
         }
     }
     extracted
-}
-
-fn count_markdown_tables(markdown: &str) -> u32 {
-    markdown
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim().trim_matches('|').trim();
-            let cells = trimmed.split('|').map(str::trim).collect::<Vec<_>>();
-            cells.len() >= 2
-                && cells.iter().all(|cell| {
-                    let marker = cell.trim_matches(':').trim();
-                    marker.len() >= 3 && marker.chars().all(|character| character == '-')
-                })
-        })
-        .count()
-        .try_into()
-        .unwrap_or(u32::MAX)
 }
 
 fn markdown_plain_text(markdown: &str) -> String {
@@ -1507,6 +1535,10 @@ fn looks_like_author_line(line: &str) -> bool {
 }
 
 fn split_author_candidates(value: &str) -> Vec<String> {
+    let chinese = crate::recognition::chinese_names(value);
+    if !chinese.is_empty() {
+        return chinese;
+    }
     let normalized = normalize_line(value)
         .replace(" and ", ",")
         .replace(" & ", ",")
@@ -2047,17 +2079,17 @@ fn count_occurrences(text: &str, marker: &str) -> u32 {
 }
 
 fn count_numbered_labels(text: &str, labels: &[&str]) -> u32 {
-    let lower = text.to_ascii_lowercase();
-    let mut count = 0_u32;
-    for line in lower.lines() {
-        if labels
-            .iter()
-            .any(|label| line.trim_start().starts_with(label))
-        {
-            count = count.saturating_add(1);
-        }
-    }
-    count
+    let kind = if labels.contains(&"图") {
+        "figure"
+    } else {
+        "table"
+    };
+    text.lines()
+        .filter_map(crate::recognition::caption_label)
+        .filter(|(found, _, confirmed)| found == kind && *confirmed)
+        .map(|(_, label, _)| label)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() as u32
 }
 
 fn count_words(text: &str) -> u64 {
@@ -2273,7 +2305,10 @@ mod tests {
             ]
         );
         assert!(extracted.references_present);
-        assert_eq!(extracted.table_count, 1);
+        assert_eq!(
+            extracted.table_count, 0,
+            "layout-only tables are candidates, not manuscript captions"
+        );
         assert!(extracted.keywords_present);
         assert!(!markdown_plain_text(markdown).contains('|'));
     }

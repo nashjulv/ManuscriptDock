@@ -23,6 +23,13 @@ export function localize(locale: Locale, chinese: string, english: string) {
 }
 
 const BACKEND_ENGLISH: Record<string, string> = {
+  "参考文献文件：可上传 BIB、RIS、NBIB、EndNote、XML 或其他可编辑参考文献文件": "Bibliography files: optionally add BIB, RIS, NBIB, EndNote, XML, or other editable references.",
+  "声明文件：可上传伦理、知情同意、利益冲突、资金、数据可用性、作者贡献或 AI 使用声明": "Declaration files: optionally add ethics, consent, conflict-of-interest, funding, data-availability, author-contribution, or AI-use statements.",
+  "投稿信：可上传致编辑的投稿信；是否需要以及内容格式以当前期刊要求为准": "Cover letter: optionally add a letter to the editor; follow the current journal's requirements for necessity and format.",
+  "标题页与作者信息页：适用于期刊要求将作者、单位、通讯信息与匿名主稿分离的情况": "Title and author-information page: use when the journal requires author, affiliation, and correspondence details to be separate from the blinded manuscript.",
+  "补充材料与研究数据：可上传附录、方法补充、数据、代码归档、演示或音视频等期刊允许的补充材料": "Supplementary materials and research data: optionally add appendices, extended methods, data, code archives, presentations, or media permitted by the journal.",
+  "说明、回复与其他支持文件：可上传情况说明、回复信、报告清单、版权或许可文件、作者协议及其他支持资料": "Explanations, responses, and supporting files: optionally add explanations, response letters, reporting checklists, copyright or permission documents, author agreements, and other supporting materials.",
+  "匿名评审已启用：实名源稿不会写入 submission，独立匿名稿将作为主稿": "Anonymous review is enabled: the identified source is excluded from submission, and the separate blinded manuscript is used as the main file.",
   "自动抽取只建立带来源的准备清单，不替代作者对官网原文的最终核对": "Automatic extraction creates a source-backed preparation checklist; the author must still verify the official text.",
   "已保存官方页面指纹，但未识别到明确投稿条目；请粘贴作者指南原文": "The page fingerprint was saved, but no explicit submission requirements were identified. Paste the author-guide text.",
   "部分来源由作者确认，域名未与期刊主页自动匹配": "Some sources were confirmed by the author; their domains did not automatically match the journal homepage.",
@@ -136,6 +143,7 @@ const BACKEND_ENGLISH: Record<string, string> = {
 };
 
 const BACKEND_PATTERNS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^已自动排除 (\d+) 个属于旧版本、旧目标或旧要求快照的附件$/, (match) => `${new Intl.NumberFormat("en").format(Number(match[1]))} attachments from an earlier version, target, or requirements snapshot were automatically excluded.`],
   [/^无法读取所选文件路径：(.+)$/, (match) => `The selected file path could not be read: ${systemDetail(match[1])}`],
   [/^无法读取所选文件：(.+)$/, (match) => `The selected file could not be read: ${systemDetail(match[1])}`],
   [/^无法读取本地源快照：(.+)$/, (match) => `The local source snapshot could not be read: ${systemDetail(match[1])}`],
@@ -260,6 +268,24 @@ export const OFFICIAL_SOURCE_MESSAGES: Record<string, [string, string]> = {
 };
 
 export const DECLARATION_MESSAGES: Record<string, [string, string]> = {
+  EXPORT_RECORD_SAVE_FAILED: ["文件已生成到所选文件夹，但导出记录保存失败。请先检查导出位置；当前无法确认导出完成状态。", "Files were generated in the selected folder, but the export record could not be saved. Check the export location first; completion cannot currently be verified."],
+  EXPORT_AUDIT_WRITE_FAILED: ["导出记录已保存，但审计日志写入失败。", "The export record was saved, but the audit log could not be written."],
+  EXPORT_RECORD_UNVERIFIED: ["部分导出记录无法核验，不能据此认定当前投稿包已完成。请检查并重新导出。", "Some export records could not be verified and cannot establish current package completion. Check and export again."],
+  STRUCTURE_REVIEW_STALE: ["结构已变化，请重新打开核对面板后保存。", "The structure changed. Reopen the review panel before saving."],
+  STRUCTURE_REVIEW_INVALID: ["核对记录无效，请检查作者、题注页码与核对说明。", "Invalid review record. Check authors, caption pages, and the review note."],
+  SOURCE_LINK_REQUIRES_CONFIRMATION: ["请选择 DOCX/TEX，并确认它与原 PDF 属于同一论文。", "Choose DOCX/TEX and confirm it represents the same manuscript as the PDF."],
+  SOURCE_OPEN_FAILED: ["无法打开原稿，请检查系统是否安装了对应阅读器。", "The source could not be opened. Check that a compatible reader is installed."],
+  SOURCE_SELECTION_EXPIRED: ["文件选择已失效，请重新选择。", "The file selection expired. Choose the file again."],
+  REQUIREMENTS_REBOUND_REVIEW_FRESHNESS: ["已将历史要求重新绑定到当前目标；正式投稿前仍需核对有效期。", "Historical requirements were rebound to the current target; review their freshness before submission."],
+  MATERIAL_REUSE_INVALID: ["未找到可沿用的历史附件，请重新选择文件。", "The historical attachment could not be found. Choose the file again."],
+  REQUIREMENT_DECISION_INVALID: ["请选择有效的核验结果，并将说明限制在 2000 字以内。", "Choose a valid review outcome and keep the note within 2,000 characters."],
+  REQUIREMENT_NOT_APPLICABLE_NEEDS_BASIS: ["只有原文有明确适用条件时才可选择不适用，并且必须填写依据。", "Not applicable requires an explicit condition in the source and a written basis."],
+  REQUIREMENT_PRESENCE_CHECK: ["仅检查此项是否存在；系统已依据当前稿件自动核验。", "This requirement only concerns presence and is checked automatically against the current manuscript."],
+  REQUIREMENTS_UPGRADED_FROM_LOCAL_EVIDENCE: ["已用本地保存的官方摘录升级要求清单，未联网、未延长有效期。含义变化的项目需重新核验；旧记录只有已核验标记的项目需补充明确结果。", "Requirements were upgraded from locally saved official excerpts without network access or extending freshness. Changed requirements need review; legacy reviewed-only records need an explicit outcome."],
+  REQUIREMENT_COMPARE_SOURCE: ["请对照证据原文核验具体要求，并记录符合、不符合、不适用或不确定。", "Review the specific requirement against its source and record compliant, noncompliant, not applicable, or uncertain."],
+  CHECK_AUTHOR_REVIEW: ["请查看当前主稿并记录核验结果；系统不代替作者作真实性声明。", "Review the current manuscript and record your decision; the app does not attest facts on your behalf."],
+  CHECK_CONTEXT_CHANGED: ["主稿、结构、目标、要求、材料或核验决定已变更，请重新检查。", "The manuscript, structure, target, requirements, materials, or review decisions changed. Run checks again."],
+  CHECK_REQUIRED: ["尚无适用于当前材料的检查，请运行本地检查。", "No check applies to the current materials. Run local checks."],
   DECLARATION_TARGET_REQUIRED: ["请先核验当前稿件的目标期刊与官方要求。", "Verify the current manuscript's target journal and official requirements first."],
   DECLARATION_INVALID_UPDATE: ["请填写完整的声明要求、有效来源地址和核验依据，并检查文件数量与格式。", "Complete the declaration, valid source URL, and verification note; check the file count and formats."],
   DECLARATION_FORMAT_NOT_ALLOWED: ["文件格式不符合此项官方要求，请按限定格式重新选择。", "This file format does not meet this official requirement. Choose an allowed format."],
@@ -287,7 +313,7 @@ export function localizeBackendText(locale: Locale, value: string) {
       if (Array.isArray(pair) && pair.length === 2 && pair.every(item => typeof item === "string")) return pair[locale === "zh-CN" ? 0 : 1] as string;
     } catch { /* Malformed records use the regular fallback below. */ }
   }
-  const declaration = DECLARATION_MESSAGES[value.replace(/^投稿材料无效：/, "")];
+  const declaration = DECLARATION_MESSAGES[value.replace(/^(投稿材料无效|本地工作区记录无效)：/, "")];
   if (declaration) return declaration[locale === "zh-CN" ? 0 : 1];
   const declarationWithFile = value.replace(/^投稿材料无效：/, "").match(/^(.*)：(DECLARATION_[A-Z_]+)$/);
   if (declarationWithFile && DECLARATION_MESSAGES[declarationWithFile[2]]) return `${declarationWithFile[1]}: ${DECLARATION_MESSAGES[declarationWithFile[2]][locale === "zh-CN" ? 0 : 1]}`;

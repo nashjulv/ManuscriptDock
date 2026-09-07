@@ -9,21 +9,22 @@ use official_sources::{
 
 use manuscript_core::{
     bundled_rule_pack_catalog, bundled_submission_element_catalog, discipline_catalog,
-    normalize_issn, AcademicKnowledgeBodySnapshot, DisciplineCatalogItem, InstitutionRuleEvidence,
-    InstitutionRuleStatus, JournalDirectoryEvidence, JournalDirectoryImportResult,
-    JournalDirectoryProfile, JournalDirectorySummary, JournalMatchPreferences, JournalMetricScheme,
-    JournalProfileDiscoveryRecord, JournalRecommendation, JournalRecommendationPortfolio,
-    JournalRecommendationProfile, JournalRecommendationProfileInput,
-    JournalRecommendationProfileSummary, JournalRecommendationRun, JournalRegion,
-    JournalRequirementSnapshot, JournalRequirementSourceDocument, JournalRequirementSourceMode,
-    KnowledgeBodyRecord, KnowledgeCandidateDecision, KnowledgeDialogueLedger,
-    KnowledgeInquiryStance, KnowledgeInquiryTarget, LocalAttestation, ManuscriptSelection,
-    ReadinessEvaluation, RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog,
-    StructureAnalysis, SubmissionElementCatalog, SubmissionExport, SubmissionMaterialCatalog,
-    SubmissionMaterialKind, SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection,
-    TargetSubmissionExport, TargetSubmissionPackagePlan, VersionComparison, VersionCreation,
-    VersionHistory, WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation, WorkspaceLifecycle,
-    WorkspaceStore, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
+    normalize_issn, AcademicKnowledgeBodySnapshot, ArticleTypePreference, DisciplineCatalogItem,
+    InstitutionRuleEvidence, InstitutionRuleStatus, JournalDirectoryEvidence,
+    JournalDirectoryImportResult, JournalDirectoryProfile, JournalDirectorySummary,
+    JournalMatchPreferences, JournalMetricScheme, JournalProfileDiscoveryRecord,
+    JournalRecommendation, JournalRecommendationPortfolio, JournalRecommendationProfile,
+    JournalRecommendationProfileInput, JournalRecommendationProfileSummary,
+    JournalRecommendationRun, JournalRegion, JournalRequirementSnapshot,
+    JournalRequirementSourceDocument, JournalRequirementSourceMode, KnowledgeBodyRecord,
+    KnowledgeCandidateDecision, KnowledgeDialogueLedger, KnowledgeInquiryStance,
+    KnowledgeInquiryTarget, LocalAttestation, ManuscriptSelection, ReadinessEvaluation,
+    RevisionApplication, RevisionChangeInput, RevisionDraft, RulePackCatalog, StructureAnalysis,
+    SubmissionElementCatalog, SubmissionExport, SubmissionMaterialCatalog, SubmissionMaterialKind,
+    SubmissionRecord, SubmissionTargetPlan, SubmissionTargetSelection, TargetSubmissionExport,
+    TargetSubmissionPackagePlan, VersionComparison, VersionCreation, VersionHistory,
+    WorkspaceCatalog, WorkspaceCopyExport, WorkspaceCreation, WorkspaceLifecycle, WorkspaceStore,
+    WorkspaceSummary, JOURNAL_PROFILE_DISCOVERY_SCHEMA_VERSION,
 };
 use model_service::{ModelSettingsSummary, ModelSlotInput};
 use serde::{Deserialize, Serialize};
@@ -295,6 +296,7 @@ fn decode_html_entities(value: &str) -> String {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublicJournalRecommendationRun {
+    resolved_article_type: ArticleTypePreference,
     schema_version: u32,
     run_id: String,
     workspace_id: String,
@@ -316,6 +318,7 @@ struct PublicJournalRecommendationRun {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublicJournalRecommendation {
+    public_scope: Option<[String; 2]>,
     id: String,
     name: String,
     name_en: String,
@@ -374,6 +377,7 @@ impl From<JournalDirectoryEvidence> for PublicJournalDirectoryEvidence {
 impl From<JournalRecommendation> for PublicJournalRecommendation {
     fn from(recommendation: JournalRecommendation) -> Self {
         Self {
+            public_scope: manuscript_core::public_journal_scope(&recommendation.id),
             id: recommendation.id,
             name: recommendation.name,
             name_en: recommendation.name_en,
@@ -420,6 +424,7 @@ impl From<JournalRecommendationPortfolio> for PublicJournalRecommendationPortfol
 impl From<JournalRecommendationRun> for PublicJournalRecommendationRun {
     fn from(run: JournalRecommendationRun) -> Self {
         Self {
+            resolved_article_type: run.resolved_article_type,
             schema_version: run.schema_version,
             run_id: run.run_id,
             workspace_id: run.workspace_id,
@@ -524,6 +529,82 @@ async fn create_workspace(
             },
         },
     )
+}
+
+#[tauri::command]
+async fn find_workspace_matches(
+    selection_id: String,
+    app: AppHandle,
+    pending: State<'_, PendingSelections>,
+) -> Result<Vec<manuscript_core::WorkspaceImportMatch>, String> {
+    let path = pending
+        .0
+        .lock()
+        .map_err(|_| "SOURCE_SELECTION_EXPIRED")?
+        .get(&selection_id)
+        .cloned()
+        .ok_or("SOURCE_SELECTION_EXPIRED")?;
+    WorkspaceStore::new(workspace_root(&app)?)
+        .matching_workspaces(&path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_linked_sources(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<Vec<manuscript_core::WorkspaceSourceLink>, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .linked_sources(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_linked_source(
+    workspace_id: String,
+    selection_id: String,
+    author_confirmed: bool,
+    app: AppHandle,
+    pending: State<'_, PendingSelections>,
+) -> Result<WorkspaceSummary, String> {
+    let path = pending
+        .0
+        .lock()
+        .map_err(|_| "SOURCE_SELECTION_EXPIRED")?
+        .get(&selection_id)
+        .cloned()
+        .ok_or("SOURCE_SELECTION_EXPIRED")?;
+    let workspace = WorkspaceStore::new(workspace_root(&app)?)
+        .create_linked_source(&workspace_id, &path, author_confirmed)
+        .map_err(|error| error.to_string())?;
+    pending
+        .0
+        .lock()
+        .map_err(|_| "SOURCE_SELECTION_EXPIRED")?
+        .remove(&selection_id);
+    Ok(workspace)
+}
+
+#[tauri::command]
+async fn reconfirm_previous_target(
+    workspace_id: String,
+    app: AppHandle,
+) -> Result<SubmissionTargetPlan, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .reconfirm_previous_target(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn reuse_previous_material(
+    workspace_id: String,
+    material_id: String,
+    checklist_item_id: String,
+    app: AppHandle,
+) -> Result<SubmissionMaterialCatalog, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .reuse_previous_material(&workspace_id, &material_id, &checklist_item_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -921,6 +1002,48 @@ async fn confirm_submission_requirement(
     WorkspaceStore::new(root)
         .confirm_submission_requirement(&workspace_id, &item_id, confirmed)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn decide_submission_requirement(
+    workspace_id: String,
+    item_id: String,
+    decision: String,
+    reason: String,
+    app: AppHandle,
+) -> Result<SubmissionMaterialCatalog, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .decide_submission_requirement(&workspace_id, &item_id, &decision, &reason)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn review_manuscript_structure(
+    workspace_id: String,
+    input: manuscript_core::StructureReviewInput,
+    app: AppHandle,
+) -> Result<manuscript_core::StructureReport, String> {
+    WorkspaceStore::new(workspace_root(&app)?)
+        .review_structure(&workspace_id, input)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_manuscript_source(workspace_id: String, app: AppHandle) -> Result<(), String> {
+    let path = WorkspaceStore::new(workspace_root(&app)?)
+        .source_snapshot_path(&workspace_id)
+        .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "windows")]
+    let program = "explorer.exe";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let program = "xdg-open";
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map_err(|_| "SOURCE_OPEN_FAILED".to_owned())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2230,6 +2353,11 @@ pub fn run() {
             save_ui_preferences,
             select_manuscript,
             create_workspace,
+            find_workspace_matches,
+            list_linked_sources,
+            create_linked_source,
+            reconfirm_previous_target,
+            reuse_previous_material,
             list_workspaces,
             archive_workspace,
             restore_workspace,
@@ -2247,6 +2375,9 @@ pub fn run() {
             get_submission_materials,
             get_target_submission_package_plan,
             confirm_submission_requirement,
+            decide_submission_requirement,
+            review_manuscript_structure,
+            open_manuscript_source,
             update_declaration_plan,
             select_recommended_journal,
             add_backup_recommended_journal,
@@ -2380,6 +2511,7 @@ mod tests {
     #[test]
     fn journal_webview_projection_omits_ranking_internals() {
         let projection = PublicJournalRecommendation {
+            public_scope: Some(["计算机网络".into(), "Computer networks".into()]),
             id: "journal-1".into(),
             name: "示例期刊".into(),
             name_en: "Example Journal".into(),

@@ -1,12 +1,48 @@
-# 投稿舱 ManuscriptDock V0.49 产品使用手册
+# 投稿舱 ManuscriptDock V0.52 产品使用手册
 
-- 产品名称：投稿舱 ManuscriptDock V0.49
-- 产品版本：V0.49（安装包版本 `0.49.0`）
+- 产品名称：投稿舱 ManuscriptDock V0.52
+- 产品版本：V0.52（安装包版本 `0.52.0`）
 - 适用平台：macOS 11+、Windows 10/11 x64
 - 手册日期：2026-09-07
 - 产品定位：本地论文投稿准备工作台 / Local-first manuscript submission workspace
 
+获取官方投稿要求时，“仅本次允许后端读取该期刊公开页面”在读取过程中保持勾选并禁用，显示“本次已授权，正在读取”。请求完成、部分完成或失败后，勾选自动清空并提示“本次授权已结束，再次获取需重新授权”。这不会取消已发起的读取；切换期刊不会沿用上一期刊的授权。
+
+选择稿件后，“发现已有本地档案”默认最多显示 3 个匹配档案。超过 3 个时，点击“展开更多”查看其余档案，也可以“收起”；重新选择稿件后恢复默认收起状态。每个档案仍可通过“继续已有档案”打开。
+
+## 按钮提示前置步骤 / Action prerequisites
+
+推荐结果直接显示本次采用的文章类型，不再要求勾选类型确认。点击“修改文章类型”可定位选择框；改变类型后需重新生成推荐。明确的“返回目标期刊”按钮直接跳转。
+
+“检查与修订”支持就地完成要求核验；保存后自动更新既有的本地检查，无需返回资料页再手动检查。明确仅要求摘要、关键词存在的受支持表述由系统检查；同一官方摘要长度条款不会重复要求核验。格式、数量等不能可靠判定的要求仍需作者核对。
+
+结构核验内容未变时，重复保存保留完成状态；实际修改作者或题注时只影响相关人工核验，最终检查仍需与当前内容一致。有条件或适用性不明的要求可记录“不适用”及依据；明确的无条件要求和必需附件不能由此免除。
+
+旧版期刊要求可从本地保存的官方摘录形成兼容清单，不联网、不改原始历史记录、不延长有效期。含义未变的项目保留标识；变更项目需要重新核验。早期只有“已核验”标记的记录仍需补充明确结果，不能自动视为符合。
+
+Recommendation results show the article type used without a confirmation checkbox. Change article type focuses the selector; changing it requires a new recommendation run. Explicit return buttons navigate directly. Reviews can be completed in Check/revise, with existing local checks refreshed automatically after saving. Supported presence-only abstract/keyword requirements are automatic, and an identical abstract-length clause is reviewed once. Unknown format constraints still require author review.
+
+Unchanged structure saves preserve completion. Actual author/caption corrections invalidate related reviews; the final check must match current content. Conditional or uncertain applicability may be reviewed with a recorded basis, but unconditional obligations and required files cannot be waived. Legacy requirements use locally saved official excerpts without new network access, history changes, or freshness extensions. Unchanged items retain their IDs; changed items and legacy reviewed-only records need explicit review.
+
+需要先完成其他步骤的按钮仍可点击。本页缺少输入或勾选时，系统会展开对应区域、滚动并高亮具体控件，说明需要完成什么；不会自动勾选授权或作者确认。补齐后，再次点击原按钮继续。
+
+操作引导采用黄色边框，每秒闪烁一次，约 4 秒后自动消失，提示文字继续保留。再次点击会重新开始；填写或勾选后会提前结束。系统开启“减少动态效果”时改用静态黄色高亮，同样在 4 秒后消失。材料待办定位、检查页核验定位和文章类型修改入口使用相同效果。
+
+Action guidance uses a yellow outline that pulses once per second for about four seconds, then disappears while the explanation remains. Repeating the action restarts it; editing or checking the field clears it early. Reduced-motion settings use a static yellow highlight with the same timeout. Material tasks, in-place review navigation, and the article-type edit shortcut share this behavior.
+
+如果前置步骤在其他页面，会先显示说明和“前往…”按钮。确认后系统保留当前稿件，跳到相应页面并定位所需步骤；点击“暂不处理”或按 Escape 可关闭提示。正在读取、保存或导出时，按钮仍会暂时锁定，防止重复执行。
+
+“上传资料”没有文件入口时，也会明确说明原因并保留操作入口：尚未选择当前版本的投稿目标或缺少有效官方要求，点击后引导到“目标期刊”；已经核验且确实没有上传项，则引导核对要求清单。不能纳入的已有文件可通过“查看纳入条件”了解下一步。
+
+Buttons with missing prerequisites remain clickable. For a missing field or confirmation on the current page, the app expands the relevant section, scrolls to and highlights the control, and explains what is needed. It never checks consent or author confirmation for you. Complete the requirement, then click the original action again.
+
+If the prerequisite is on another page, a dialog explains the required action before navigation. “Not now” or Escape closes it. Ongoing reads, saves and exports remain temporarily locked to prevent duplicate operations. An empty Upload view explains whether target verification is needed or the current checklist has no upload requirements; stored files also offer “Review inclusion requirements” when they cannot be included.
+
 ## 窗口大小与首页布局 / Window size and home layout
+
+工作区顶部的四步进度卡片与正文卡片保持一致的左右留白，卡片之间保留间距；窄窗口自动调整排列。检查与修订导航占用独立行，下方内容区可滚动。
+
+The four preparation-progress cards share the same side spacing as the workspace content, with gaps between cards and a responsive arrangement in narrow windows. Check/revise navigation occupies its own row above the scrollable content area.
 
 桌面应用按显示器记住正常窗口的逻辑尺寸、相对位置及最大化状态。启动时优先恢复仍连接的上次屏幕；该屏断开时回到当前可用屏幕，优先使用该屏历史尺寸，并限制到排除菜单栏、Dock/任务栏后的可用区域。首次启动或记录无效时使用 1180 × 780 的默认尺寸，再按工作区收缩；通常最小尺寸为 760 × 620，工作区更小时临时放宽，保证窗口可操作。
 
@@ -121,7 +157,7 @@ Windows 10/11 使用 x64 安装包。系统通常已包含 WebView2；缺少时�
 2. 核对文件信息后创建本地工作区。
 3. 在“目标期刊”直接用当前主稿生成国内外冲刺 2、匹配 3、保底 3 的初步候选；学校、专业、用途和截止日期可用于进一步调整。选择一个主目标，并取得该刊官方投稿要求；其他候选可加入备选支线。
 4. 在“投稿资料”查看由文章类型与官方原文生成的动态清单，核对摘要、正文及各章节字数限制，并补充源工程、匿名稿、原图、表格、参考文献、投稿信、标题页、声明、报告清单和其他支持文件。“目标检查”不属于待上传材料。
-5. 必需材料完成后，从页面底部的独立下一步进入“检查与修订”，提取结构、运行与当前目标绑定的规则检查，并将安全修改保存为新版本。
+5. 随时从概览点击“直接检查主稿”，或进入“检查与修订”提取结构并运行本地基础检查；无需官网或模型。全部必需项处理后重新检查，使最终结果绑定当前材料。安全修改保存为新版本。
 6. 直接在“投稿包”核对当前版本、目标与材料完整性，导出面向出版社的资料；只上传其中的 `submission` 文件夹。
 7. 在真实期刊网站完成投稿后，回到应用登记稿件号或回执；本地存证会随作者确认自动建立。
 8. 需要时从“记录与高级功能”查看版本历史、本地存证和知识体。
@@ -150,6 +186,17 @@ Windows 10/11 使用 x64 安装包。系统通常已包含 WebView2；缺少时�
 后续阶段、不适用或失去当前绑定的材料会保留在本地，但不会进入当前投稿包。
 导出后的 `records/declaration-summary.txt` 提供中英文核验摘要，`records/declaration-plan.json`
 保留结构化依据与作者说明；这两个文件仅供本地核对，不需要交给出版社。
+
+### 4.2 V0.50 的核验与恢复入口 / Review and recovery
+
+- “已运行检查”与“投稿包就绪”分别显示。待办保留逐项入口；没有目标时先引导完成目标核验，基础检查仍可运行。
+- 作者核验选择“符合、不符合、暂不确定、不适用”。有条件的不适用必须填写依据；阅读过要求不等于符合，必需附件不能用勾选代替。旧版确认需要重新核验。
+- 在检查页展开“核对作者与图表”，对照原稿页码修正作者、题注和疑似对象，并填写说明。保存后使用新核对结果生成清单，旧检查失效；原 PDF 不会被修改。
+- PDF 概览与修订页提供“选择源稿继续准备”。确认同一论文后，DOCX/TEX 建立关联的新档案，从 v1 开始；可双向返回。关联不自动继承作者声明和投稿通过状态。
+- 同格式新版本可以明确重新确认旧目标。在“已存文件”展开历史附件，选择当前要求后沿用；沿用前仍要核对适用性。
+- 同内容再次导入会提示继续已有档案；同名不同内容会明确区分。也可以主动新建独立档案。
+
+Checks can run before choosing a journal or configuring a model. Final export requires current evidence and a fresh check. Review decisions distinguish compliant, non-compliant, unknown and justified non-applicability; required files cannot be waived with a confirmation. Caption corrections preserve the source and invalidate old checks. Linking a PDF to DOCX/TEX creates a separate v1 workspace, with navigation in both directions and no automatic transfer of attestations. Previous-version targets and files require explicit review before reuse.
 
 ## 5. 导入论文与概览
 
@@ -448,6 +495,8 @@ Excel 二进制工作簿，系统会拒绝并指出真实类型。作者应把�
 ## 11. 生成投稿包并登记投稿
 
 ### 11.1 导出投稿交付包
+
+V0.52 起，成功导出后侧栏与页面显示“已导出”，重新打开工作区仍可恢复；展开“查看上次成功导出记录”可以找到导出时间、版本和目录。实际向期刊投稿后的回执登记是独立步骤，不影响导出完成。修改稿件、材料、目标要求或核验状态后显示“内容已变更”，需要重新检查并导出。旧版仅有审计事件的导出显示“历史导出待核验”，重新导出后建立完整记录。取消或再次导出失败不会抹除上次成功记录。
 
 先在“投稿资料”补充期刊实际需要的源工程、匿名稿、原图、可编辑表格、参考文献、投稿信、标题页、声明、
 报告清单和补充材料，逐项确认篇幅与格式；材料完成后进入独立的“检查与修订”步骤，完成与当前版本和
