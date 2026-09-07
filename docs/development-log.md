@@ -1,5 +1,59 @@
 # ManuscriptDock Development Log
 
+## 2026-09-07 — V0.49 coordinated button density
+
+- Replace the blanket 44px minimum with shared toolbar / standard / primary control heights:
+  30/34/36px at Small, 32/36/38px at Default, and 36/40/42px at Large. Keep body font sizes while
+  using 20/20/24px button line heights and 5px vertical padding. Multiline and content-rich actions
+  still grow to fit; rail icons and graph targets retain their dedicated geometry.
+- Align Aa, the language-switch outer frame, model settings and local status. Use a 6px toolbar gap,
+  10px horizontal toolbar text padding and 6px Aa padding. Reduce the toolbar minimum from 68 to 56px;
+  larger text and narrow layouts can grow. Single-line form spacing follows standard buttons, the
+  model-dialog close icon is square, and coarse-pointer devices retain larger targets.
+- Keep V0.49 as requested. Internationalization review: existing zh-CN/en labels, accessible names,
+  focus, selected/disabled states and error copy remain unchanged; bilingual density guidance added.
+  Rendered checks use synthetic workspaces and model slots, never real manuscripts or credentials.
+- Validation: all 62 frontend tests passed. The macOS debug bundle, TypeScript checks and production
+  frontend build passed. With Browser plugin unavailable, cached Playwright checked the synthetic
+  fixture at `http://127.0.0.1:1422`: 24 locale/size/width home cases (390/760/1180/1440px), model-dialog
+  open/close for each case, and 60 locale/size/width/stage cases across the five primary workflow views.
+  Toolbar heights matched the scale exactly; no button content overflow, framework overlays or page
+  exceptions were observed. Inspected Chinese home and English model-dialog screenshots.
+- The running native app had a selected manuscript awaiting workspace creation, so it was left open
+  to preserve that selection. The new bundle is ready for the next restart; this final density update
+  has not been inspected in the native WebView or on Windows. No installer deployment.
+
+## 2026-09-07 — V0.49 window size persistence and home layout
+
+- Keep V0.49 at the user's request. Register the Rust-only Tauri window-state plugin for size and
+  maximized state. Normal close/exit persists state in the app configuration directory; a missing or
+  unreadable cache falls back to the configured 1180 × 780 window with its existing 760 × 620 minimum.
+  No new WebView permissions or frontend filesystem access are granted.
+- The final home layout has three stages: below 960 px the guide is hidden; above that, the guide
+  receives 40% of the space after the 48 px rail while the workspace receives 60%; once every guide
+  heading and description fits on one line, the guide stops growing. CSS intrinsic sizing computes
+  this cap from the actual locale, text size and system font, without JS resize handlers or truncation.
+  Intermediate widths allow natural wrapping. Default Chinese measures about 474 px at the cap on
+  this Mac (window width about 1233 px); English and larger text require more width.
+- Validation: `npm run check` passed (62 frontend tests, 92 core tests, 36 desktop tests, 2 unrelated
+  live-network tests ignored), including typecheck, production build, rustfmt, doctests and clippy.
+  The initial doctest run encountered a dependency-read error while the native bundle was building;
+  the sequential rerun passed. The macOS debug app bundle also built successfully.
+- Browser plugin not available: used cached Playwright against `http://127.0.0.1:1420`. The final
+  three-stage layout passed 84 combinations of zh-CN/en, three text sizes and 14 widths from 390 to
+  3840 px, including both sides of the hiding and default-font capping thresholds. Assertions checked
+  the 60/40 split, intrinsic width cap, single-line headings and descriptions after capping, workspace
+  allocation, narrow-screen hiding and horizontal overflow. Title, nonblank content, absence of framework
+  overlays, console health, text-size interaction and language switching passed; the 1440 px Chinese
+  screenshot confirms the capped guide with complete single-line text. The final macOS bundle rebuilt.
+- Native macOS QA resized the new bundle to 1058 × 689, quit through its menu and verified the same
+  dimensions after reopening. The close button also persisted the restored 1180 × 780 size. Checked
+  both locales in the native WebView and restored Chinese. Windows, monitor/DPI changes, maximized
+  restoration and forced termination were not exercised; no installer was published or installed.
+- Internationalization review: zh-CN/en home content, guide wrapping, language controls and all text-size
+  modes checked; no UI strings or backend message contracts changed. User-manual guidance added in both
+  languages. Window persistence is locale-neutral and remains entirely in Rust.
+
 ## 2026-09-07 — V0.49 compact text-size buttons
 
 - Reduce the popover to three buttons: Smaller / Default / Larger. Remove its heading, preview, status copy

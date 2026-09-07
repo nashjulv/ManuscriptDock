@@ -62,7 +62,9 @@ h1, h2, h3, p { margin-top: 0; }
 
 /* Shared 48 / 574 / fluid shell measured from PWC publish */
 .landing-shell, .workspace-shell { height: 100vh; height: 100dvh; overflow: hidden; }
-.landing-review-layout { height: calc(100vh - 56px); height: calc(100dvh - 56px); display: grid; grid-template-columns: 48px 574px minmax(0, 1fr); }
+/* The guide receives 40% of the space after the rail, capped at its
+   single-line content width for the current language and text size. */
+.landing-review-layout { height: calc(100vh - 56px); height: calc(100dvh - 56px); display: grid; grid-template-columns: 48px minmax(0, 1fr) fit-content(calc(40% - 19.2px)); }
 .task-rail { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 16px 0 28px; background: var(--bg); border-right: 1px solid var(--border); overflow-y: auto; }
 .rail-button { position: relative; width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 36px; padding: 0; color: var(--text-muted); background: transparent; border: 0; border-radius: 6px; cursor: pointer; }
 .rail-button > span { display: none; }

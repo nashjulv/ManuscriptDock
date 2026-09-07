@@ -11,6 +11,20 @@
 
 English uses the same semantic roles and sizes. User-authored manuscripts and quoted source material retain their original language. Small annotations must not carry instructions, errors, or decisions that belong in body text.
 
+## 按钮与控件密度 / Button and control density
+
+按钮沿用正文的字号，但使用独立的紧凑行高（更小 / 默认 20px，更大 24px）。下表是单行控件的目标最小高度；多行文本和内容型导航卡片按内容撑高，不裁切文字。
+
+| 类型 | 更小 | 默认 | 更大 |
+| --- | --- | --- | --- |
+| 右上角工具栏 | 30px | 32px | 36px |
+| 常规按钮与单行输入 | 34px | 36px | 40px |
+| 主要操作按钮 | 36px | 38px | 42px |
+
+工具栏 Aa、语言切换外框、模型设置与本地状态保持等高，间距 6px；常规文字操作左右内边距 12px，工具栏文字按钮 10px，Aa 为 6px。工具栏上下内边距 3px，常规按钮 5px。主栏最小高度从 68px 调整为 56px，大字号与窄屏仍可自然增高。纯图标轨道、图谱坐标和内容型按钮保留各自布局语义。
+
+Buttons retain the body font size with a separate compact line height (20px for Small/Default, 24px for Large). Toolbar, standard and primary controls use the minimum heights above; multiline labels expand naturally. Top-right controls share one outer height and a 6px gap. Standard text actions use 12px horizontal padding, toolbar text buttons 10px, and Aa 6px. Touch devices retain larger targets. No labels, accessible names, focus behavior or error messages change.
+
 ## 交互
 
 右上角 Aa 按钮的可访问名称为“字体大小 / Text size”。点击打开非模态浮层；V0.49 浮层只显示更小 / Smaller、默认 / Default、更大 / Larger 三个按钮。选中背景与 `aria-pressed` 标识当前字号，不显示标题、预览、状态说明或关闭按钮。点击后立即全局生效，保持浮层打开。

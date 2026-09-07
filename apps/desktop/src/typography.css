@@ -10,14 +10,21 @@
   --leading-section: 26px;
   --leading-page: 30px;
   --leading-brand: 36px;
+  --control-height: 36px;
+  --control-leading: 20px;
+  --control-padding-y: 5px;
+  --toolbar-height: 32px;
+  --primary-height: 38px;
 }
 :root[data-text-size="small"] {
   --type-meta: 12px; --type-body: 14px; --type-section: 16px; --type-page: 18px; --type-brand: 24px;
   --leading-meta: 18px; --leading-body: 22px; --leading-section: 24px; --leading-page: 26px; --leading-brand: 32px;
+  --control-height: 34px; --toolbar-height: 30px; --primary-height: 36px;
 }
 :root[data-text-size="large"] {
   --type-meta: 14px; --type-body: 17px; --type-section: 19px; --type-page: 22px; --type-brand: 28px;
   --leading-meta: 22px; --leading-body: 28px; --leading-section: 30px; --leading-page: 34px; --leading-brand: 40px;
+  --control-height: 40px; --control-leading: 24px; --toolbar-height: 36px; --primary-height: 42px;
 }
 body, button, input, select, textarea {
   font-family: "PingFang SC", "PingFang HK", "Microsoft YaHei UI", "Segoe UI", sans-serif;
@@ -36,31 +43,39 @@ body, button, input, select, textarea {
 }
 .app-shell :is(button:not(.rail-button):not(.journal-target-point):not(.journal-coordinate-button), input:not([type="checkbox"]):not([type="radio"]), select),
 .global-model-settings-dialog :is(button, input:not([type="checkbox"]):not([type="radio"]), select) {
-  min-height: 44px;
+  min-height: var(--control-height);
   height: auto;
 }
+.app-shell :is(button:not(.rail-button):not(.journal-target-point):not(.journal-coordinate-button)),
+.global-model-settings-dialog button {
+  line-height: var(--control-leading);
+  padding-block: var(--control-padding-y);
+}
+.primary-button { --control-height: var(--primary-height); }
 .app-shell :is(button, label, p, small, h1, h2, h3, h4, dd, li),
 .global-model-settings-dialog :is(button, label, p, small, h2, h3) { overflow-wrap: anywhere; }
 .app-shell :is(button:not(.rail-button):not(.journal-target-point):not(.journal-coordinate-button)),
 .global-model-settings-dialog button { white-space: normal; }
 .app-shell :is(.primary-button, .secondary-button, .text-button, .bar-button),
-.global-model-settings-dialog :is(.primary-button, .text-button) { padding: 9px 12px; }
+.global-model-settings-dialog :is(.primary-button, .text-button) { padding: var(--control-padding-y) 12px; }
 .app-shell :is(input:not([type="checkbox"]):not([type="radio"]), select),
-.global-model-settings-dialog input:not([type="checkbox"]) { padding-top: 8px; padding-bottom: 8px; }
+.global-model-settings-dialog input:not([type="checkbox"]) { padding-top: 5px; padding-bottom: 5px; }
 .app-shell textarea { padding: 10px 12px; }
 
 /* Let the product bar grow; content panes receive the remaining window height. */
 .landing-shell, .workspace-shell { display: flex; flex-direction: column; }
-.product-bar { position: relative; z-index: 8; flex: none; height: auto; min-height: 68px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; padding: 10px 20px; }
+.product-bar { --control-height: var(--toolbar-height); --control-padding-y: 3px; position: relative; z-index: 8; flex: none; height: auto; min-height: 56px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; padding: 10px 20px; }
 .landing-review-layout, .workbench { flex: 1; height: auto; min-height: 0; }
 .brand-copy { flex-wrap: wrap; gap: 0 7px; white-space: normal; }
 .brand-cn, .brand-name { font-size: var(--type-body); line-height: var(--leading-body); }
 .brand-copy .brand-version { font-size: var(--type-meta); line-height: var(--leading-meta); }
-.bar-actions { min-width: 0; gap: 8px; }
-.language-switch { height: auto; padding: 0 2px; }
-.language-switch button { padding: 7px; }
-.local-badge { height: auto; min-height: 44px; padding: 8px; }
+.bar-actions { min-width: 0; gap: 6px; }
+.product-bar .bar-button { padding-inline: 10px; }
+.language-switch { height: auto; min-height: var(--toolbar-height); padding: 1px; }
+.language-switch button { --control-height: calc(var(--toolbar-height) - 4px); --control-padding-y: 2px; padding-inline: 7px; }
+.local-badge { height: auto; min-height: var(--toolbar-height); padding: 3px 9px; }
 .model-config-button b { min-width: 22px; }
+.global-model-settings-dialog .global-model-settings-header button { width: var(--control-height); padding: 0; }
 .landing-workspace-head { height: auto; min-height: 60px; padding: 16px 24px 8px; }
 .landing-workspace-head h1, .workflow-header h1 { padding: 0; color: var(--text); border: 0; border-radius: 0; }
 .brand-statement-title { flex-wrap: wrap; gap: 0 10px; }
@@ -116,18 +131,18 @@ body, button, input, select, textarea {
 
 /* Font preference popover; all text inherits the selected global scale. */
 .text-size-settings { position: relative; }
-.app-shell .text-size-trigger { position: relative; display: grid; place-items: center; min-width: 44px; padding: 8px; }
+.app-shell .text-size-trigger { position: relative; display: grid; place-items: center; min-width: var(--toolbar-height); padding: 3px 6px; }
 .text-size-trigger[aria-expanded="true"] { background: var(--panel-strong); }
 .text-size-error-dot { position: absolute; width: 6px; height: 6px; right: 5px; top: 5px; background: var(--danger); border-radius: 50%; }
 .text-size-popover { position: absolute; top: calc(100% + 10px); right: 0; z-index: 20; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; width: 252px; max-width: calc(100vw - 24px); padding: 6px; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 8px 30px #1c1b191f; }
-.app-shell .text-size-option { min-width: 0; min-height: 44px; padding: 8px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 400; }
+.app-shell .text-size-option { min-width: 0; min-height: var(--toolbar-height); padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 400; }
 .app-shell .text-size-option:hover { background: var(--panel); }
 .app-shell .text-size-option[aria-pressed="true"] { background: var(--accent); color: var(--button-text); font-weight: 500; }
 
 @media (max-width: 1120px) {
   .product-bar { grid-template-columns: minmax(0, 1fr) auto; }
   .current-manuscript { display: none; }
-  .model-config-button { min-width: 44px; justify-content: center; }
+  .product-bar .model-config-button { min-width: var(--toolbar-height); width: var(--toolbar-height); padding-inline: 0; justify-content: center; }
   .model-config-button > span, .model-config-button > b, .local-badge { display: none; }
   .workspace-shell .workspace-panes[data-evidence-open="true"] { grid-template-columns: minmax(0, 1fr); }
   .workspace-shell .workspace-panes[data-evidence-open="true"] .operation-pane { display: none; }
@@ -173,4 +188,9 @@ body, button, input, select, textarea {
   .product-bar { grid-template-columns: minmax(0, 1fr); }
   .bar-actions { justify-content: flex-end; flex-wrap: wrap; }
   .overview-summary-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Preserve comfortable targets on devices whose primary pointer is touch. */
+@media (pointer: coarse) {
+  :root, :root[data-text-size] { --control-height: 44px; --toolbar-height: 44px; --primary-height: 44px; }
 }

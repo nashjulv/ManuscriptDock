@@ -2219,6 +2219,16 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PendingSelections::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // Keep the last normal size and maximized state, without restoring
+                // an off-screen position, fullscreen mode or hidden window.
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_ui_preferences,
             save_ui_preferences,

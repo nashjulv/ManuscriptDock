@@ -6,7 +6,19 @@
 - 手册日期：2026-09-07
 - 产品定位：本地论文投稿准备工作台 / Local-first manuscript submission workspace
 
+## 窗口大小与首页布局 / Window size and home layout
+
+桌面应用正常关闭或退出后，本机会记住窗口大小及最大化状态，下次启动时恢复。首次启动或无法读取有效记录时，使用 1180 × 780 的初始尺寸；最小尺寸仍为 760 × 620。窗口状态由 Rust 保存在应用配置目录，不随稿件导出。
+
+首页采用三段布局：宽度小于 960 像素时隐藏“投稿指引”；达到 960 像素后，扣除左侧导航栏，按“我的工作台”60%、“投稿指引”40% 分配宽度；指引宽度达到全部标题和说明均能各自单行展示的尺寸后固定，新增空间全部分配给工作台。这个上限随语言、字号和系统字体自动计算，不截断文字。中间区间允许自然换行。
+
+After a normal close or quit, the desktop app remembers its window size and maximized state on this device and restores them on the next launch. With no readable saved state, it starts at 1180 × 780; the minimum remains 760 × 620. Rust stores window state in the application configuration directory; it is not included in manuscript exports.
+
+The home page uses three stages: below 960 pixels, the Submission guide is hidden; from 960 pixels, the space after the navigation rail is shared 60% for My Workspace and 40% for the guide. Once the guide can display every heading and description on its own single line, its width stops growing and all additional space goes to My Workspace. This cap adapts to language, text size, and system fonts without truncating text. Text can wrap naturally in the intermediate stage.
+
 ## 调整字体大小 / Adjust text size
+
+按钮随字号协调缩放：默认字号下，右上角工具栏约 32px 高，常规按钮约 36px，主要操作约 38px；长文字可以自然换行撑高。Buttons scale with the text preference: at Default, toolbar controls are about 32px high, standard buttons 36px, and primary actions 38px; long labels can wrap and grow.
 
 点击右上角 **Aa** 图标，浮层中只有 **更小 / 默认 / 更大** 三个按钮，选中背景标识当前字号。点击后字号与行距立即应用到全部界面，本机会记住选择，切换稿件或重启后继续使用。点击浮层外部或按 Esc 关闭。
 
