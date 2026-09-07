@@ -1,6 +1,7 @@
 mod model_service;
 mod official_sources;
 mod ui_preferences;
+mod window_geometry;
 use official_sources::{
     instruction_links as discover_instruction_links, same_host as hosts_share_official_site,
     source_url as public_source_url, FetchOptions, FetchSession, PublicTransport,
@@ -2219,16 +2220,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PendingSelections::default())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                // Keep the last normal size and maximized state, without restoring
-                // an off-screen position, fullscreen mode or hidden window.
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
-                .build(),
-        )
+        .setup(|app| {
+            window_geometry::install(app);
+            Ok(())
+        })
+        .on_window_event(window_geometry::event)
         .invoke_handler(tauri::generate_handler![
             get_ui_preferences,
             save_ui_preferences,
@@ -2290,8 +2286,13 @@ pub fn run() {
             discover_journal_profile,
             get_journal_profile_discoveries
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run ManuscriptDock");
+        .build(tauri::generate_context!())
+        .expect("failed to build ManuscriptDock")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { .. } => window_geometry::flush(app),
+            tauri::RunEvent::Exit => window_geometry::stop(app),
+            _ => {}
+        });
 }
 
 #[cfg(test)]

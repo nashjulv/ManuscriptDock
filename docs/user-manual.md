@@ -8,11 +8,19 @@
 
 ## 窗口大小与首页布局 / Window size and home layout
 
-桌面应用正常关闭或退出后，本机会记住窗口大小及最大化状态，下次启动时恢复。首次启动或无法读取有效记录时，使用 1180 × 780 的初始尺寸；最小尺寸仍为 760 × 620。窗口状态由 Rust 保存在应用配置目录，不随稿件导出。
+桌面应用按显示器记住正常窗口的逻辑尺寸、相对位置及最大化状态。启动时优先恢复仍连接的上次屏幕；该屏断开时回到当前可用屏幕，优先使用该屏历史尺寸，并限制到排除菜单栏、Dock/任务栏后的可用区域。首次启动或记录无效时使用 1180 × 780 的默认尺寸，再按工作区收缩；通常最小尺寸为 760 × 620，工作区更小时临时放宽，保证窗口可操作。
+
+跨屏拖动期间不自动调整；落定后只缩小容纳不下的维度。自动缩小不会覆盖之前手动设置的大屏尺寸，拖回大屏也不会突然放大；以后在该屏启动时恢复其偏好。全屏、最小化及 Windows 贴靠的尺寸不覆盖普通窗口记录，首版不恢复全屏或贴靠布局。显示器身份无法可靠匹配时使用安全回退。窗口策略不改变阅读字号。
+
+窗口状态由 Rust 保存在应用配置目录的 `window-geometry-v1.json`，不随稿件导出；稳定调整后自动保存，正常关闭再刷盘。升级前的旧像素记录没有来源缩放信息，因此首次升级会使用安全默认尺寸；旧 `.window-state.json` 保留并备份为 `.window-state.pre-logical.json`。写入失败时仍可使用窗口，但下次启动可能恢复到较早的记录。
 
 首页采用三段布局：宽度小于 960 像素时隐藏“投稿指引”；达到 960 像素后，扣除左侧导航栏，按“我的工作台”60%、“投稿指引”40% 分配宽度；指引宽度达到全部标题和说明均能各自单行展示的尺寸后固定，新增空间全部分配给工作台。这个上限随语言、字号和系统字体自动计算，不截断文字。中间区间允许自然换行。
 
-After a normal close or quit, the desktop app remembers its window size and maximized state on this device and restores them on the next launch. With no readable saved state, it starts at 1180 × 780; the minimum remains 760 × 620. Rust stores window state in the application configuration directory; it is not included in manuscript exports.
+The desktop app remembers normal logical window dimensions, relative position, and maximized state per monitor. It restores to the last monitor if still connected, otherwise to an available current monitor, preferring that monitor's saved dimensions. The window is constrained to the usable area excluding the menu bar, Dock or taskbar. Missing or invalid state starts from 1180 × 780 and shrinks to fit. The usual 760 × 620 minimum is relaxed when the usable area is smaller.
+
+Moving between monitors does not trigger resizing during the drag. Once settled, only dimensions that do not fit are reduced. Automatic shrinking preserves the earlier large-screen preference; moving back does not enlarge the window unexpectedly, but a later launch on that monitor restores its preference. Fullscreen, minimized and Windows snapped geometry do not overwrite normal dimensions; fullscreen and snap layouts are not restored. Uncertain monitor identities use a safe fallback. Reading text size is unchanged.
+
+Rust stores `window-geometry-v1.json` in the application configuration directory, outside manuscript exports. Stable changes are saved automatically and flushed on normal close. Legacy pixel records lack their original scale factor, so the first upgrade uses safe default dimensions and retains `.window-state.json`, with a `.window-state.pre-logical.json` backup. A failed write does not block window use, but the next launch may restore an older record.
 
 The home page uses three stages: below 960 pixels, the Submission guide is hidden; from 960 pixels, the space after the navigation rail is shared 60% for My Workspace and 40% for the guide. Once the guide can display every heading and description on its own single line, its width stops growing and all additional space goes to My Workspace. This cap adapts to language, text size, and system fonts without truncating text. Text can wrap naturally in the intermediate stage.
 

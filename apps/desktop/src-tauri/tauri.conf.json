@@ -21,6 +21,8 @@
         "height": 780,
         "minWidth": 760,
         "minHeight": 620,
+        "visible": false,
+        "preventOverflow": true,
         "resizable": true,
         "fullscreen": false
       }

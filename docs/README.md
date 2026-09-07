@@ -26,6 +26,8 @@
 
 ## 技术与体验
 
+- [多显示器窗口恢复与适配方案](multi-monitor-window-state-design.md)：已实施的逻辑尺寸、跨屏与断屏保护、每屏偏好、旧记录迁移，以及验证结果和待测硬件矩阵。
+
 - [字体与阅读设置](typography-and-reading-settings.md)：统一语义字号、右上角三档切换、本机保存、双语失败恢复及回归范围。
 
 - [官方来源读取与 HTTP 兼容](official-source-access.md)：HTTP 无额外确认、虚拟 DNS 恢复、来源修正、网络防护与访问记录。

@@ -1,5 +1,31 @@
 # ManuscriptDock Development Log
 
+## 2026-09-07 — V0.49 monitor-aware window geometry
+
+- Replace physical-pixel window-state restoration with Rust-owned logical content geometry,
+  work-area bounds, relative anchors and hashed per-monitor identities. Keep V0.49 as requested.
+- Separate user-preferred and effective dimensions: cross-screen shrinking preserves earlier
+  preferences, never enlarges the window on return, and waits until native dragging has ended.
+  Keep normal dimensions independent from maximize, fullscreen, minimize and Windows snap states.
+- Add AppKit observers and Windows native message handling, a bounded startup display fallback,
+  debounced atomic saves and close/exit flushing protected against stale queued writes. Preserve
+  legacy pixel records and start from safe defaults because their source DPI is unknown.
+- `npm run check` passed (62 frontend, 92 core, 48 desktop tests, 2 ignored desktop tests).
+  Three later regression cases bring focused geometry coverage to 15 passing tests; they cover
+  immediate close and maximize after resize, recovery from unavailable monitor metadata,
+  and returning from a work area smaller than the usual minimum without automatic enlargement.
+  Clippy was rerun after these changes.
+- Built and opened a separate macOS QA app, observed normal rendering, logical state and user
+  resize persistence. Paused UI automation when the QA window was being manually operated.
+  Controlled restarts, real 2K/4K hotplug and the complete native monitor matrix remain unverified.
+- The Windows adapter passes an isolated x64 MSVC API/type check with Tauri calls stubbed.
+  Full Windows cross-check is blocked by absent Windows SDK/CRT headers (`assert.h` in ring).
+  This is not a Windows application build or native-run pass; no installer was published.
+- Internationalization review: zh-CN/en frontend tests pass; no new UI or locale-sensitive
+  backend messages. Both language sections of the user manual now explain monitor adaptation,
+  migration and persistence failure behavior. Full native bilingual/scale matrix remains open.
+- Details: [multi-monitor implementation and acceptance matrix](multi-monitor-window-state-design.md).
+
 ## 2026-09-07 — V0.49 coordinated button density
 
 - Replace the blanket 44px minimum with shared toolbar / standard / primary control heights:
