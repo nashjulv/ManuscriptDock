@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.46 文档
+# 投稿舱 ManuscriptDock V0.49 文档
 
 ## 使用指南
 
@@ -25,6 +25,8 @@
 - [Paperpal 竞争应对与市场定位](competitive-positioning-paperpal.md)：检查能力基线、差异化、传播话术与证据要求。
 
 ## 技术与体验
+
+- [字体与阅读设置](typography-and-reading-settings.md)：统一语义字号、右上角三档切换、本机保存、双语失败恢复及回归范围。
 
 - [官方来源读取与 HTTP 兼容](official-source-access.md)：HTTP 无额外确认、虚拟 DNS 恢复、来源修正、网络防护与访问记录。
 - [期刊网址核验记录](journal-url-audit-2026-09-06.md)：17 条内置期刊入口检查与剩余站点限制。

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import manuscriptDockLogo from "./assets/manuscriptdock-logo.svg";
 import { PRODUCT_VERSION } from "./version";
+import { TextSizeProvider, TextSizeSettings } from "./TextSizeSettings";
 import { I18nProvider, localize, localizeBackendText, localizeSourceLabel, useI18n, type Locale } from "./i18n";
 
 type ManuscriptKind = "word" | "pdf" | "latex";
@@ -569,7 +570,7 @@ function outcomeLabel(outcome: ReadinessOutcome, locale: Locale) {
 }
 
 export default function App() {
-  return <I18nProvider><ManuscriptDockApp /></I18nProvider>;
+  return <I18nProvider><TextSizeProvider><ManuscriptDockApp /></TextSizeProvider></I18nProvider>;
 }
 
 function ManuscriptDockApp() {
@@ -1493,7 +1494,7 @@ function ProductBar({ manuscriptName, onNewManuscript, isSelecting = false }: { 
   }, []);
   const configuredModelCount = modelSettings?.slots?.filter((slot) => slot.enabled && slot.hasApiKey && slot.providerLabel && slot.baseUrl && slot.model).length ?? 0;
   return <>
-    <header className="product-bar"><div className="brand" aria-label={`投稿舱 ManuscriptDock ${PRODUCT_VERSION}`}><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span><span className="brand-version">{PRODUCT_VERSION}</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span className="current-manuscript" aria-hidden="true" />}<div className="bar-actions"><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><button className="bar-button model-config-button" type="button" aria-label={text("模型设置", "Models")} aria-haspopup="dialog" aria-expanded={modelSettingsOpen} onClick={() => setModelSettingsOpen(true)} title={text("配置模型与 API Key", "Configure models and API keys")}><Icon name="settings" /><span>{text("模型设置", "Models")}</span>{configuredModelCount > 0 ? <b>{configuredModelCount}</b> : null}</button><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>
+    <header className="product-bar"><div className="brand" aria-label={`投稿舱 ManuscriptDock ${PRODUCT_VERSION}`}><span className="brand-mark" aria-hidden="true"><img src={manuscriptDockLogo} alt="" width="32" height="32" /></span><span className="brand-copy"><span className="brand-cn" lang="zh-CN">投稿舱</span><span className="brand-name" lang="en">ManuscriptDock</span><span className="brand-version">{PRODUCT_VERSION}</span></span></div>{manuscriptName ? <p className="current-manuscript" title={manuscriptName}>{manuscriptName}</p> : <span className="current-manuscript" aria-hidden="true" />}<div className="bar-actions"><TextSizeSettings /><div className="language-switch" role="group" aria-label={text("界面语言", "Interface language")}><button type="button" aria-pressed={locale === "zh-CN"} onClick={() => setLocale("zh-CN")}>中文</button><button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button></div><button className="bar-button model-config-button" type="button" aria-label={text("模型设置", "Models")} aria-haspopup="dialog" aria-expanded={modelSettingsOpen} onClick={() => setModelSettingsOpen(true)} title={text("配置模型与 API Key", "Configure models and API keys")}><Icon name="settings" /><span>{text("模型设置", "Models")}</span>{configuredModelCount > 0 ? <b>{configuredModelCount}</b> : null}</button><span className="local-badge" title={text("稿件尚未离开你的设备", "The manuscript has not left your device")}><Icon name="lock" />{text("仅在本机", "Local only")}</span>{onNewManuscript ? <button className="bar-button" type="button" onClick={onNewManuscript} disabled={isSelecting}>{isSelecting ? text("正在打开…", "Opening…") : text("导入另一篇", "Import another")}</button> : null}</div></header>
     <GlobalModelSettingsDialog open={modelSettingsOpen} onClose={() => setModelSettingsOpen(false)} onSaved={setModelSettings} />
   </>;
 }
@@ -2328,10 +2329,10 @@ function JournalTargetMap({ title, portfolio, locale, focusedJournalId, onFocus 
         <circle className="target-ring target-ring-matching" cx="50" cy="50" r="33" />
         <circle className="target-ring target-ring-sprint" cx="50" cy="50" r="19" />
         {Array.from({ length: 8 }, (_, index) => { const angle = ((-90 + index * 45) * Math.PI) / 180; return <line key={index} x1="50" y1="50" x2={50 + Math.cos(angle) * 46} y2={50 + Math.sin(angle) * 46} />; })}
-        <text x="50" y="51">{text("冲刺", "Reach")}</text>
-        <text x="50" y="23">{text("匹配环", "Match ring")}</text>
-        <text x="50" y="7">{text("保底环", "Safeguard ring")}</text>
       </svg>
+      <span className="journal-target-label journal-target-label-reach">{text("冲刺", "Reach")}</span>
+      <span className="journal-target-label journal-target-label-match">{text("匹配环", "Match ring")}</span>
+      <span className="journal-target-label journal-target-label-safeguard">{text("保底环", "Safeguard ring")}</span>
       {points.map(({ item, tier, code, left, top }) => <button key={item.id} className="journal-target-point" data-tier={tier.key} type="button" aria-pressed={focusedJournalId === item.id} aria-label={`${code} · ${locale === "en" ? item.nameEn : item.name} · ${locale === "en" && item.publisherEn ? item.publisherEn : item.publisher} · ${tier.label}`} style={{ left: `${left}%`, top: `${top}%` }} onClick={() => onFocus(item.id)}><span>{code}</span></button>)}
     </div>
     <div className="journal-target-legend" aria-label={text("推荐层级图例", "Recommendation tier legend")}>{tiers.map((tier) => <span key={tier.key} data-tier={tier.key}><i />{tier.label}<b>{tier.items.length}</b></span>)}</div>
@@ -3030,15 +3031,19 @@ function KnowledgeNetworkCanvas({ bodies, assertions, view }: { bodies: Knowledg
     };
     return localize(locale, labels[role][0], labels[role][1]);
   };
-  return <div className="knowledge-network-canvas" role="img" aria-label={text(`${visibleBodies.length} 个保持边界的知识体，通过 ${visibleAssertions.length} 个一等声明对象形成关联网络。`, `${visibleBodies.length} bounded knowledge bodies form a network through ${visibleAssertions.length} first-class assertion objects.`)}>
+  return <div className="knowledge-network-canvas" role="group" aria-label={text(`${visibleBodies.length} 个保持边界的知识体，通过 ${visibleAssertions.length} 个一等声明对象形成关联网络。`, `${visibleBodies.length} bounded knowledge bodies form a network through ${visibleAssertions.length} first-class assertion objects.`)}>
     <svg viewBox="0 0 600 420" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs><marker id="knowledge-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
-      {visibleAssertions.map(({ assertion, sourceIndex, targetIndex }) => {
+      {visibleAssertions.map(({ assertion, sourceIndex, targetIndex }, index) => {
         const source = positions[sourceIndex]; const target = positions[targetIndex]; const midX = (source.x + target.x) / 2; const midY = (source.y + target.y) / 2;
-        return <g className="network-assertion" key={`${assertion.assertionId}-${assertion.version}`}><line x1={source.x} y1={source.y} x2={target.x} y2={target.y} markerEnd="url(#knowledge-arrow)" /><rect x={midX - 8} y={midY - 8} width="16" height="16" transform={`rotate(45 ${midX} ${midY})`} /><text x={midX} y={midY - 14}>{relationKindLabel(assertion.relationKind, locale)}</text><text className="network-protocol" x={midX} y={midY + 24}>{assertion.protocolObject} · v{assertion.version}</text></g>;
+        return <g className="network-assertion" key={`${assertion.assertionId}-${assertion.version}`}><line x1={source.x} y1={source.y} x2={target.x} y2={target.y} markerEnd="url(#knowledge-arrow)" /><rect x={midX - 8} y={midY - 8} width="16" height="16" transform={`rotate(45 ${midX} ${midY})`} /><text x={midX} y={midY - 14}>R{index + 1}</text></g>;
       })}
-      {visibleBodies.map((body, index) => { const position = positions[index]; const radius = view === "pair" ? 118 : 72; return <g className="network-body" key={body.body.objectId}><circle className="body-boundary" cx={position.x} cy={position.y} r={radius} /><text className="body-title" x={position.x} y={position.y - radius + 18}>{body.displayId} · {roleLabel(body.role)} · S{body.body.version}</text><line x1={position.x} y1={position.y} x2={position.x - 38} y2={position.y + 30} /><line x1={position.x} y1={position.y} x2={position.x + 38} y2={position.y + 30} /><circle className="body-claim" cx={position.x} cy={position.y} r="19" /><text x={position.x} y={position.y - 26}>Claim</text><text x={position.x} y={position.y + 4}>v{body.claim.version}</text><circle className="body-anchor" cx={position.x - 38} cy={position.y + 30} r="13" /><text x={position.x - 38} y={position.y + 52}>Anchor v{body.sourceAnchor.version}</text><circle className="body-method" cx={position.x + 38} cy={position.y + 30} r="13" /><text x={position.x + 38} y={position.y + 52}>Method v{body.method.version}</text></g>; })}
+      {visibleBodies.map((body, index) => { const position = positions[index]; const radius = view === "pair" ? 118 : 72; return <g className="network-body" key={body.body.objectId}><circle className="body-boundary" cx={position.x} cy={position.y} r={radius} /><text className="body-title" x={position.x} y={position.y - radius + 18}>{body.displayId} · S{body.body.version}</text><line x1={position.x} y1={position.y} x2={position.x - 38} y2={position.y + 30} /><line x1={position.x} y1={position.y} x2={position.x + 38} y2={position.y + 30} /><circle className="body-claim" cx={position.x} cy={position.y} r="19" /><text x={position.x} y={position.y - 26}>Claim</text><text x={position.x} y={position.y + 4}>v{body.claim.version}</text><circle className="body-anchor" cx={position.x - 38} cy={position.y + 30} r="13" /><text x={position.x - 38} y={position.y + 52}>Anchor v{body.sourceAnchor.version}</text><circle className="body-method" cx={position.x + 38} cy={position.y + 30} r="13" /><text x={position.x + 38} y={position.y + 52}>Method v{body.method.version}</text></g>; })}
     </svg>
+    <ul className="network-labels" aria-label={text("知识体与关系标签", "Knowledge bodies and relationship labels")}>
+      {visibleBodies.map((body) => <li key={body.body.objectId}><strong>{body.displayId} · {roleLabel(body.role)} · S{body.body.version}</strong><small>Claim v{body.claim.version} · SourceAnchor v{body.sourceAnchor.version} · Method v{body.method.version}</small></li>)}
+      {visibleAssertions.map(({ assertion, sourceIndex, targetIndex }, index) => <li key={`${assertion.assertionId}-${assertion.version}`}><strong>R{index + 1} · {visibleBodies[sourceIndex].displayId} → {visibleBodies[targetIndex].displayId} · {relationKindLabel(assertion.relationKind, locale)}</strong><small>{assertion.protocolObject} · v{assertion.version}</small></li>)}
+    </ul>
     {visibleAssertions.length === 0 ? <p>{text("当前只有单体边界，尚无经过声明协议确认的跨体关系。", "Only the local body boundary exists; no cross-body relationship has been confirmed through an assertion protocol.")}</p> : null}
   </div>;
 }

@@ -1,5 +1,53 @@
 # ManuscriptDock Development Log
 
+## 2026-09-07 — V0.49 compact text-size buttons
+
+- Reduce the popover to three buttons: Smaller / Default / Larger. Remove its heading, preview, status copy
+  and close button; the pressed style communicates the active size. Keep immediate application, persistence,
+  keyboard access and the V0.48 focus-loss fix. Escape, the trigger and outside pointer/focus dismiss it.
+- Preference errors remain available through localized tooltips and a screen-reader alert; clicking any size,
+  including the current choice, retries saving without adding controls to the compact popover.
+- Validation: all 62 frontend tests passed, including zh-CN/en compact-content, keyboard, null-focus and
+  retry cases. Typecheck, production build and the macOS debug app bundle passed. Chrome verified all three
+  buttons in both languages; the native macOS WebView verified the compact panel and size changes without
+  dismissing it. The original native size was restored. Internationalization review preserved paired button
+  names and localized error tooltips/announcements; Windows was not exercised.
+
+## 2026-09-07 — V0.48 text-size label click fix
+
+- Clicking a size label could blur the selected radio with no next focus target before label activation.
+  The popover closed on that intermediate blur, preventing the actual selection. Dismiss on an actual
+  outside pointer or focus target instead; keep label clicks, radio clicks and keyboard selection active.
+- Added zh-CN/en regressions that failed with the previous blur handler and pass with the fix. Validate
+  label-text clicks, persistence and popover dismissal separately from direct radio activation.
+- Validation: `npm run check` passed (60 frontend, 92 core and 36 desktop tests; 2 live tests ignored).
+  Chrome verified all six zh-CN/en label selections, reload persistence and keyboard dismissal without
+  application console errors. Computer Use clicked all three Chinese labels in the bundled macOS WebView
+  at `tauri://localhost`; each updated the selection while keeping the popover open. The original size
+  preference was restored. The debug app bundle built successfully and was opened without installation.
+- Internationalization review: existing zh-CN/en copy and accessible names are preserved; both locales
+  cover the focus-loss regression. Windows native behavior was not exercised.
+
+## 2026-09-07 — V0.47 unified typography and reading settings
+
+- Replace scattered desktop font sizes with four semantic tiers plus a brand tier. Default metadata/body/
+  section/page sizes are 13/15/17/20 px; use regular body text, medium emphasis and paired line heights.
+- Add a top-right Aa popover with Smaller / Default / Larger, immediate previews, keyboard and outside-click
+  dismissal, local persistence and bilingual recovery messages. Rust owns the desktop preference file;
+  queued saves preserve the latest choice and startup reads cannot undo a new selection.
+- Let headers, navigation and controls grow with text. Reflow narrow declaration forms and knowledge nodes;
+  keep journal-map labels at screen text sizes and expose full network labels in an accessible list.
+- `npm run check` passed: 58 frontend tests, 92 core tests, 36 desktop tests (2 unrelated live-network tests
+  intentionally ignored), typecheck, production build, rustfmt and clippy. The native desktop build passed.
+- Connected Chrome extension regression used synthetic workspaces: 18 home/font combinations across zh-CN/en,
+  three sizes and 1180/980/760 px widths; 60 main-task combinations across both locales, all sizes and
+  1180/760 px widths. Also inspected declaration editing, model settings, evidence panes, version history,
+  knowledge networks, journal-map selection and a 390 px text-settings popover. No application console
+  errors were observed; unrelated browser-extension warnings were excluded.
+- Internationalization review covered zh-CN/en controls, accessible names, preference failure/retry states
+  and graph labels. Browser fixtures do not validate Windows font rendering, native file pickers or publisher
+  submission. No installer was published or installed.
+
 ## 2026-09-06 — V0.46 structured declaration requirements
 
 - Separate manuscript statements, attachments, submission-system entries, and author verification.

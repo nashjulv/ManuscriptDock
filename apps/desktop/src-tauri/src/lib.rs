@@ -1,5 +1,6 @@
 mod model_service;
 mod official_sources;
+mod ui_preferences;
 use official_sources::{
     instruction_links as discover_instruction_links, same_host as hosts_share_official_site,
     source_url as public_source_url, FetchOptions, FetchSession, PublicTransport,
@@ -2192,12 +2193,35 @@ fn model_settings_root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法定位模型设置目录：{error}"))
 }
 
+#[tauri::command]
+fn get_ui_preferences(app: AppHandle) -> Result<ui_preferences::UiPreferences, &'static str> {
+    let root = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "UI_PREFERENCES_READ_FAILED")?;
+    ui_preferences::load(&root)
+}
+
+#[tauri::command]
+fn save_ui_preferences(
+    app: AppHandle,
+    text_size: ui_preferences::TextSize,
+) -> Result<(), &'static str> {
+    let root = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "UI_PREFERENCES_WRITE_FAILED")?;
+    ui_preferences::save(&root, text_size)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(PendingSelections::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            get_ui_preferences,
+            save_ui_preferences,
             select_manuscript,
             create_workspace,
             list_workspaces,

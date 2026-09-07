@@ -1,10 +1,18 @@
-# 投稿舱 ManuscriptDock V0.46 产品使用手册
+# 投稿舱 ManuscriptDock V0.49 产品使用手册
 
-- 产品名称：投稿舱 ManuscriptDock V0.46
-- 产品版本：V0.46（安装包版本 `0.46.0`）
+- 产品名称：投稿舱 ManuscriptDock V0.49
+- 产品版本：V0.49（安装包版本 `0.49.0`）
 - 适用平台：macOS 11+、Windows 10/11 x64
-- 手册日期：2026-09-04
+- 手册日期：2026-09-07
 - 产品定位：本地论文投稿准备工作台 / Local-first manuscript submission workspace
+
+## 调整字体大小 / Adjust text size
+
+点击右上角 **Aa** 图标，浮层中只有 **更小 / 默认 / 更大** 三个按钮，选中背景标识当前字号。点击后字号与行距立即应用到全部界面，本机会记住选择，切换稿件或重启后继续使用。点击浮层外部或按 Esc 关闭。
+
+Open **Aa** in the top-right toolbar. The popover contains only **Smaller / Default / Larger** buttons; the highlighted button shows the current size. Text size and line spacing update immediately and are remembered on this device. Click outside or press Esc to close. This changes the application interface, not manuscript formatting or exported files.
+
+若 Aa 出现异常标记，悬停可查看原因；点击任一档位即可重试保存。保存失败时当前字号仍然有效；若无法读取原设置，应用使用默认档。
 
 > **投论文，上更好的期刊。**<br>
 > *Go for Better Journals.*

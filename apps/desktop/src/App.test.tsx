@@ -32,9 +32,9 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "我的工作台" })).toBeVisible();
     expect(screen.getByRole("button", { name: "我的工作台" })).toHaveAttribute("aria-current", "page");
     expect(container.querySelector(".brand-mark img")).toHaveAttribute("src", expect.stringContaining("manuscriptdock-logo.svg"));
-    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.46")).toBeVisible();
-    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.46" }));
-    expect(brandStatement.getByText("V0.46")).toBeVisible();
+    expect(screen.getByLabelText("投稿舱 ManuscriptDock V0.49")).toBeVisible();
+    const brandStatement = within(screen.getByRole("region", { name: "投稿舱 ManuscriptDock V0.49" }));
+    expect(brandStatement.getByText("V0.49")).toBeVisible();
     expect(brandStatement.getByText("本地论文投稿准备工作台")).toBeVisible();
     expect(brandStatement.getByText("Local-first manuscript submission workspace.")).toHaveAttribute("lang", "en");
     expect(brandStatement.getByText("投论文，上更好的期刊")).toBeVisible();
@@ -982,13 +982,19 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "中文" }));
 
     await user.click(screen.getByRole("tab", { name: "2. 两体关联" }));
-    expect(screen.getByRole("img", { name: /2 个保持边界的知识体/ })).toBeVisible();
+    expect(screen.getByRole("group", { name: /2 个保持边界的知识体/ })).toBeVisible();
     expect(document.querySelectorAll(".network-body")).toHaveLength(2);
 
     await user.click(screen.getByRole("tab", { name: "3. 关联网络" }));
-    expect(screen.getByRole("img", { name: /5 个保持边界的知识体/ })).toBeVisible();
+    expect(screen.getByRole("group", { name: /5 个保持边界的知识体/ })).toBeVisible();
     expect(document.querySelectorAll(".network-body")).toHaveLength(5);
     expect(document.querySelectorAll(".network-assertion")).toHaveLength(6);
+    const networkLabels = screen.getByRole("list", { name: "知识体与关系标签" });
+    expect(networkLabels).toHaveTextContent("ReproductionAssertion · v1");
+    expect(networkLabels).toHaveTextContent("R1 · K-A → K-B");
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByRole("list", { name: "Knowledge bodies and relationship labels" })).toHaveTextContent("Original research");
+    await user.click(screen.getByRole("button", { name: "中文" }));
 
     await user.click(screen.getByRole("button", { name: "打开模型设置" }));
     expect(screen.getByText("1 个主模型，2 个备选模型")).toBeVisible();
