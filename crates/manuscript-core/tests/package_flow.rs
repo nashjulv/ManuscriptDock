@@ -12,6 +12,702 @@ use std::{
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 #[test]
+fn ai_drafts_bind_sources_require_evidence_and_preserve_files_and_author_review() {
+    use manuscript_core::{ai_assistance as ai, material_drafts as drafts};
+    let root = temporary_root("ai-draft");
+    let source = root.join("synthetic.docx");
+    write_synthetic_docx(&source);
+    let original = fs::read(&source).unwrap();
+    let store = ProjectStore::new(root.join("store")).unwrap();
+    let project = store
+        .create_from_docx(&source, TaskKind::PreparePackage)
+        .unwrap();
+    let mut project = store
+        .select_target(
+            &project.id,
+            project.revision,
+            TargetSelection {
+                id: uuid::Uuid::new_v4().to_string(),
+                journal_id: "elsevier-artificial-intelligence".into(),
+                article_type: "research_article".into(),
+                stage: "initial_submission".into(),
+                origin: TargetOrigin::Catalog,
+                recommendation_ref: None,
+                rules_hash: manuscript_core::rules_hash_for("elsevier-artificial-intelligence")
+                    .unwrap(),
+            },
+        )
+        .unwrap();
+    project.facts.title = Some("Synthetic study".into());
+    project.facts.abstract_text = Some("Synthetic study compares two methods.".into());
+    let input = ai::prepare(
+        &store,
+        &project,
+        ai::AiTask::DraftCoverLetter,
+        Some("cover_letter".into()),
+    )
+    .unwrap();
+    let evidence = vec![ai::Citation {
+        source_id: "manuscript-facts".into(),
+        quote: "Synthetic study".into(),
+    }];
+    let mut output = ai::AiOutput {
+        paragraphs: vec![ai::DraftParagraph {
+            text: "Please consider our Synthetic study.".into(),
+            evidence,
+        }],
+        findings: vec![],
+    };
+    ai::validate_output(&input, &output).unwrap();
+    output.paragraphs[0].evidence[0].quote = "invented evidence".into();
+    assert_eq!(
+        ai::validate_output(&input, &output).unwrap_err().code,
+        "AI_OUTPUT_INVALID"
+    );
+    output.paragraphs[0].evidence[0].quote = "Synthetic study".into();
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut run = ai::begin(
+        &store,
+        &project,
+        &input,
+        &id,
+        "http://127.0.0.1/v1",
+        "synthetic",
+    )
+    .unwrap();
+    assert_eq!(
+        ai::begin(&store, &project, &input, &id, "same", "same")
+            .unwrap_err()
+            .code,
+        "AI_RUN_ALREADY_STARTED"
+    );
+    run.status = "succeeded".into();
+    run.output = Some(output.clone());
+    ai::save_run(&store, &project, &run).unwrap();
+    let mut changed = project.clone();
+    changed.facts.title = Some("Changed title".into());
+    assert_eq!(
+        ai::accept(&store, &changed, &id).unwrap_err().code,
+        "AI_CONTEXT_CHANGED"
+    );
+    assert!(!ai::history(&store, &changed).unwrap()[0].current);
+    let path = ai::accept(&store, &project, &id).unwrap();
+    assert_eq!(
+        ai::accept(&store, &project, &id).unwrap_err().code,
+        "AI_DRAFT_UNAVAILABLE"
+    );
+    assert!(ai::prepare(
+        &store,
+        &project,
+        ai::AiTask::DraftCoverLetter,
+        Some("cover_letter".into())
+    )
+    .is_err());
+    let task = drafts::list_material_tasks(&store, &project)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == "cover_letter")
+        .unwrap();
+    assert_eq!(task.status, "draft_present");
+    assert!(!task.can_generate);
+    assert!(!task.can_generate_template);
+    let review = ai::prepare(
+        &store,
+        &project,
+        ai::AiTask::ReviewMaterial,
+        Some("cover_letter".into()),
+    )
+    .unwrap();
+    assert!(review
+        .sources
+        .iter()
+        .any(|s| s.id == "material-cover_letter" && s.text.contains("Synthetic study")));
+    assert_eq!(
+        ai::validate_output(&review, &output).unwrap_err().code,
+        "AI_OUTPUT_INVALID"
+    );
+    let prepared = manuscript_core::material_review::prepare(&store, &project).unwrap();
+    let package = build_package(&store, &project, &prepared.context_hash, "draft").unwrap();
+    let package_path = Path::new(&package.staging_dir);
+    assert!(package_path.join("records/ai-assistance.json").is_file());
+    let audit: serde_json::Value =
+        serde_json::from_slice(&fs::read(package_path.join("records/ai-assistance.json")).unwrap())
+            .unwrap();
+    assert_eq!(audit[0]["acceptedPath"], path);
+    let mut zip =
+        ZipArchive::new(fs::File::open(package_path.join("publisher-files.zip")).unwrap()).unwrap();
+    assert!(zip.by_name("records/ai-assistance.json").is_err());
+    assert_eq!(fs::read(&source).unwrap(), original);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ai_input_tracks_edited_templates_and_rejects_incomplete_highlights() {
+    use manuscript_core::{ai_assistance as ai, material_drafts as drafts};
+    let root = temporary_root("ai-template");
+    let source = root.join("synthetic.docx");
+    write_synthetic_docx(&source);
+    let store = ProjectStore::new(root.join("store")).unwrap();
+    let project = store
+        .create_from_docx(&source, TaskKind::PreparePackage)
+        .unwrap();
+    let mut project = store
+        .select_target(
+            &project.id,
+            project.revision,
+            TargetSelection {
+                id: uuid::Uuid::new_v4().to_string(),
+                journal_id: "elsevier-artificial-intelligence".into(),
+                article_type: "research_article".into(),
+                stage: "initial_submission".into(),
+                origin: TargetOrigin::Catalog,
+                recommendation_ref: None,
+                rules_hash: manuscript_core::rules_hash_for("elsevier-artificial-intelligence")
+                    .unwrap(),
+            },
+        )
+        .unwrap();
+    project.facts.title = Some("Synthetic title".into());
+    project.facts.abstract_text = None;
+    assert_eq!(
+        ai::prepare(
+            &store,
+            &project,
+            ai::AiTask::DraftCoverLetter,
+            Some("cover_letter".into())
+        )
+        .unwrap_err()
+        .code,
+        "AI_SOURCE_REQUIRED"
+    );
+    project.facts.abstract_text = Some("Synthetic abstract".into());
+    drafts::generate_material_template(&store, &project, "cover_letter").unwrap();
+    let input = ai::prepare(
+        &store,
+        &project,
+        ai::AiTask::DraftCoverLetter,
+        Some("cover_letter".into()),
+    )
+    .unwrap();
+    assert!(input
+        .sources
+        .iter()
+        .any(|s| s.id == "material-cover_letter"));
+    let workspace =
+        manuscript_core::package_workspace::workspace_root(&store, &project.id).unwrap();
+    write_synthetic_docx_named(
+        &workspace.join("author-tools/cover-letter-TEMPLATE.docx"),
+        "Author edited this template.",
+    );
+    let changed = ai::prepare(
+        &store,
+        &project,
+        ai::AiTask::DraftCoverLetter,
+        Some("cover_letter".into()),
+    )
+    .unwrap();
+    assert_ne!(input.context_hash, changed.context_hash);
+    let mut highlights = changed;
+    highlights.task = ai::AiTask::DraftHighlights;
+    let p = ai::DraftParagraph {
+        text: "Synthetic result".into(),
+        evidence: vec![ai::Citation {
+            source_id: "manuscript-facts".into(),
+            quote: "Synthetic abstract".into(),
+        }],
+    };
+    assert!(ai::validate_output(
+        &highlights,
+        &ai::AiOutput {
+            paragraphs: vec![p.clone()],
+            findings: vec![]
+        }
+    )
+    .is_err());
+    ai::validate_output(
+        &highlights,
+        &ai::AiOutput {
+            paragraphs: vec![p.clone(), p.clone(), p],
+            findings: vec![],
+        },
+    )
+    .unwrap();
+    let lock = store.acquire_ai_lock(&project.id).unwrap();
+    assert!(store.acquire_ai_lock(&project.id).is_err());
+    drop(lock);
+    assert!(store.acquire_ai_lock(&project.id).is_ok());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn material_review_requires_author_confirmation_and_invalidates_changed_content() {
+    use manuscript_core::{material_drafts as drafts, material_review as review};
+    let root = temporary_root("material-review");
+    let source = root.join("synthetic.docx");
+    write_synthetic_docx(&source);
+    let store = ProjectStore::new(root.join("store")).unwrap();
+    let project = store
+        .create_from_docx(&source, TaskKind::PreparePackage)
+        .unwrap();
+    let project = store
+        .select_target(
+            &project.id,
+            project.revision,
+            TargetSelection {
+                id: uuid::Uuid::new_v4().to_string(),
+                journal_id: "elsevier-artificial-intelligence".into(),
+                article_type: "research_article".into(),
+                stage: "initial_submission".into(),
+                origin: TargetOrigin::Catalog,
+                recommendation_ref: None,
+                rules_hash: manuscript_core::rules_hash_for("elsevier-artificial-intelligence")
+                    .unwrap(),
+            },
+        )
+        .unwrap();
+    drafts::generate_material_template(&store, &project, "funding").unwrap();
+    let workspace =
+        manuscript_core::package_workspace::workspace_root(&store, &project.id).unwrap();
+    let file = workspace.join("author-tools/funding-TEMPLATE.docx");
+    let check = review::check(&store, &project, "funding").unwrap();
+    assert!(!check.issues.is_empty());
+    assert!(check
+        .issues
+        .iter()
+        .all(|issue| !issue.zh_cn.is_empty() && !issue.en.is_empty()));
+    assert_eq!(
+        review::confirm(
+            &store,
+            &project,
+            "funding",
+            &check.sha256,
+            &check.context_hash,
+            true
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_REVIEW_FAILED"
+    );
+    write_synthetic_docx_named(&file, "This synthetic study received no external funding.");
+    let task = drafts::list_material_tasks(&store, &project)
+        .unwrap()
+        .into_iter()
+        .find(|task| task.id == "funding")
+        .unwrap();
+    assert_eq!(task.status, "modified");
+    let checked = review::check(&store, &project, "funding").unwrap();
+    assert!(checked.issues.is_empty());
+    assert_eq!(
+        review::confirm(
+            &store,
+            &project,
+            "funding",
+            &checked.sha256,
+            &checked.context_hash,
+            false
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_AUTHOR_CONFIRMATION_REQUIRED"
+    );
+    let confirmed = review::confirm(
+        &store,
+        &project,
+        "funding",
+        &checked.sha256,
+        &checked.context_hash,
+        true,
+    )
+    .unwrap();
+    let repeated = review::confirm(
+        &store,
+        &project,
+        "funding",
+        &checked.sha256,
+        &checked.context_hash,
+        true,
+    )
+    .unwrap();
+    assert_eq!(confirmed.snapshot_id, repeated.snapshot_id);
+    assert_eq!(
+        drafts::list_material_tasks(&store, &project)
+            .unwrap()
+            .into_iter()
+            .find(|task| task.id == "funding")
+            .unwrap()
+            .status,
+        "confirmed"
+    );
+    let prep = review::prepare(&store, &project).unwrap();
+    assert!(prep
+        .ready_items
+        .iter()
+        .any(|item| item.requirement_id.ends_with("funding")));
+    let package = build_package(&store, &project, &prep.context_hash, "draft").unwrap();
+    assert!(package
+        .files
+        .iter()
+        .any(|file| file.relative_path == "submission/funding.docx"
+            && file.sha256 == confirmed.sha256));
+    let mut publisher_zip = ZipArchive::new(
+        fs::File::open(Path::new(&package.staging_dir).join("publisher-files.zip")).unwrap(),
+    )
+    .unwrap();
+    let mut exported = Vec::new();
+    publisher_zip
+        .by_name("submission/funding.docx")
+        .unwrap()
+        .read_to_end(&mut exported)
+        .unwrap();
+    assert_eq!(hex::encode(Sha256::digest(&exported)), confirmed.sha256);
+    write_synthetic_docx_named(
+        &file,
+        "The author revised the synthetic funding declaration.",
+    );
+    assert_eq!(
+        drafts::list_material_tasks(&store, &project)
+            .unwrap()
+            .into_iter()
+            .find(|task| task.id == "funding")
+            .unwrap()
+            .status,
+        "modified"
+    );
+    assert_eq!(
+        review::confirm(
+            &store,
+            &project,
+            "funding",
+            &checked.sha256,
+            &checked.context_hash,
+            true
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_REVIEW_CHANGED"
+    );
+    assert!(!review::prepare(&store, &project)
+        .unwrap()
+        .ready_items
+        .iter()
+        .any(|item| item.requirement_id.ends_with("funding")));
+    assert!(build_package(&store, &project, &prep.context_hash, "draft").is_err());
+    let next = review::check(&store, &project, "funding").unwrap();
+    let mut changed_context = project.clone();
+    changed_context.facts.title = Some("Changed manuscript title".into());
+    assert_eq!(
+        review::confirm(
+            &store,
+            &changed_context,
+            "funding",
+            &next.sha256,
+            &next.context_hash,
+            true
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_REVIEW_CHANGED"
+    );
+    let second = review::confirm(
+        &store,
+        &project,
+        "funding",
+        &next.sha256,
+        &next.context_hash,
+        true,
+    )
+    .unwrap();
+    assert_ne!(second.snapshot_id, confirmed.snapshot_id);
+    let dir = root
+        .join("store/projects")
+        .join(&project.id)
+        .join("material-review")
+        .join(hex::encode(Sha256::digest(
+            "elsevier-artificial-intelligence",
+        )))
+        .join(hex::encode(Sha256::digest("funding")));
+    assert_eq!(
+        hex::encode(Sha256::digest(
+            fs::read(dir.join(format!("{}.docx", confirmed.snapshot_id))).unwrap()
+        )),
+        confirmed.sha256
+    );
+    fs::write(&file, b"invalid document").unwrap();
+    assert!(!review::check(&store, &project, "funding")
+        .unwrap()
+        .issues
+        .is_empty());
+    fs::remove_file(file).unwrap();
+    assert_eq!(
+        review::check(&store, &project, "funding").unwrap_err().code,
+        "MATERIAL_REVIEW_UNAVAILABLE"
+    );
+    drafts::generate_material_template(&store, &project, "title_page").unwrap();
+    write_synthetic_docx(&workspace.join("author-tools/title-page-TEMPLATE.docx"));
+    assert!(review::check(&store, &project, "title_page")
+        .unwrap()
+        .issues
+        .iter()
+        .any(|issue| issue.en.contains("email")));
+    drafts::generate_material_template(&store, &project, "highlights").unwrap();
+    write_synthetic_docx_named(
+        &workspace.join("author-tools/highlights-TEMPLATE.docx"),
+        &"x".repeat(90),
+    );
+    assert!(review::check(&store, &project, "highlights")
+        .unwrap()
+        .issues
+        .iter()
+        .any(|issue| issue.en.contains("length")));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn editable_workspace_refresh_move_and_reinclude_preserve_source_and_snapshots() {
+    use manuscript_core::package_workspace::*;
+    let root = temporary_root("editable-workspace");
+    let source = root.join("synthetic-manuscript.docx");
+    write_synthetic_docx(&source);
+    let original = fs::read(&source).unwrap();
+    let store = ProjectStore::new(root.join("store")).unwrap();
+    let project = store
+        .create_from_docx(&source, TaskKind::PreparePackage)
+        .unwrap();
+    let mut project = store
+        .select_target(
+            &project.id,
+            project.revision,
+            TargetSelection {
+                id: uuid::Uuid::new_v4().to_string(),
+                journal_id: "elsevier-artificial-intelligence".into(),
+                article_type: "research_article".into(),
+                stage: "initial_submission".into(),
+                origin: TargetOrigin::Catalog,
+                recommendation_ref: None,
+                rules_hash: manuscript_core::rules_hash_for("elsevier-artificial-intelligence")
+                    .unwrap(),
+            },
+        )
+        .unwrap();
+    let folder = workspace_root(&store, &project.id).unwrap();
+    assert!(folder.starts_with(root.canonicalize().unwrap()));
+    assert!(!folder.starts_with(root.join("store")));
+    assert_eq!(
+        folder.parent().unwrap().parent().unwrap(),
+        root.canonicalize().unwrap()
+    );
+    let folder_project = store
+        .open_or_create_folder_project(&root, &source, TaskKind::PreparePackage)
+        .unwrap();
+    assert_eq!(
+        store.package_parent_directory(&folder_project.id).unwrap(),
+        root.canonicalize().unwrap()
+    );
+    assert_eq!(
+        fs::read(folder.join("submission/synthetic-manuscript.docx")).unwrap(),
+        original
+    );
+    let external = root.join("notes.txt");
+    fs::write(&external, "first draft").unwrap();
+    import_workspace_file(&store, &project.id, &external, "submission").unwrap();
+    assert_eq!(
+        import_workspace_file(&store, &project.id, &external, "submission")
+            .unwrap_err()
+            .code,
+        "WORKSPACE_FILE_EXISTS"
+    );
+    move_workspace_file(
+        &store,
+        &project.id,
+        "submission/notes.txt",
+        "submission/supplementary",
+    )
+    .unwrap();
+    let relative = "submission/supplementary/notes.txt";
+    assert!(list_workspace(&store, &project.id)
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.relative_path == relative));
+    project = store
+        .use_workspace_material(
+            &project.id,
+            project.revision,
+            &folder.join(relative),
+            "supplementary",
+        )
+        .unwrap();
+    let first = project.materials.last().unwrap().clone();
+    fs::write(folder.join(relative), "author revision").unwrap();
+    assert_eq!(
+        list_workspace(&store, &project.id)
+            .unwrap()
+            .entries
+            .iter()
+            .find(|e| e.relative_path == relative)
+            .unwrap()
+            .size_bytes,
+        15
+    );
+    project = store
+        .use_workspace_material(
+            &project.id,
+            project.revision,
+            &folder.join(relative),
+            "supplementary",
+        )
+        .unwrap();
+    assert_eq!(project.materials.iter().filter(|m| m.included).count(), 1);
+    assert_eq!(
+        fs::read(store.material_path(&project.id, &first)).unwrap(),
+        b"first draft"
+    );
+    assert_eq!(fs::read(&source).unwrap(), original);
+    let task_items =
+        manuscript_core::material_drafts::list_material_tasks(&store, &project).unwrap();
+    assert_eq!(
+        manuscript_core::material_drafts::generate_material_template(
+            &store,
+            &project,
+            "manuscript"
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_NOT_GENERATABLE"
+    );
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(
+            root.join("store/locks")
+                .join(format!("material-generation-{}.lock", project.id)),
+        )
+        .unwrap();
+    fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+    assert_eq!(
+        manuscript_core::material_drafts::generate_materials(&store, &project, &[])
+            .unwrap_err()
+            .code,
+        "PROJECT_LOCK_UNAVAILABLE"
+    );
+    assert_eq!(
+        manuscript_core::material_drafts::generate_material_templates(&store, &project, &[])
+            .unwrap_err()
+            .code,
+        "PROJECT_LOCK_UNAVAILABLE"
+    );
+    fs2::FileExt::unlock(&lock).unwrap();
+    let templates =
+        manuscript_core::material_drafts::generate_material_template(&store, &project, "funding")
+            .unwrap();
+    assert_eq!(templates, vec!["author-tools/funding-TEMPLATE.docx"]);
+    assert!(folder.join(&templates[0]).is_file());
+    let manual = manuscript_core::material_drafts::list_material_tasks(&store, &project)
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == "funding")
+        .unwrap();
+    assert!(manual.template_present);
+    assert!(!manual.can_generate_template && !manual.can_generate);
+    assert_eq!(manual.status, "manual_required");
+    assert_eq!(
+        manuscript_core::material_drafts::generate_material_template(&store, &project, "funding")
+            .unwrap_err()
+            .code,
+        "MATERIAL_NOT_GENERATABLE"
+    );
+    assert!(task_items
+        .iter()
+        .any(|task| task.id == "cover_letter" && task.can_generate));
+    assert!(task_items
+        .iter()
+        .any(|task| task.id == "conflict_of_interest"
+            && task.status == "manual_required"
+            && !task.can_generate));
+    assert_eq!(
+        manuscript_core::material_drafts::generate_materials(
+            &store,
+            &project,
+            &["manuscript".into()]
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_NOT_GENERATABLE"
+    );
+    let written = manuscript_core::material_drafts::generate_materials(
+        &store,
+        &project,
+        &["cover_letter".into()],
+    )
+    .unwrap();
+    assert_eq!(written, vec!["author-tools/cover-letter-DRAFT.docx"]);
+    assert_eq!(
+        manuscript_core::material_drafts::generate_material_template(
+            &store,
+            &project,
+            "cover_letter"
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_NOT_GENERATABLE"
+    );
+    assert!(!folder.join("author-tools/title-page-DRAFT.docx").exists());
+    assert_eq!(
+        manuscript_core::material_drafts::generate_materials(
+            &store,
+            &project,
+            &["cover_letter".into()]
+        )
+        .unwrap_err()
+        .code,
+        "MATERIAL_NOT_GENERATABLE"
+    );
+    assert!(
+        manuscript_core::material_drafts::generate_materials(&store, &project, &[])
+            .unwrap()
+            .is_empty()
+    );
+    let prep = prepare(&project).unwrap();
+    let package = build_package(&store, &project, &prep.context_hash, "draft").unwrap();
+    copy_package_to_workspace(&store, &package).unwrap();
+    assert!(folder
+        .join(format!(
+            "drafts/{}/author-tools/cover-letter-DRAFT.docx",
+            package.id
+        ))
+        .is_file());
+    fs::remove_file(folder.join(relative)).unwrap();
+    assert!(!list_workspace(&store, &project.id)
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.relative_path == relative));
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&external, folder.join("linked.txt")).unwrap();
+        assert!(workspace_path(&folder, "linked.txt").is_err());
+        assert!(!list_workspace(&store, &project.id)
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.relative_path == "linked.txt"));
+    }
+    let templates =
+        manuscript_core::material_drafts::generate_material_templates(&store, &project, &[])
+            .unwrap();
+    assert!(!templates.is_empty());
+    assert!(!templates
+        .iter()
+        .any(|path| path.contains("cover-letter") || path.contains("funding")));
+    assert!(
+        manuscript_core::material_drafts::generate_material_templates(&store, &project, &[])
+            .unwrap()
+            .is_empty()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn final_package_is_transactional_and_keeps_internal_files_out_of_publisher_zip() {
     let root = temporary_root("final-package");
     let source = root.join("synthetic-manuscript.docx");

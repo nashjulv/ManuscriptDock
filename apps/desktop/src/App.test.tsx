@@ -236,6 +236,9 @@ beforeEach(() => {
           generationCoverage: "catalog_only",
         },
       ]);
+    if (command === "list_material_tasks") return Promise.resolve([]);
+    if (command === "list_ai_runs") return Promise.resolve([]);
+    if (command === "list_package_workspace") return Promise.resolve({ rootPath: "/local/manuscript/Submission Package", entries: [] });
     if (command === "get_preparation")
       return Promise.resolve({
         projectId: project.id,
@@ -371,7 +374,7 @@ it("shows two clear bilingual tasks and local processing boundary", async () => 
   render(<App />);
   expect(await screen.findByRole("button", { name: /推荐期刊/ })).toBeVisible();
   expect(screen.getByRole("button", { name: /整理投稿包/ })).toBeVisible();
-  expect(screen.getByText(/无需账号或模型设置/)).toBeVisible();
+  expect(screen.getByText(/基础功能无需配置模型/)).toBeVisible();
   await user.click(screen.getByRole("button", { name: "EN" }));
   expect(screen.getByRole("button", { name: /Find journals/ })).toBeVisible();
   expect(
@@ -379,6 +382,40 @@ it("shows two clear bilingual tasks and local processing boundary", async () => 
   ).toBeVisible();
   expect(document.documentElement.lang).toBe("en");
 });
+
+for (const locale of ["zh-CN", "en"] as const) {
+  it(`returns from both task pages with the visible Home button in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const user = userEvent.setup();
+    render(<App />);
+    const home = screen.getByRole("button", { name: locale === "en" ? "Home" : "首页" });
+    expect(home).toHaveAttribute("aria-current", "page");
+    for (const task of locale === "en" ? [/Find journals/, /Prepare submission package/] : [/推荐期刊/, /整理投稿包/]) {
+      await user.click(await screen.findByRole("button", { name: task }));
+      expect(home).not.toHaveAttribute("aria-current");
+      await user.click(home);
+      expect(home).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("button", { name: locale === "en" ? /Find journals/ : /推荐期刊/ })).toBeVisible();
+    }
+    expect(invokeMock).not.toHaveBeenCalledWith("hide_recent_project", expect.anything());
+  });
+  it(`keeps edited inputs when returning home is cancelled in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: locale === "en" ? /Find journals/ : /推荐期刊/ }));
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Open local manuscript" : "打开本地论文" }));
+    const keywords = await screen.findByLabelText(locale === "en" ? "Research keywords" : "研究关键词");
+    await user.type(keywords, ", new topic");
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Home" : "首页" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(locale === "en" ? "Unsaved" : "未保存");
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Continue editing" : "继续编辑" }));
+    expect((keywords as HTMLInputElement).value).toContain("new topic");
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Home" : "首页" }));
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Discard input and go home" : "放弃输入并返回首页" }));
+    expect(screen.getByRole("button", { name: locale === "en" ? "Home" : "首页" })).toHaveAttribute("aria-current", "page");
+  });
+}
 
 it("explains in both locales that the same folder reopens one project record", async () => {
   const user = userEvent.setup();
@@ -443,7 +480,7 @@ it("prefills essential matching fields and keeps optional constraints under bili
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /推荐期刊/ }));
   await user.click(screen.getByRole("button", { name: "打开本地论文" }));
-  expect(await screen.findByLabelText("投稿语言")).toHaveValue("zh-CN");
+  expect(await screen.findByLabelText("投稿语言")).toHaveValue("");
   expect(screen.getByLabelText("文章类型")).toHaveValue("research_article");
   expect(screen.getByLabelText("研究关键词")).toHaveValue("machine learning");
   expect(screen.getByLabelText("最高 APC（可选）")).not.toBeVisible();
@@ -460,7 +497,7 @@ it("prefills essential matching fields and keeps optional constraints under bili
   ).toBeChecked();
 
   await user.click(screen.getByRole("button", { name: "EN" }));
-  expect(screen.getByLabelText("Submission language")).toHaveValue("en");
+  expect(screen.getByLabelText("Submission language")).toHaveValue("");
   expect(screen.getByLabelText("Article type")).toHaveValue("research_article");
   expect(screen.getByLabelText("Research keywords")).toHaveValue(
     "machine learning",
@@ -483,7 +520,7 @@ it("explains the Chinese catalog gap and retries in English only after confirmat
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /推荐期刊/ }));
   await user.click(screen.getByRole("button", { name: "打开本地论文" }));
-  expect(await screen.findByLabelText("投稿语言")).toHaveValue("zh-CN");
+  expect(await screen.findByLabelText("投稿语言")).toHaveValue("");
   await user.selectOptions(screen.getByLabelText("投稿语言"), "zh-CN");
   await user.click(screen.getByRole("button", { name: "推荐期刊" }));
   expect(
@@ -551,6 +588,7 @@ it("runs manuscript to recommendation to preparation without a second file selec
   expect(screen.getByLabelText("CRediT 作者贡献")).toBeVisible();
   expect(screen.getByLabelText("生成式 AI 使用披露（如适用）")).toBeVisible();
   expect(screen.getByLabelText("附件用途")).toBeVisible();
+  await user.click(screen.getByText("作者与顺序"));
   expect(screen.getByText("https://example.test/guide")).toBeVisible();
   expect(screen.getByText("查看计划生成的 1 个文件")).toBeVisible();
   expect(

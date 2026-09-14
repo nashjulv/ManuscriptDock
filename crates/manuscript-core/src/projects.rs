@@ -489,6 +489,16 @@ impl ProjectStore {
             let data = serde_json::to_vec_pretty(&project)
                 .map_err(|_| AppError::new("PROJECT_INVALID", false))?;
             atomic_write(&temporary_dir.join("manifest.json"), &data)?;
+            let original = path
+                .canonicalize()
+                .map_err(|_| AppError::new("INPUT_UNREADABLE", true))?;
+            let parent = original
+                .parent()
+                .ok_or_else(|| AppError::new("INPUT_UNREADABLE", true))?;
+            atomic_write(
+                &temporary_dir.join("input-directory.json"),
+                &serde_json::to_vec(parent).map_err(|_| AppError::new("PROJECT_INVALID", false))?,
+            )?;
             fs::rename(&temporary_dir, &final_dir)
                 .map_err(|_| AppError::new("STORAGE_UNAVAILABLE", true))?;
             Ok(project)
@@ -807,7 +817,17 @@ impl ProjectStore {
         kind: &str,
     ) -> Result<Project, AppError> {
         let file_name = safe_file_name(path)?;
-        self.add_material_named(project_id, expected_revision, path, kind, &file_name)
+        self.add_material_named(project_id, expected_revision, path, kind, &file_name, false)
+    }
+    pub fn use_workspace_material(
+        &self,
+        project_id: &str,
+        expected_revision: u64,
+        path: &Path,
+        kind: &str,
+    ) -> Result<Project, AppError> {
+        let file_name = safe_file_name(path)?;
+        self.add_material_named(project_id, expected_revision, path, kind, &file_name, true)
     }
     fn add_material_named(
         &self,
@@ -816,6 +836,7 @@ impl ProjectStore {
         path: &Path,
         kind: &str,
         file_name: &str,
+        replace_same_name: bool,
     ) -> Result<Project, AppError> {
         validate_stored_file_name(file_name)?;
         validate_material_kind(kind)?;
@@ -846,7 +867,10 @@ impl ProjectStore {
             u64::try_from(bytes.len()).map_err(|_| AppError::new("LIMIT_EXCEEDED", true))?;
         let hash = hex::encode(Sha256::digest(&bytes));
         if project.materials.iter().any(|material| {
-            material.file_name == file_name && material.sha256 == hash && material.kind == kind
+            material.included
+                && material.file_name == file_name
+                && material.sha256 == hash
+                && material.kind == kind
         }) {
             return Ok(project);
         }
@@ -873,9 +897,13 @@ impl ProjectStore {
         } else {
             None
         };
-        if is_anonymized || is_editable_manuscript {
+        {
             for material in &mut project.materials {
-                if material.kind == kind {
+                if material.kind == kind
+                    && (is_anonymized
+                        || is_editable_manuscript
+                        || (replace_same_name && material.file_name == file_name))
+                {
                     material.included = false;
                 }
             }
@@ -900,6 +928,91 @@ impl ProjectStore {
             .join("sources")
             .join(&project.active_source.id)
             .join(&project.active_source.file_name)
+    }
+    pub fn package_workspace_path(&self, project_id: &str) -> Result<PathBuf, AppError> {
+        let project = self.get(project_id)?;
+        let target = project
+            .target
+            .ok_or_else(|| AppError::new("TARGET_REQUIRED", true))?;
+        let parent = self.package_parent_directory(project_id)?;
+        let journal = crate::catalog()?
+            .journals
+            .into_iter()
+            .find(|journal| journal.id == target.journal_id)
+            .ok_or_else(|| AppError::new("JOURNAL_NOT_FOUND", true))?;
+        let stem = Path::new(&project.active_source.file_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Manuscript");
+        let safe = |value: &str| {
+            value
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ') {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .take(65)
+                .collect::<String>()
+        };
+        // A short project suffix prevents different tasks with the same filename sharing editable files.
+        Ok(parent
+            .join(format!(
+                "{} - Submission Package - {}",
+                safe(stem),
+                &project.id[..8]
+            ))
+            .join(safe(&journal.display_name)))
+    }
+
+    pub fn package_parent_directory(&self, project_id: &str) -> Result<PathBuf, AppError> {
+        let project = self.get(project_id)?;
+        let override_path = self.project_dir(project_id).join("package-directory.json");
+        if override_path.exists() {
+            let parent: PathBuf = serde_json::from_slice(
+                &fs::read(&override_path)
+                    .map_err(|_| AppError::new("PACKAGE_LOCATION_REQUIRED", true))?,
+            )
+            .map_err(|_| AppError::new("PROJECT_INVALID", false))?;
+            return canonical_folder(&parent);
+        }
+        if project.workspace.is_some() {
+            return self.folder_path_for_project(project_id);
+        }
+        let path = self.project_dir(project_id).join("input-directory.json");
+        if !path.exists() {
+            return Err(AppError::new("PACKAGE_LOCATION_REQUIRED", true));
+        }
+        let parent: PathBuf = serde_json::from_slice(
+            &fs::read(&path).map_err(|_| AppError::new("PACKAGE_LOCATION_REQUIRED", true))?,
+        )
+        .map_err(|_| AppError::new("PROJECT_INVALID", false))?;
+        canonical_folder(&parent)
+    }
+
+    pub fn set_package_parent_directory(
+        &self,
+        project_id: &str,
+        parent: &Path,
+    ) -> Result<(), AppError> {
+        self.get(project_id)?;
+        let parent = canonical_folder(parent)?;
+        atomic_write(
+            &self.project_dir(project_id).join("package-directory.json"),
+            &serde_json::to_vec(&parent).map_err(|_| AppError::new("PROJECT_INVALID", false))?,
+        )
+    }
+    pub fn previous_package_workspace_path(&self, project_id: &str) -> Result<PathBuf, AppError> {
+        let project = self.get(project_id)?;
+        let target = project
+            .target
+            .ok_or_else(|| AppError::new("TARGET_REQUIRED", true))?;
+        Ok(self
+            .project_dir(project_id)
+            .join("package-workspace")
+            .join(hex::encode(Sha256::digest(target.journal_id.as_bytes()))))
     }
     pub fn material_path(&self, project_id: &str, material: &Material) -> PathBuf {
         self.project_dir(project_id)
@@ -1112,7 +1225,15 @@ impl ProjectStore {
     fn job_path(&self, job_id: &str) -> PathBuf {
         self.root.join("jobs").join(format!("{job_id}.json"))
     }
-    fn acquire_file_lock(&self, kind: &str, id: &str) -> Result<FileLockGuard, AppError> {
+    pub fn acquire_ai_lock(&self, project_id: &str) -> Result<impl Drop + Send, AppError> {
+        self.acquire_file_lock("ai-request", project_id)
+    }
+
+    pub(crate) fn acquire_file_lock(
+        &self,
+        kind: &str,
+        id: &str,
+    ) -> Result<FileLockGuard, AppError> {
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -1124,7 +1245,7 @@ impl ProjectStore {
             .map_err(|_| AppError::new("PROJECT_LOCK_UNAVAILABLE", true))?;
         Ok(FileLockGuard { file })
     }
-    fn project_dir(&self, id: &str) -> PathBuf {
+    pub(crate) fn project_dir(&self, id: &str) -> PathBuf {
         self.root.join("projects").join(id)
     }
 }
@@ -1193,7 +1314,7 @@ fn validate_material_kind(kind: &str) -> Result<(), AppError> {
 }
 
 #[derive(Debug)]
-struct FileLockGuard {
+pub(crate) struct FileLockGuard {
     file: fs::File,
 }
 
@@ -1426,7 +1547,7 @@ fn atomic_copy(source: &Path, destination: &Path) -> Result<(), AppError> {
     let bytes = fs::read(source).map_err(|_| AppError::new("INPUT_UNREADABLE", true))?;
     atomic_write(destination, &bytes)
 }
-fn atomic_write(destination: &Path, bytes: &[u8]) -> Result<(), AppError> {
+pub(crate) fn atomic_write(destination: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let parent = destination
         .parent()
         .ok_or_else(|| AppError::new("STORAGE_UNAVAILABLE", false))?;

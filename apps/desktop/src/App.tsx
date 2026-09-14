@@ -18,6 +18,10 @@ import type {
   TaskKind,
 } from "./shared/contracts";
 import { PRODUCT_VERSION } from "./version";
+import { PackageWorkspace } from "./PackageWorkspace";
+import { MaterialChecklist } from "./MaterialChecklist";
+import { JournalTargetMap } from "./JournalTargetMap";
+import { AiSettingsDialog } from "./AiAssistant";
 
 type Screen = "home" | "matching" | "preparation";
 const DEFAULT_CONSTRAINTS: AuthorConstraints = {
@@ -33,11 +37,11 @@ const DEFAULT_CONSTRAINTS: AuthorConstraints = {
 
 function constraintsForProject(
   project: Project | null,
-  locale: Locale,
+  _locale: Locale,
 ): AuthorConstraints {
   return {
     ...DEFAULT_CONSTRAINTS,
-    requiredLanguage: locale,
+    requiredLanguage: null,
     articleType:
       project?.facts.articleType || DEFAULT_CONSTRAINTS.articleType,
   };
@@ -48,6 +52,7 @@ function keywordsForProject(project: Project | null): string {
 }
 
 function AppContent() {
+  const [showAiSettings, setShowAiSettings] = useState(false);
   const { locale, setLocale, text } = useI18n();
   const [screen, setScreen] = useState<Screen>("home");
   const [project, setProject] = useState<Project | null>(null);
@@ -62,6 +67,20 @@ function AppContent() {
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState<JobRecord | null>(null);
   const busyRef = useRef(false);
+  const pageDirty = useRef(false);
+  const [showHomePrompt, setShowHomePrompt] = useState(false);
+  const reportDirty = useCallback((dirty: boolean) => { pageDirty.current = dirty; }, []);
+  const returnHome = () => {
+    setShowHomePrompt(false);
+    pageDirty.current = false;
+    setScreen("home");
+    refreshRecent();
+  };
+  const goHome = () => {
+    if (busyRef.current) return;
+    if (pageDirty.current) { setShowHomePrompt(true); return; }
+    returnHome();
+  };
   const refreshRecent = useCallback(() => {
     void api
       .recent()
@@ -205,9 +224,11 @@ function AppContent() {
   return (
     <div className="app-shell">
       <header className="product-bar">
+        <div className="brand-navigation">
         <button
           className="brand"
-          onClick={() => setScreen("home")}
+          onClick={goHome}
+          disabled={busy}
           aria-label={text("返回首页", "Back to home")}
         >
           <img src="/src/assets/manuscriptdock-logo.svg" alt="" />
@@ -215,11 +236,17 @@ function AppContent() {
             投稿舱 ManuscriptDock <strong>{PRODUCT_VERSION}</strong>
           </span>
         </button>
+        <button className="home-navigation" onClick={goHome} disabled={busy} aria-current={screen === "home" ? "page" : undefined}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          {text("首页", "Home")}
+        </button>
+        </div>
         <div className="bar-actions">
           <span className="local-badge">
-            {text("本机处理", "Processed locally")}
+            {text("本地优先", "Local first")}
           </span>
           <TextSizeSettings />
+          <button disabled={busy} onClick={() => setShowAiSettings(true)}>{text("AI 设置", "AI settings")}</button>
           <button
             className="language"
             onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}
@@ -228,6 +255,19 @@ function AppContent() {
           </button>
         </div>
       </header>
+      {showAiSettings && <AiSettingsDialog onClose={() => setShowAiSettings(false)}/>}
+      {showHomePrompt ? <div className="modal-backdrop"><section className="panel home-prompt" role="alertdialog" aria-modal="true" aria-labelledby="home-prompt-title" aria-describedby="home-prompt-description" onKeyDown={event => {
+        if (event.key === "Escape") { setShowHomePrompt(false); event.preventDefault(); }
+        if (event.key === "Tab") {
+          const buttons = event.currentTarget.querySelectorAll("button");
+          if (event.shiftKey && document.activeElement === buttons[0]) { buttons[1].focus(); event.preventDefault(); }
+          else if (!event.shiftKey && document.activeElement === buttons[1]) { buttons[0].focus(); event.preventDefault(); }
+        }
+      }}>
+        <h2 id="home-prompt-title">{text("有未保存的输入", "Unsaved input")}</h2>
+        <p id="home-prompt-description">{text("返回首页将放弃当前页面未保存的输入。已保存的任务和本地文件会保留。", "Returning home discards unsaved input on this page. Saved tasks and local files are preserved.")}</p>
+        <div className="footer-actions"><button autoFocus className="secondary" onClick={() => setShowHomePrompt(false)}>{text("继续编辑", "Continue editing")}</button><button className="primary" onClick={returnHome}>{text("放弃输入并返回首页", "Discard input and go home")}</button></div>
+      </section></div> : null}
       {error ? (
         <div className="error-banner" role="alert">
           <span>{localizeBackendText(locale, error.code)}</span>
@@ -272,6 +312,7 @@ function AppContent() {
         ) : null}
         {screen === "matching" ? (
           <Matching
+            onDirtyChange={reportDirty}
             key={project?.id ?? "new-matching-task"}
             project={project}
             setProject={setProject}
@@ -283,6 +324,7 @@ function AppContent() {
         ) : null}
         {screen === "preparation" ? (
           <Preparation
+            onDirtyChange={reportDirty}
             project={project}
             setProject={setProject}
             open={() => openManuscript("prepare_package")}
@@ -340,8 +382,8 @@ function Home({
       </h1>
       <p>
         {text(
-          "打开本地 PDF 或 DOCX，期刊匹配、规则检查和文件整理都在你的设备上完成。",
-          "Open a local PDF or DOCX. Journal matching, requirement checks, and file preparation stay on your device.",
+          "打开本地 PDF 或 DOCX，在设备上匹配期刊、检查规则和整理文件；AI 起草与检查可按需启用。",
+          "Open a local PDF or DOCX to match journals, check rules, and organize files on your device. AI drafting and review are optional.",
         )}
       </p>
       <div className="task-grid">
@@ -363,8 +405,8 @@ function Home({
       <div className="privacy-line">
         <span aria-hidden="true">⌁</span>
         {text(
-          "无需账号或模型设置 · 原稿不会被覆盖",
-          "No account or model setup · Your source is never overwritten",
+          "基础功能无需配置模型 · AI 辅助按需启用 · 原稿始终保留",
+          "Core features need no model setup · AI assistance is optional · Original files are preserved",
         )}
       </div>
       <section className="recent">
@@ -554,6 +596,7 @@ function Matching({
   openFolder,
   run,
   onPrepare,
+  onDirtyChange,
 }: {
   project: Project | null;
   setProject: (value: Project) => void;
@@ -561,6 +604,7 @@ function Matching({
   openFolder: () => void;
   run: <T>(action: () => Promise<T>) => Promise<T | null>;
   onPrepare: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { locale, text, localize } = useI18n();
   const [constraints, setConstraints] = useState(() =>
@@ -569,15 +613,10 @@ function Matching({
   const [keywords, setKeywords] = useState(() => keywordsForProject(project));
   const [result, setResult] = useState<RecommendationResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const submissionLanguageChanged = useRef(false);
   useEffect(() => {
-    if (!submissionLanguageChanged.current) {
-      setConstraints((current) => ({
-        ...current,
-        requiredLanguage: locale,
-      }));
-    }
-  }, [locale]);
+    onDirtyChange(!!project && (keywords !== keywordsForProject(project) || JSON.stringify(constraints) !== JSON.stringify(constraintsForProject(project, locale))));
+    return () => onDirtyChange(false);
+  }, [project, keywords, constraints, locale, onDirtyChange]);
   if (!project)
     return (
       <EmptyTask kind="find_journals" open={open} openFolder={openFolder} />
@@ -612,6 +651,7 @@ function Matching({
         journal.journal.id,
         "recommendation",
         result.runId,
+        constraints.articleType ?? undefined,
       ),
     );
     if (next) {
@@ -648,7 +688,6 @@ function Matching({
                 <select
                   value={constraints.requiredLanguage ?? ""}
                   onChange={(event) => {
-                    submissionLanguageChanged.current = true;
                     setConstraints({
                       ...constraints,
                       requiredLanguage: event.target.value || null,
@@ -836,6 +875,7 @@ function Matching({
               {text("修改偏好", "Edit preferences")}
             </button>
           </div>
+          {result.recommendations.length ? <JournalTargetMap items={result.recommendations} selected={selected} onSelect={setSelected} /> : null}
           {result.recommendations.length ? (
             <div className="recommendation-grid">
               {result.recommendations.map((item) => (
@@ -930,7 +970,6 @@ function Matching({
                 <button
                   className="secondary"
                   onClick={() => {
-                    submissionLanguageChanged.current = true;
                     void calculate({ requiredLanguage: "en" });
                   }}
                 >
@@ -987,12 +1026,14 @@ function Preparation({
   open,
   openFolder,
   run,
+  onDirtyChange,
 }: {
   project: Project | null;
   setProject: (value: Project) => void;
   open: () => void;
   openFolder: () => void;
   run: <T>(action: () => Promise<T>) => Promise<T | null>;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const { text, localize } = useI18n();
   const [journals, setJournals] = useState<JournalRecord[]>([]);
@@ -1001,34 +1042,68 @@ function Preparation({
   const [facts, setFacts] = useState<DocumentFacts | null>(
     project?.facts ?? null,
   );
+  useEffect(() => {
+    onDirtyChange(!!project && !!facts && JSON.stringify(facts) !== JSON.stringify(project.facts));
+    return () => onDirtyChange(false);
+  }, [project, facts, onDirtyChange]);
   const [materialKind, setMaterialKind] = useState("supplementary");
   const [authorConfirmed, setAuthorConfirmed] = useState(false);
   const [changingTarget, setChangingTarget] = useState(false);
   const [targetName, setTargetName] = useState<string | null>(null);
+  const [targetJournal, setTargetJournal] = useState<JournalRecord | null>(null);
   const [pkg, setPackage] = useState<CompiledPackage | null>(null);
   const [receipt, setReceipt] = useState<ExportReceipt | null>(null);
+  const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
+  const preparationTarget = useRef<string | null>(null);
   useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      if (project?.target) void api.preparation(project.id).then(value => {
+        if (active) { setPreparation(value); setPackage(current => current && current.contextHash !== value.contextHash ? null : current); }
+      }).catch(() => { if (active) setPreparation(null); });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.removeEventListener("focus", refresh); };
+  }, [workspaceRefresh, project?.id, project?.target?.journalId]);
+  useEffect(() => {
+    let active = true;
+    void api.journals("").then(items => { if (active) setJournals(items); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [project?.id, changingTarget]);
+  useEffect(() => {
+    let active = true;
+    const targetKey = project?.target ? `${project.id}/${project.target.journalId}` : null;
+    if (preparationTarget.current !== targetKey) setPreparation(null);
+    preparationTarget.current = targetKey;
     if (project?.target)
       void api
         .preparation(project.id)
-        .then(setPreparation)
-        .catch(() => setPreparation(null));
+        .then(value => { if (active) setPreparation(value); })
+        .catch(() => { if (active) setPreparation(null); });
     setFacts(project?.facts ?? null);
+    setPackage(null);
+    setReceipt(null);
+    return () => { active = false; };
   }, [project?.id, project?.revision, project?.target]);
   useEffect(() => {
     const journalId = project?.target?.journalId;
+    let active = true;
+    setTargetJournal(null);
     if (!journalId) {
       setTargetName(null);
       return;
     }
     void api
       .journals(journalId)
-      .then((items) =>
-        setTargetName(
-          items.find((item) => item.id === journalId)?.displayName ?? journalId,
-        ),
-      )
-      .catch(() => setTargetName(journalId));
+      .then((items) => {
+        if (!active) return;
+        const journal = items.find((item) => item.id === journalId) ?? null;
+        setTargetName(journal?.displayName ?? journalId);
+        setTargetJournal(journal);
+      })
+      .catch(() => { if (active) setTargetName(journalId); });
+    return () => { active = false; };
   }, [project?.target?.journalId]);
   const search = async () => {
     const result = await run(() => api.journals(query));
@@ -1095,15 +1170,14 @@ function Preparation({
     );
     if (result) {
       setPackage(result);
+      setWorkspaceRefresh(value => value + 1);
       setReceipt(null);
     }
   };
   const exportFiles = async () => {
     if (!pkg || !project) return;
     const selection = await run(() =>
-      project.workspace?.kind === "folder"
-        ? api.chooseProjectExport(project.id)
-        : api.chooseExport(),
+      api.chooseProjectExport(project.id),
     );
     if (!selection || selection.status === "cancelled") return;
     const result = await run(() => api.export(pkg, selection.items[0].token));
@@ -1155,7 +1229,8 @@ function Preparation({
               onKeyDown={(event) => {
                 if (event.key === "Enter") void search();
               }}
-              placeholder={text("期刊名或 ISSN", "Journal name or ISSN")}
+              aria-label={text("搜索目标期刊", "Search target journals")}
+              placeholder={text("中文名、英文名、缩写或 ISSN", "Chinese or English name, abbreviation, or ISSN")}
             />
             <button className="primary" onClick={search}>
               {text("搜索", "Search")}
@@ -1200,7 +1275,7 @@ function Preparation({
           ) : null}
         </section>
       ) : !pkg ? (
-        <div className="content-grid">
+        <div className="content-grid package-content-grid">
           <section className="panel preparation">
             <div className="target-line">
               <span>{text("目标", "Target")}</span>
@@ -1231,6 +1306,20 @@ function Preparation({
                         )}
                   </strong>
                 </div>
+                <PackageWorkspace key={`${project.id}-${project.target.journalId}`} project={project} setProject={setProject} run={run} refreshKey={String(workspaceRefresh)} onLocationChanged={() => setWorkspaceRefresh(value => value + 1)} />
+                <MaterialChecklist key={`materials-${project.id}-${project.target.journalId}`} project={project} refreshKey={workspaceRefresh} run={run} onGenerated={() => setWorkspaceRefresh(value => value + 1)} />
+                <section className="target-requirements" aria-label={text("目标期刊要求", "Target journal requirements")}>
+                  <h3>{text("目标期刊要求与待补材料", "Target requirements and missing materials")}</h3>
+                  {targetJournal?.evidence.map(evidence => <button key={evidence.sourceUrl} className="link" onClick={() => void run(() => api.openSource(project.target!.journalId, evidence.sourceUrl))}>{localize(evidence.label)} ↗ </button>)}
+                  <p>{text("先按目标期刊确认以下清单，再补充作者信息和文件。", "Review this target-specific checklist, then complete the author details and files.")}</p>
+                  {[...preparation.blockers, ...preparation.warnings, ...preparation.readyItems].map(item => <details key={item.requirementId}>
+                    <summary><strong>{localize(item.label)}</strong><span>{item.status === "ready" ? text("已齐备", "Ready") : text("待补充", "To complete")} · {item.required ? text("必需", "Required") : text("建议", "Recommended")}</span></summary>
+                    <p>{localize(item.description)}</p>
+                    <button className="link" onClick={() => void run(() => api.openSource(project.target!.journalId, item.evidence.sourceUrl))}>{localize(item.evidence.label)} ↗</button>
+                    <small>{text("核验日期", "Verified on")} · {item.evidence.verifiedAt}</small>
+                    <code>{item.evidence.sourceUrl}</code>
+                  </details>)}
+                </section>
                 <div className="fact-form">
                   <label>
                     {text("论文标题", "Manuscript title")}
@@ -1520,62 +1609,6 @@ function Preparation({
                     ))}
                   </ul>
                 </details>
-                <div className="requirement-list">
-                  {preparation.blockers.map((item) => (
-                    <div
-                      key={item.requirementId}
-                      className="requirement missing"
-                    >
-                      <span>!</span>
-                      <div>
-                        <strong>{localize(item.label)}</strong>
-                        <p>{localize(item.description)}</p>
-                        <span className="evidence-reference">
-                          <b>
-                            {localize(item.evidence.label)} ·{" "}
-                            {item.evidence.verifiedAt}
-                          </b>
-                          <code>{item.evidence.sourceUrl}</code>
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {preparation.warnings.map((item) => (
-                    <div
-                      key={item.requirementId}
-                      className="requirement advisory"
-                    >
-                      <span>i</span>
-                      <div>
-                        <strong>{localize(item.label)}</strong>
-                        <p>{localize(item.description)}</p>
-                        <span className="evidence-reference">
-                          <b>
-                            {localize(item.evidence.label)} ·{" "}
-                            {item.evidence.verifiedAt}
-                          </b>
-                          <code>{item.evidence.sourceUrl}</code>
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {preparation.readyItems.map((item) => (
-                    <div key={item.requirementId} className="requirement ready">
-                      <span>✓</span>
-                      <div>
-                        <strong>{localize(item.label)}</strong>
-                        <p>{localize(item.description)}</p>
-                        <span className="evidence-reference">
-                          <b>
-                            {localize(item.evidence.label)} ·{" "}
-                            {item.evidence.verifiedAt}
-                          </b>
-                          <code>{item.evidence.sourceUrl}</code>
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
                 <div className="footer-actions">
                   <button
                     className="secondary"
@@ -1730,10 +1763,10 @@ function EvidenceAside() {
     <aside className="evidence-aside">
       <span className="eyebrow">{text("执行边界", "Processing boundary")}</span>
       <h3>
-        {text("论文内容不离开设备", "Manuscript content stays on device")}
+        {text("本地优先，外发前确认", "Local first, consent before sending")}
       </h3>
       <ul>
-        <li>{text("无云模型调用", "No cloud model calls")}</li>
+        <li>{text("基础流程无需模型；AI 调用前预览并确认", "Core workflows need no model; preview and approve each AI request")}</li>
         <li>{text("不实时抓取期刊官网", "No live journal-site scraping")}</li>
         <li>
           {text(
@@ -1786,6 +1819,8 @@ function operationLabel(
       "需补充作者核对的可编辑 DOCX",
       "Provide an author-verified editable DOCX",
     );
+  if (operation === "provide_anonymized_manuscript")
+    return text("需补充作者核对的匿名 DOCX", "Provide an author-verified anonymized DOCX");
   if (operation === "copy_attachment_unchanged")
     return text("原样复制附件", "Copy attachment unchanged");
   if (operation === "generate_from_confirmed_fact")

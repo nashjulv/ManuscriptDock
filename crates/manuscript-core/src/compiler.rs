@@ -1,6 +1,6 @@
 use crate::{
-    prepare, AppError, CompiledPackage, ExportReceipt, GeneratedFile, LocalizedText,
-    PreparationStatus, Project, ProjectStore,
+    AppError, CompiledPackage, ExportReceipt, GeneratedFile, LocalizedText, PreparationStatus,
+    Project, ProjectStore,
 };
 use rust_xlsxwriter::{Format, Workbook};
 use sha2::{Digest, Sha256};
@@ -53,7 +53,7 @@ pub fn build_package(
     if current_rules_hash != target.rules_hash {
         return Err(AppError::new("RULES_CHANGED", true).recover("reselect_target"));
     }
-    let preparation = prepare(project)?;
+    let preparation = crate::material_review::prepare(store, project)?;
     if preparation.context_hash != context_hash {
         return Err(AppError::new("CONTEXT_CHANGED", true).recover("reload_preparation"));
     }
@@ -67,15 +67,14 @@ pub fn build_package(
         .materials
         .iter()
         .find(|material| material.included && material.kind == "anonymized_manuscript");
-    let editable_manuscript =
-        if anonymized_manuscript.is_none() && project.active_source.format == "pdf" {
-            project
-                .materials
-                .iter()
-                .find(|material| material.included && material.kind == "editable_manuscript")
-        } else {
-            None
-        };
+    let editable_manuscript = if anonymized_manuscript.is_none() {
+        project
+            .materials
+            .iter()
+            .find(|material| material.included && material.kind == "editable_manuscript")
+    } else {
+        None
+    };
     let selected_manuscript = anonymized_manuscript.or(editable_manuscript);
     let (manuscript_source, manuscript_hash, manuscript_size, manuscript_extension) =
         selected_manuscript.map_or_else(
@@ -303,6 +302,18 @@ pub fn build_package(
         "Submission package compliance report",
         &checklist,
     )?;
+    crate::material_review::copy_confirmed(store, project, &staging)?;
+    let ai_runs = crate::ai_assistance::history(store, project)?;
+    if !ai_runs.is_empty() {
+        write_file(
+            &staging.join("records/ai-assistance.json"),
+            &serde_json::to_vec_pretty(&ai_runs)
+                .map_err(|_| AppError::new("PROJECT_INVALID", false))?,
+        )?;
+    }
+    if crate::material_review::prepare(store, project)?.context_hash != context_hash {
+        return Err(AppError::new("MATERIAL_REVIEW_CHANGED", true));
+    }
     create_publisher_zip(&staging)?;
     let mut artifact_files = collect_files(&staging)?;
     artifact_files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
@@ -353,6 +364,11 @@ pub fn build_package(
 }
 
 pub(crate) fn planned_package_files(project: &Project) -> Vec<crate::PlannedFile> {
+    let target_rules = project
+        .target
+        .as_ref()
+        .and_then(|target| crate::rules_for(&target.journal_id).ok())
+        .unwrap_or_default();
     let main_name = manuscript_name("final", "docx");
     let has_anonymized = project
         .materials
@@ -366,7 +382,12 @@ pub(crate) fn planned_package_files(project: &Project) -> Vec<crate::PlannedFile
         relative_path: format!("submission/{main_name}"),
         operation: if has_anonymized {
             "use_author_verified_anonymized_manuscript".into()
-        } else if project.active_source.format == "pdf" && has_editable {
+        } else if target_rules
+            .iter()
+            .any(|rule| rule.required_file_kind.as_deref() == Some("anonymized_manuscript"))
+        {
+            "provide_anonymized_manuscript".into()
+        } else if has_editable {
             "use_author_verified_editable_manuscript".into()
         } else if project.active_source.format == "pdf" {
             "provide_editable_manuscript".into()
@@ -392,17 +413,20 @@ pub(crate) fn planned_package_files(project: &Project) -> Vec<crate::PlannedFile
         operation: "generate_from_confirmed_fact".into(),
         publisher_file: true,
     });
-    if publishable_highlights(project) {
+    if target_rules
+        .iter()
+        .any(|rule| rule.fact_key.as_deref() == Some("highlights"))
+    {
         files.push(crate::PlannedFile {
             relative_path: "submission/highlights.docx".into(),
             operation: "generate_from_confirmed_fact".into(),
             publisher_file: true,
         });
     }
-    if project
-        .materials
-        .iter()
-        .any(|material| material.included && material.kind == "anonymized_manuscript")
+    if has_anonymized
+        || target_rules
+            .iter()
+            .any(|rule| rule.required_file_kind.as_deref() == Some("anonymized_manuscript"))
     {
         files.push(crate::PlannedFile {
             relative_path: "submission/title-page.docx".into(),
@@ -493,7 +517,7 @@ fn verify_snapshot(path: &Path, expected_hash: &str, expected_size: u64) -> Resu
     Ok(())
 }
 
-fn title_page_paragraphs(project: &Project) -> Vec<String> {
+pub(crate) fn title_page_paragraphs(project: &Project) -> Vec<String> {
     vec![
         project
             .facts
@@ -655,7 +679,11 @@ fn write_submission_fields(path: &Path, project: &Project) -> Result<(), AppErro
         .map_err(|_| AppError::new("XLSX_GENERATION_FAILED", true))
 }
 
-fn write_docx(path: &Path, document_title: &str, paragraphs: &[String]) -> Result<(), AppError> {
+pub(crate) fn write_docx(
+    path: &Path,
+    document_title: &str,
+    paragraphs: &[String],
+) -> Result<(), AppError> {
     let file = fs::File::create(path).map_err(|_| AppError::new("DOCX_GENERATION_FAILED", true))?;
     let mut writer = ZipWriter::new(file);
     let options = SimpleFileOptions::default()

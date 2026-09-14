@@ -68,12 +68,17 @@ pub fn find_journals(query: &str) -> Result<Vec<JournalRecord>, AppError> {
         normalized.is_empty()
             || journal.id.to_lowercase().contains(&normalized)
             || journal.display_name.to_lowercase().contains(&normalized)
+            || chinese_search_name(&journal.id).contains(&normalized)
             || journal
                 .aliases
                 .iter()
                 .any(|alias| alias.to_lowercase().contains(&normalized))
             || journal
                 .issn
+                .as_deref()
+                .is_some_and(|issn| issn.replace('-', "").contains(&normalized.replace('-', "")))
+            || journal
+                .eissn
                 .as_deref()
                 .is_some_and(|issn| issn.replace('-', "").contains(&normalized.replace('-', "")))
     });
@@ -83,6 +88,24 @@ pub fn find_journals(query: &str) -> Result<Vec<JournalRecord>, AppError> {
             .then(left.id.cmp(&right.id))
     });
     Ok(journals)
+}
+
+// Search translations only; these do not change the signed publisher records or submission languages.
+fn chinese_search_name(id: &str) -> &'static str {
+    match id {
+        "elsevier-artificial-intelligence" => "人工智能",
+        "elsevier-expert-systems-with-applications" => "专家系统及其应用专家系统与应用",
+        "elsevier-knowledge-based-systems" => "基于知识的系统知识系统",
+        "ieee-tpami" => "模式分析与机器智能汇刊",
+        "jmlr" => "机器学习研究杂志",
+        "tacl" => "计算语言学汇刊",
+        "elsevier-pattern-recognition" => "模式识别",
+        "jair" => "人工智能研究杂志",
+        "elsevier-engineering-applications-of-ai" => "人工智能工程应用",
+        "ieee-tnnls" => "神经网络与学习系统汇刊",
+        "nature-machine-intelligence" => "自然机器智能",
+        _ => "",
+    }
 }
 
 pub fn rules_for(journal_id: &str) -> Result<Vec<RequirementRule>, AppError> {
@@ -475,6 +498,17 @@ fn constraint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chinese_names_abbreviations_and_both_issns_find_targets() {
+        for query in ["专家系统", "ESWA", "0957-4174", "18736793"] {
+            assert!(find_journals(query)
+                .unwrap()
+                .iter()
+                .any(|j| j.id == "elsevier-expert-systems-with-applications"));
+        }
+        assert!(!find_journals("人工智能").unwrap().is_empty());
+        assert!(find_journals("不存在的期刊").unwrap().is_empty());
+    }
     #[test]
     fn catalog_is_valid_and_has_supported_rules() {
         let catalog = catalog().unwrap();

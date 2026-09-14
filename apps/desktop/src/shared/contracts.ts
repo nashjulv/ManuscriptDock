@@ -238,3 +238,30 @@ export interface ExportReceipt {
   finishedAtUnixMs: number;
   recordPersisted: boolean;
 }
+export interface MaterialTask {
+  id: string;
+  label: LocalizedText;
+  description: LocalizedText;
+  relativePath: string;
+  required: boolean;
+  status: "manual_required" | "ready_to_generate" | "draft_present" | "ready" | "modified" | "confirmed";
+  canGenerate: boolean;
+  canGenerateTemplate?: boolean;
+  templatePresent?: boolean;
+  existingFilePath?: string | null;
+  reviewPath?: string | null;
+}
+export interface MaterialCheck {
+  materialId: string;
+  relativePath: string;
+  sha256: string;
+  contextHash: string;
+  issues: LocalizedText[];
+  authorChecks: LocalizedText[];
+}
+export type AiTask = "draft_cover_letter" | "draft_highlights" | "review_material" | "review_consistency";
+export interface AiSettings { enabled: boolean; endpoint: string; model: string; local: boolean; maxOutputTokens: number; hasKey: boolean }
+export interface AiSource { id: string; label: LocalizedText; text: string; sha256: string }
+export interface AiEvidence { sourceId: string; quote: string }
+export interface AiPreview { id: string; input: { task: AiTask; materialId?: string | null; projectId: string; contextHash: string; sources: AiSource[] }; provider: string; model: string; local: boolean; inputCharacters: number; estimatedInputTokens: number; maxOutputTokens: number }
+export interface AiRun { id: string; task: AiTask; materialId?: string | null; contextHash: string; provider: string; model: string; status: string; createdAt: number; sources: [string, string][]; output?: { paragraphs: { text: string; evidence: AiEvidence[] }[]; findings: { message: LocalizedText; evidence: AiEvidence[] }[] } | null; errorCode?: string | null; acceptedPath?: string | null; inputTokens?: number | null; outputTokens?: number | null; current: boolean }

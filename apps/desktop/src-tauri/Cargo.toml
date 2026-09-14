@@ -1,6 +1,6 @@
 [package]
 name = "manuscriptdock-desktop"
-version = "0.54.0"
+version = "0.60.0"
 description = "ManuscriptDock local-first manuscript submission workspace"
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 manuscript-core = { path = "../../../crates/manuscript-core" }
+keyring = "4.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2"
+tokio = { version = "1", features = ["net", "time"] }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

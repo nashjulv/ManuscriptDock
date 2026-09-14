@@ -8,6 +8,23 @@ const MAX_ZIP_ENTRIES: usize = 10_000;
 const MAX_EXPANDED_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_XML_BYTES: u64 = 32 * 1024 * 1024;
 
+pub(crate) fn material_text(path: &Path) -> Result<String, AppError> {
+    inspect_docx(path)?;
+    let file = File::open(path).map_err(|_| AppError::new("INPUT_UNREADABLE", true))?;
+    let mut archive = ZipArchive::new(file).map_err(|_| AppError::new("INPUT_UNREADABLE", true))?;
+    let mut xml = String::new();
+    archive
+        .by_name("word/document.xml")
+        .map_err(|_| AppError::new("INPUT_UNREADABLE", true))?
+        .take(MAX_XML_BYTES + 1)
+        .read_to_string(&mut xml)
+        .map_err(|_| AppError::new("INPUT_UNREADABLE", true))?;
+    if xml.len() as u64 > MAX_XML_BYTES {
+        return Err(AppError::new("LIMIT_EXCEEDED", true));
+    }
+    Ok(paragraphs(&xml).join("\n"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentFeatureProfile {
@@ -411,7 +428,7 @@ fn normalize_identity_text(value: &str) -> String {
         .to_lowercase()
 }
 
-fn paragraphs(xml: &str) -> Vec<String> {
+pub(crate) fn paragraphs(xml: &str) -> Vec<String> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut values = Vec::new();

@@ -1,7 +1,7 @@
 # 实施工作包、依赖与完成标准
 
 - 日期：2026-09-14。
-- 当前状态：V0.54 核心路径已经实现；各工作包的准确状态和剩余证据记录在对应条目及 [V0.54 实现状态](../releases/V0.54/implementation-status.md) 中。
+- 当前状态：以下 W01—W14 记录 V0.54 基础核心路径；后续目录整理、材料确认快照、导航和可选 AI 的累计实现与验证见 [V0.60 实现状态](../releases/V0.60/implementation-status.md)，AI 范围见[专项说明](../optional-ai-assistance.md)。基础工作包的剩余证据仍保留在对应条目及 [V0.54 记录](../releases/V0.54/implementation-status.md) 中。
 - 本文件唯一维护实施进度；[范围方案](../local-journal-package-plan.md)的 P0—P5 仅作阶段映射。
 
 ## 1. 推进顺序

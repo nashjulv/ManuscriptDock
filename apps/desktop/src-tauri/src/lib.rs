@@ -1,3 +1,4 @@
+mod ai_service;
 mod ui_preferences;
 mod window_geometry;
 
@@ -439,8 +440,217 @@ fn select_target(
 
 #[tauri::command]
 fn get_preparation(app: AppHandle, project_id: String) -> Result<PreparationView, AppError> {
-    let project = store(&app)?.get(&project_id)?;
-    manuscript_core::prepare(&project)
+    let store = store(&app)?;
+    let project = store.get(&project_id)?;
+    manuscript_core::material_review::prepare(&store, &project)
+}
+
+#[tauri::command]
+fn check_material(
+    app: AppHandle,
+    project_id: String,
+    material_id: String,
+) -> Result<manuscript_core::material_review::MaterialCheck, AppError> {
+    let store = store(&app)?;
+    manuscript_core::material_review::check(&store, &store.get(&project_id)?, &material_id)
+}
+
+#[tauri::command]
+fn confirm_material(
+    app: AppHandle,
+    project_id: String,
+    material_id: String,
+    expected_hash: String,
+    expected_context: String,
+    author_confirmed: bool,
+) -> Result<manuscript_core::material_review::ReviewRecord, AppError> {
+    let store = store(&app)?;
+    manuscript_core::material_review::confirm(
+        &store,
+        &store.get(&project_id)?,
+        &material_id,
+        &expected_hash,
+        &expected_context,
+        author_confirmed,
+    )
+}
+
+#[tauri::command]
+fn list_package_workspace(
+    app: AppHandle,
+    project_id: String,
+) -> Result<manuscript_core::package_workspace::WorkspaceListing, AppError> {
+    manuscript_core::package_workspace::list_workspace(&store(&app)?, &project_id)
+}
+
+#[tauri::command]
+async fn choose_package_location(app: AppHandle, project_id: String) -> Result<bool, AppError> {
+    let dialog_app = app.clone();
+    let selection = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app.dialog().file().blocking_pick_folder()
+    })
+    .await
+    .map_err(|_| AppError::new("DIALOG_UNAVAILABLE", true))?;
+    let Some(selection) = selection else {
+        return Ok(false);
+    };
+    let parent = selection
+        .into_path()
+        .map_err(|_| AppError::new("WORKSPACE_PATH_INVALID", true))?;
+    store(&app)?.set_package_parent_directory(&project_id, &parent)?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn list_material_tasks(
+    app: AppHandle,
+    project_id: String,
+) -> Result<Vec<manuscript_core::material_drafts::MaterialTask>, AppError> {
+    let store = store(&app)?;
+    manuscript_core::material_drafts::list_material_tasks(&store, &store.get(&project_id)?)
+}
+
+#[tauri::command]
+fn generate_materials(
+    app: AppHandle,
+    request_id: String,
+    project_id: String,
+    expected_revision: u64,
+    material_ids: Vec<String>,
+    template: Option<bool>,
+) -> Result<JobRecord, AppError> {
+    dispatch_job(
+        app,
+        request_id,
+        "generate_materials",
+        Some(project_id.clone()),
+        None,
+        move |store| {
+            let project = store.get(&project_id)?;
+            if project.revision != expected_revision {
+                return Err(AppError::new("CONTEXT_CHANGED", true));
+            }
+            if template.unwrap_or(false) {
+                manuscript_core::material_drafts::generate_material_templates(
+                    &store,
+                    &project,
+                    &material_ids,
+                )
+            } else {
+                manuscript_core::material_drafts::generate_materials(
+                    &store,
+                    &project,
+                    &material_ids,
+                )
+            }
+        },
+    )
+}
+
+#[tauri::command]
+fn import_workspace_file(
+    app: AppHandle,
+    state: State<'_, RuntimeState>,
+    project_id: String,
+    token: String,
+    directory: String,
+) -> Result<(), AppError> {
+    let selection = take_selection(&state, &token, None)?;
+    manuscript_core::package_workspace::import_workspace_file(
+        &store(&app)?,
+        &project_id,
+        &selection.path,
+        &directory,
+    )
+}
+
+#[tauri::command]
+fn move_workspace_file(
+    app: AppHandle,
+    project_id: String,
+    source: String,
+    directory: String,
+) -> Result<(), AppError> {
+    manuscript_core::package_workspace::move_workspace_file(
+        &store(&app)?,
+        &project_id,
+        &source,
+        &directory,
+    )
+}
+
+#[tauri::command]
+fn use_workspace_material(
+    app: AppHandle,
+    project_id: String,
+    expected_revision: u64,
+    relative_path: String,
+    kind: String,
+) -> Result<Project, AppError> {
+    let store = store(&app)?;
+    let root = manuscript_core::package_workspace::workspace_root(&store, &project_id)?;
+    let path = manuscript_core::package_workspace::workspace_path(&root, &relative_path)?;
+    store.use_workspace_material(&project_id, expected_revision, &path, &kind)
+}
+
+fn open_system_target(target: &str) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(target).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer.exe")
+        .arg(target)
+        .spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let result = std::process::Command::new("xdg-open").arg(target).spawn();
+    result
+        .map(|_| ())
+        .map_err(|_| AppError::new("SYSTEM_OPEN_FAILED", true))
+}
+
+#[tauri::command]
+fn open_package_workspace(app: AppHandle, project_id: String) -> Result<(), AppError> {
+    let path = manuscript_core::package_workspace::workspace_root(&store(&app)?, &project_id)?;
+    open_system_target(&path.to_string_lossy())
+}
+
+#[tauri::command]
+fn open_workspace_entry(
+    app: AppHandle,
+    project_id: String,
+    relative_path: String,
+) -> Result<(), AppError> {
+    let root = manuscript_core::package_workspace::workspace_root(&store(&app)?, &project_id)?;
+    let path = manuscript_core::package_workspace::workspace_path(&root, &relative_path)?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !path.is_file()
+        || ![
+            "docx", "pdf", "xlsx", "txt", "csv", "png", "jpg", "jpeg", "tif", "tiff",
+        ]
+        .contains(&extension.as_str())
+    {
+        return Err(AppError::new("FILE_PREVIEW_UNSUPPORTED", true));
+    }
+    open_system_target(&path.to_string_lossy())
+}
+
+#[tauri::command]
+fn open_journal_source(journal_id: String, url: String) -> Result<(), AppError> {
+    let journal = manuscript_core::catalog()?
+        .journals
+        .into_iter()
+        .find(|j| j.id == journal_id)
+        .ok_or_else(|| AppError::new("JOURNAL_NOT_FOUND", true))?;
+    let allowed = journal.evidence.iter().any(|e| e.source_url == url)
+        || manuscript_core::rules_for(&journal_id)
+            .is_ok_and(|rules| rules.iter().any(|r| r.evidence.source_url == url));
+    if !allowed || !url.starts_with("https://") {
+        return Err(AppError::new("SOURCE_URL_INVALID", true));
+    }
+    open_system_target(&url)
 }
 
 #[tauri::command]
@@ -506,6 +716,10 @@ fn build_package(
             let package =
                 manuscript_core::build_package(&project_store, &project, &context_hash, &mode)?;
             project_store.save_compiled_package(&package)?;
+            manuscript_core::package_workspace::copy_package_to_workspace(
+                &project_store,
+                &package,
+            )?;
             runtime
                 .packages
                 .lock()
@@ -558,7 +772,7 @@ fn choose_project_folder_for_export(
     project_id: String,
 ) -> Result<SelectionResponse, AppError> {
     let project_store = store(&app)?;
-    let path = project_store.folder_path_for_project(&project_id)?;
+    let path = manuscript_core::package_workspace::workspace_root(&project_store, &project_id)?;
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -690,7 +904,35 @@ pub fn run() {
             window_geometry::install(app);
             Ok(())
         })
-        .on_window_event(window_geometry::event)
+        .on_window_event(|window, event| {
+            window_geometry::event(window, event);
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
+                paths,
+                position,
+                ..
+            }) = event
+            {
+                let state = window.state::<RuntimeState>();
+                if paths.len() > manuscript_core::MAX_MATERIAL_FILES {
+                    return;
+                }
+                let items = paths
+                    .iter()
+                    .map(|path| selected_input(path.clone(), "material", &state))
+                    .collect::<Result<Vec<_>, _>>();
+                match items {
+                    Ok(items) => {
+                        let _ = window.emit(
+                            "manuscriptdock://files-dropped",
+                            serde_json::json!({ "items": items, "x": position.x, "y": position.y }),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = window.emit("manuscriptdock://drop-error", error);
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             choose_local_inputs,
             open_project,
@@ -703,6 +945,18 @@ pub fn run() {
             recommend_journals,
             select_target,
             get_preparation,
+            list_package_workspace,
+            choose_package_location,
+            list_material_tasks,
+            check_material,
+            confirm_material,
+            generate_materials,
+            import_workspace_file,
+            move_workspace_file,
+            use_workspace_material,
+            open_package_workspace,
+            open_workspace_entry,
+            open_journal_source,
             update_document_facts,
             add_material,
             build_package,
@@ -712,7 +966,13 @@ pub fn run() {
             get_job,
             cancel_job,
             get_ui_preferences,
-            save_ui_preferences
+            save_ui_preferences,
+            ai_service::get_ai_settings,
+            ai_service::save_ai_settings,
+            ai_service::prepare_ai_request,
+            ai_service::run_ai_request,
+            ai_service::list_ai_runs,
+            ai_service::accept_ai_draft
         ])
         .build(tauri::generate_context!())
         .expect("failed to build ManuscriptDock")

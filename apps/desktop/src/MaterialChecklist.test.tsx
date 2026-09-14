@@ -1,0 +1,103 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, expect, it, vi } from "vitest";
+import { I18nProvider } from "./i18n";
+import { MaterialChecklist } from "./MaterialChecklist";
+import { api } from "./shared/ipc";
+import type { MaterialTask, Project } from "./shared/contracts";
+vi.mock("./shared/ipc", () => ({ api: { aiHistory: vi.fn().mockResolvedValue([]), materialTasks: vi.fn(), generateMaterials: vi.fn(), generateMaterialTemplate: vi.fn(), generateMaterialTemplates: vi.fn(), openWorkspaceEntry: vi.fn(), checkMaterial: vi.fn(), confirmMaterial: vi.fn() } }));
+const project = { id: "p", revision: 4, facts: {}, target: { journalId: "eswa" } } as Project;
+const items: MaterialTask[] = [
+  { id: "manuscript", label: { zhCn: "匿名主稿", en: "Anonymized manuscript" }, description: { zhCn: "需作者提供", en: "Author supplied" }, relativePath: "submission/manuscript.docx", required: true, status: "manual_required", canGenerate: false },
+  { id: "cover_letter", label: { zhCn: "投稿信", en: "Cover letter" }, description: { zhCn: "本地草稿", en: "Local draft" }, relativePath: "author-tools/cover-letter-DRAFT.docx", required: false, status: "ready_to_generate", canGenerate: true },
+];
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.materialTasks).mockResolvedValue(items); vi.mocked(api.generateMaterials).mockResolvedValue([items[1].relativePath]); });
+for (const locale of ["zh-CN", "en"] as const) {
+  it(`checks, requires author confirmation, then invalidates an edited snapshot in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const task = { ...items[1], status: "modified" as const, canGenerate: false, reviewPath: "author-tools/cover-letter-TEMPLATE.docx", templatePresent: true };
+    vi.mocked(api.materialTasks).mockResolvedValue([task]);
+    const checked = { materialId: task.id, relativePath: task.reviewPath, sha256: "checked-hash", contextHash: "context-hash", issues: [{ zhCn: "仍有待填内容", en: "Placeholders remain" }], authorChecks: [{ zhCn: "我已核对期刊要求", en: "I verified journal requirements" }, { zhCn: "我确认声明真实", en: "I confirm accurate declarations" }] };
+    vi.mocked(api.checkMaterial).mockResolvedValue(checked);
+    const user = userEvent.setup();
+    render(<I18nProvider><MaterialChecklist project={project} refreshKey={0} onGenerated={vi.fn()} run={async action => action()} /></I18nProvider>);
+    await user.click(await screen.findByRole("button", { name: locale === "en" ? "Check and confirm completion" : "检查并确认完成" }));
+    expect(await screen.findByText(locale === "en" ? "Placeholders remain" : "仍有待填内容")).toBeVisible();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    vi.mocked(api.checkMaterial).mockResolvedValue({ ...checked, issues: [] });
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Check and confirm completion" : "检查并确认完成" }));
+    const confirm = await screen.findByRole("button", { name: locale === "en" ? "Confirm completion and save snapshot" : "确认完成并保存快照" });
+    expect(confirm).toBeDisabled();
+    for (const checkbox of screen.getAllByRole("checkbox")) await user.click(checkbox);
+    vi.mocked(api.confirmMaterial).mockResolvedValue({});
+    vi.mocked(api.materialTasks).mockResolvedValue([{ ...task, status: "confirmed" }]);
+    await user.click(confirm);
+    expect(api.confirmMaterial).toHaveBeenCalledWith(project.id, { ...checked, issues: [] });
+    expect(await screen.findByRole("button", { name: locale === "en" ? "Confirmed" : "已确认" })).toBeVisible();
+    expect(document.querySelectorAll(".material-status")).toHaveLength(1);
+    vi.mocked(api.materialTasks).mockResolvedValue([task]);
+    fireEvent(window, new Event("focus"));
+    expect(await screen.findByRole("button", { name: locale === "en" ? "Modified · check needed" : "已修改 · 待检查" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Check and confirm completion" : "检查并确认完成" }));
+    for (const checkbox of await screen.findAllByRole("checkbox")) await user.click(checkbox);
+    vi.mocked(api.confirmMaterial).mockRejectedValue({ code: "MATERIAL_REVIEW_CHANGED" });
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Confirm completion and save snapshot" : "确认完成并保存快照" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(locale === "en" ? "has changed" : "已变化");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+  it(`locks every generation action until bulk templates and refresh complete in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const task = { ...items[1], canGenerateTemplate: true };
+    vi.mocked(api.materialTasks).mockResolvedValue([task]);
+    let resolve!: (paths: string[]) => void;
+    vi.mocked(api.generateMaterialTemplates).mockImplementation(() => new Promise(done => { resolve = done; }));
+    render(<I18nProvider><MaterialChecklist project={project} refreshKey={0} onGenerated={vi.fn()} run={async action => action()} /></I18nProvider>);
+    const bulk = await screen.findByRole("button", { name: locale === "en" ? "Generate all templates" : "一键生成模板" });
+    await userEvent.click(bulk);
+    for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled();
+    expect(api.generateMaterialTemplates).toHaveBeenCalledTimes(1);
+    vi.mocked(api.materialTasks).mockResolvedValue([{ ...task, canGenerateTemplate: false, templatePresent: true }]);
+    resolve(["author-tools/cover-letter-TEMPLATE.docx"]);
+    expect(await screen.findByText(locale === "en" ? "Template present · input needed" : "模板已存在 · 需补充")).toBeVisible();
+    expect(screen.getByRole("button", { name: locale === "en" ? "Generate all templates" : "一键生成模板" })).toBeDisabled();
+    expect(api.generateMaterials).not.toHaveBeenCalled();
+  });
+  it(`generates a template without marking manual material complete in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const task = { ...items[0], id: "funding", label: { zhCn: "经费声明", en: "Funding statement" }, relativePath: "author-tools/funding-DRAFT.docx", canGenerateTemplate: true };
+    vi.mocked(api.materialTasks).mockResolvedValue([task]);
+    vi.mocked(api.generateMaterialTemplate).mockResolvedValue(["author-tools/funding-TEMPLATE.docx"]);
+    const refreshed = vi.fn();
+    const { rerender } = render(<I18nProvider><MaterialChecklist project={project} refreshKey={0} onGenerated={refreshed} run={async action => action()} /></I18nProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: locale === "en" ? "Generate template: Funding statement" : "一键生成模板：经费声明" }));
+    expect(api.generateMaterialTemplate).toHaveBeenCalledWith(project, "funding");
+    expect(api.generateMaterials).not.toHaveBeenCalled();
+    vi.mocked(api.materialTasks).mockResolvedValue([{ ...task, canGenerateTemplate: false, templatePresent: true }]);
+    rerender(<I18nProvider><MaterialChecklist project={project} refreshKey={1} onGenerated={refreshed} run={async action => action()} /></I18nProvider>);
+    expect(await screen.findByText(locale === "en" ? "Template present · input needed" : "模板已存在 · 需补充")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: locale === "en" ? /Template present/ : /模板已存在/ }));
+    expect(api.openWorkspaceEntry).toHaveBeenCalledWith(project.id, task.relativePath.replace("-DRAFT.docx", "-TEMPLATE.docx"));
+    expect(screen.queryByText(locale === "en" ? "Manual input required" : "需手动补充")).toBeNull();
+    expect(document.querySelectorAll(".material-status")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: locale === "en" ? "Generate all available" : "全部一键生成" })).toBeDisabled();
+  });
+  it(`only offers generation for capable missing materials, in ${locale}`, async () => {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    const user = userEvent.setup(); const refreshed = vi.fn();
+    const { rerender } = render(<I18nProvider><MaterialChecklist project={project} refreshKey={0} onGenerated={refreshed} run={async action => action()} /></I18nProvider>);
+    const manual = (await screen.findByText(locale === "en" ? "Anonymized manuscript" : "匿名主稿")).closest("li")!;
+    expect(within(manual).getByText(locale === "en" ? "Manual input required" : "需手动补充")).toBeVisible();
+    expect(within(manual).queryByRole("button")).toBeNull();
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Generate: Cover letter" : "一键生成：投稿信" }));
+    expect(api.generateMaterials).toHaveBeenCalledWith(project, ["cover_letter"]);
+    expect(refreshed).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: locale === "en" ? "Generate all available" : "全部一键生成" }));
+    expect(api.generateMaterials).toHaveBeenLastCalledWith(project, []);
+    vi.mocked(api.materialTasks).mockResolvedValue(items.map(item => item.id === "cover_letter" ? { ...item, status: "draft_present", canGenerate: false } : item));
+    rerender(<I18nProvider><MaterialChecklist project={project} refreshKey={1} onGenerated={refreshed} run={async action => action()} /></I18nProvider>);
+    expect(await screen.findByText(locale === "en" ? "Draft present · review needed" : "草稿已存在 · 待核对")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: locale === "en" ? /Draft present/ : /草稿已存在/ }));
+    expect(api.openWorkspaceEntry).toHaveBeenCalledWith(project.id, items[1].relativePath);
+    expect(screen.getByRole("button", { name: locale === "en" ? "Generate all available" : "全部一键生成" })).toBeDisabled();
+  });
+}

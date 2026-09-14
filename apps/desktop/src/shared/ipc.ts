@@ -13,6 +13,9 @@ import type {
   RecommendationResult,
   SelectionResponse,
   TaskKind,
+  MaterialTask,
+  MaterialCheck,
+  AiSettings, AiPreview, AiRun, AiTask,
 } from "./contracts";
 
 async function call<T>(
@@ -163,19 +166,40 @@ export const api = {
     journalId: string,
     origin: "catalog" | "recommendation",
     recommendationRef?: string,
+    articleType?: string,
   ) =>
     mutate<Project>("select_target", {
       input: {
         projectId: project.id,
         expectedRevision: project.revision,
         journalId,
-        articleType: "research_article",
+        articleType: articleType ?? project.facts.articleType ?? "research_article",
         origin,
         recommendationRef,
       },
     }),
   preparation: (projectId: string) =>
     call<PreparationView>("get_preparation", { projectId }),
+  workspace: (projectId: string) => call<{ rootPath: string; entries: Array<{ relativePath: string; directory: boolean; sizeBytes: number; modifiedAtUnixMs?: number }> }>("list_package_workspace", { projectId }),
+  choosePackageLocation: (projectId: string) => call<boolean>("choose_package_location", { projectId }),
+  materialTasks: (projectId: string) => call<MaterialTask[]>("list_material_tasks", { projectId }),
+  aiSettings: () => call<AiSettings>("get_ai_settings"),
+  saveAiSettings: (input: Omit<AiSettings, "hasKey"> & { apiKey?: string }) => call<AiSettings>("save_ai_settings", { input }),
+  prepareAi: (projectId: string, task: AiTask, materialId?: string) => call<AiPreview>("prepare_ai_request", { projectId, task, materialId }),
+  runAi: (previewId: string) => call<AiRun>("run_ai_request", { previewId, authorConsent: true }),
+  aiHistory: (projectId: string) => call<AiRun[]>("list_ai_runs", { projectId }),
+  acceptAiDraft: (projectId: string, runId: string) => call<string>("accept_ai_draft", { projectId, runId }),
+  checkMaterial: (projectId: string, materialId: string) => call<MaterialCheck>("check_material", { projectId, materialId }),
+  confirmMaterial: (projectId: string, check: MaterialCheck) => call("confirm_material", { projectId, materialId: check.materialId, expectedHash: check.sha256, expectedContext: check.contextHash, authorConfirmed: true }),
+  generateMaterials: (project: Project, materialIds: string[] = []) => mutate<string[]>("generate_materials", { projectId: project.id, expectedRevision: project.revision, materialIds }),
+  generateMaterialTemplate: (project: Project, materialId: string) => mutate<string[]>("generate_materials", { projectId: project.id, expectedRevision: project.revision, materialIds: [materialId], template: true }),
+  generateMaterialTemplates: (project: Project) => mutate<string[]>("generate_materials", { projectId: project.id, expectedRevision: project.revision, materialIds: [], template: true }),
+  importWorkspace: (projectId: string, token: string, directory: string) => call<void>("import_workspace_file", { projectId, token, directory }),
+  moveWorkspace: (projectId: string, source: string, directory: string) => call<void>("move_workspace_file", { projectId, source, directory }),
+  useWorkspaceMaterial: (project: Project, relativePath: string, kind: string) => call<Project>("use_workspace_material", { projectId: project.id, expectedRevision: project.revision, relativePath, kind }),
+  openWorkspace: (projectId: string) => call<void>("open_package_workspace", { projectId }),
+  openWorkspaceEntry: (projectId: string, relativePath: string) => call<void>("open_workspace_entry", { projectId, relativePath }),
+  openSource: (journalId: string, url: string) => call<void>("open_journal_source", { journalId, url }),
   updateFacts: (project: Project, facts: DocumentFacts) =>
     mutate<Project>("update_document_facts", {
       projectId: project.id,

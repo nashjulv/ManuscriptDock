@@ -1,7 +1,11 @@
+pub mod ai_assistance;
 mod compiler;
 mod documents;
 mod domain;
 mod journals;
+pub mod material_drafts;
+pub mod material_review;
+pub mod package_workspace;
 mod preparation;
 mod projects;
 
