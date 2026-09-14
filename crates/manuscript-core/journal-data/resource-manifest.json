@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "manuscriptdock.computer-ai-pilot",
+  "bundleVersion": "2026-09-14.2",
+  "resources": [
+    {
+      "path": "catalog.json",
+      "sha256": "1f756ded54a1825a757799ff62b3264342c58786d31f18bbde2ad64aa148634e",
+      "licenseRecord": "Original factual metadata compiled for ManuscriptDock from the official source URLs embedded in catalog.json; no journal guide text is redistributed."
+    },
+    {
+      "path": "rules.json",
+      "sha256": "e1dd526b89281b1908e0cf563a066d3407ce33f3770b9a153c4dbf39b19847b9",
+      "licenseRecord": "Original concise rule descriptions authored for ManuscriptDock with source links; no journal guide text is redistributed."
+    }
+  ]
+}

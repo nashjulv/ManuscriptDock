@@ -12,6 +12,12 @@ Each ADR contains status, context, decision, consequences, and links to supersed
 
 ## Accepted decisions
 
+- [0011 — Rebuild the two-task product and retire legacy flows](0011-rebuild-core-and-retire-legacy-flows.md)：允许重写旧代码／接口／交互，删除无用模块；数据保护不等于旧功能兼容；详细实现待开始。
+
+- [0010 — Local journal matching and submission-package focus](0010-local-journal-package-focus.md)：2026-09-14 新定位；覆盖旧阶段导航和远程模型的产品范围，保留源稿、版本、证据与历史记录；待实施。
+
+Earlier decisions remain historical records. Where scope conflicts with 0010, use 0010; do not infer that the new runtime behavior is implemented.
+
 - [0001 — Desktop application architecture](0001-desktop-application-architecture.md)
 - [0002 — Local workspace storage](0002-local-workspace-storage.md)
 - [0003 — Deterministic structure extraction](0003-deterministic-structure-extraction.md)

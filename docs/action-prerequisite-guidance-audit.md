@@ -186,11 +186,11 @@ Internationalization review：新增原因、跨页标题和按钮、数量提�
 ## 源码定位与本轮边界
 
 - [App.tsx](../apps/desktop/src/App.tsx)：工作区导航与创建、归档、目标推荐、材料上传与复用、导出、存证、登记、版本和知识体入口。
-- [OfficialSourceAccess.tsx](../apps/desktop/src/OfficialSourceAccess.tsx)：本次许可和额外访问确认。
-- [DeclarationRequirements.tsx](../apps/desktop/src/DeclarationRequirements.tsx)：声明编辑、关联文件和表单校验。
-- [RequirementDecision.tsx](../apps/desktop/src/RequirementDecision.tsx)：不适用选项及原因。
-- [SourceRecovery.tsx](../apps/desktop/src/SourceRecovery.tsx)：关联源稿作者确认。
-- [StructureReview.tsx](../apps/desktop/src/StructureReview.tsx)：结构核验原因。
+- 历史文件 `OfficialSourceAccess.tsx`：本次许可和额外访问确认；已在 V0.53 核心重写中移除。
+- 历史文件 `DeclarationRequirements.tsx`：声明编辑、关联文件和表单校验；已在 V0.53 核心重写中移除。
+- 历史文件 `RequirementDecision.tsx`：不适用选项及原因；已在 V0.53 核心重写中移除。
+- 历史文件 `SourceRecovery.tsx`：关联源稿作者确认；已在 V0.53 核心重写中移除。
+- 历史文件 `StructureReview.tsx`：结构核验原因；已在 V0.53 核心重写中移除。
 
 最初盘点阶段仅新增本文并添加文档索引；当时未修改业务代码或执行构建。后续实施和测试结果见本文开头，工作区的其他修改仍属于各自任务。
 

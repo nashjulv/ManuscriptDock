@@ -1,5 +1,7 @@
 # ManuscriptDock 设计系统
 
+> 2026-09-14 产品范围更新：新任务导航、页面结构及本地文件文案统一以[简洁交互设计](../../docs/ui-design-direction.md)和[实施方案](../../docs/local-journal-package-plan.md)为准，覆盖本文及旧页面规范中冲突的生命周期轨道、知识体主入口与常驻证据面要求。配色、图标、字体、阅读设置及可访问性规范继续适用；新流程待实施。
+
 - 版本：1.5
 - 状态：MVP 实施基线
 - 产品：ManuscriptDock（投稿舱）

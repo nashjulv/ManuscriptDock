@@ -1,9 +1,11 @@
 {
   "name": "manuscriptdock",
-  "version": "0.52.0",
+  "version": "0.54.0",
   "private": true,
   "description": "ManuscriptDock local-first manuscript submission workspace",
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "engines": {
     "node": "^24.0.0",
     "npm": ">=11.0.0"
@@ -19,5 +21,8 @@
     "tauri": "npm run tauri --workspace @manuscriptdock/desktop --",
     "test": "npm run test --workspace @manuscriptdock/desktop",
     "typecheck": "npm run typecheck --workspace @manuscriptdock/desktop"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
   }
 }

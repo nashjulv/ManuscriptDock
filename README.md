@@ -1,47 +1,58 @@
-# ManuscriptDock
+# 投稿舱 ManuscriptDock V0.54
 
 **中文名：投稿舱**
 
-**产品类别：本地论文投稿工作台**
+**新定位：本地期刊匹配与投稿包整理客户端**
 
-ManuscriptDock 将作者已有的论文整理为可检查、可投稿、可返修、可追溯和可发布的结构化成果。
+ManuscriptDock 的产品方向收敛为两个核心功能：**推荐期刊**、**根据目标期刊要求整理投稿包**。
+打开本地论文或材料文件夹，完成必要条件与事实确认，在本机预览并保存结果。已有目标的作者可直接整理，不必先推荐。
 
-投稿准备是建立作者信任的入口，形成由作者控制、可追溯、可计算并可按需开放的
-“学术知识体”才是长期目标。排版、检查、评审、返修和发布都应持续丰富同一个论文
-知识体，而不是产生彼此割裂的文件与聊天记录。
+期刊要求由团队 AI 辅助获取公开资料、人工核验后，直接维护仓库中的结构化配置并随客户端内置。
+首版不开发人工维护功能、管理后台或独立规则更新服务。输入使用“打开／选择／加载本地文件”，
+不以云端上传概念组织交互；版本、证据与原稿保护继续保留，知识体和远程评审不进入新版核心流程。
 
-当前本地 MVP 已形成以出版社目标为主线的可执行闭环：
+**状态：V0.54 已按本地期刊匹配与目标投稿包方向重建核心运行路径。**当前实现提供离线 PDF／DOCX 打开、内置目录推荐、三本试点期刊要求、作者事实补充、草稿/正式文件清单和事务导出。更广泛的文档变换与跨平台真机验收仍按实施记录的实际边界描述。
+执行入口：[详细实现方案](docs/implementation/README.md)；产品范围见[总体计划](docs/local-journal-package-plan.md)。
+实际实现允许重写旧代码和交互，删除不服务于两个核心功能的模块，不为保留旧体系增加兼容层。
+用户原稿和已有导出文件仍须保护；因早期版本尚未上线，V0.54 不再扫描、展示或迁移早期任务，磁盘上已有文件也不会被应用主动删除。
 
-- 本地选择 DOCX、PDF 或 TEX，WebView 不获得文件路径；
-- 创建带内容指纹和审计事件的不可变源快照；
-- 在 Rust 中确定性提取结构，并诚实标注 PDF 的解析限制；
-- 验证和组合签名规则包，生成可解释的投稿准备结论；
-- 选择主投及备选期刊，保存带来源的官方要求快照；
-- 按目标组织真实附件，并导出严格分隔 `submission/` 与 `records/` 的投稿包；
-- 保存版本、检查、存证、投稿与个人知识体记录，外发操作均由作者明确授权。
+当前本地 MVP 已形成两条直接任务路径：
 
-期刊专属自动排版、完整返修管理、PWC 专业评审和预印本发布仍是后续产品切片。
+- 原生选择 PDF、DOCX 或材料文件，WebView 只获得短期 token，不获得任意文件路径；PDF 在本机提取有限文本用于推荐，不推断作者；
+- 在 `workspace-next` 中创建带内容指纹的不可变源快照并恢复最近任务；同一规范化文件夹复用同一个项目记录，主稿变化保留旧版本，导出默认写入新的版本化子目录；
+- 最近任务可以从首页隐藏并恢复；此操作不删除项目快照、生成文件或外部导出；
+- 从 12 本内置 AI 期刊目录执行确定性硬过滤、稳定排序和最多三个候选；
+- 投稿语言默认跟随客户端界面语言；简体中文暂无已核验可生成目标时明确说明覆盖缺口，只有作者点击确认后才改用 English 重试；
+- 3 本 Elsevier 试点期刊提供核验来源、作者事实缺项和正式导出边界；
+- 已知目标可跳过推荐，目录目标不需要伪造推荐记录；
+- 草稿和正式投稿包严格分隔 `submission/`、`author-tools/` 与 `records/`，并生成只含投稿文件的 ZIP；
+- 模型设置、知识体、官网实时抓取、存证、投稿登记和旧多阶段路由已从运行时删除。
+
+首批主稿采取包级原样保留。PDF 可直接用于推荐与草稿检查；三本试点期刊的正式投稿包仍要求作者明确提供核对过的可编辑 DOCX，应用不会把 PDF 反向转换或伪装成 Word 文件。XLSX 填写表已生成并通过兼容阅读器试验，但复杂 OOXML 变换、Windows 真机与 Microsoft Word／Excel 实页验收仍待后续工作包完成。实际证据和未完成项见 [V0.54 实现状态](docs/releases/V0.54/implementation-status.md)。
 
 ## 技术方向
 
 - 桌面框架：Tauri 2.x；
 - 前端：React 18 + TypeScript 5；
 - 构建：Vite 5 + Cargo；
-- 原则：本地优先、非破坏性转换、明确外发授权。
+- 新版原则：两项核心任务本地运行、非破坏性整理、规则内置、简单交互；旧外发命令已从运行时移除。
 
 ## 文档入口
 
 - [产品设计总纲](docs/product-design-overview.md)
-- [MVP 开发计划](docs/mvp-development-plan.md)
+- [详细实现方案与工作包](docs/implementation/README.md)
+- [旧代码重写与删除清单](docs/implementation/rewrite-and-removal.md)
+- [文档目录结构与迁移计划](docs/documentation-structure.md)
+- [本地选刊与投稿包整理实施方案](docs/local-journal-package-plan.md)
+- [两核心任务的简洁交互](docs/ui-design-direction.md)
+- [ADR 0010：定位与架构范围调整](docs/adr/0010-local-journal-package-focus.md)
 - [开发日志](docs/development-log.md)
 - [MVP 完成状态与边界](docs/mvp-release-status.md)
-- [学术知识体演进路线](docs/academic-knowledge-body-roadmap.md)
-- [学术知识体服务模型](docs/knowledge-body-service-model.md)
-- [Paperpal 竞争应对与市场定位](docs/competitive-positioning-paperpal.md)
-- [UI 方向：简洁学术工作台](docs/ui-design-direction.md)
 - [投稿规则系统](docs/submission-rule-system.md)
 - [设计系统](design-system/manuscriptdock/MASTER.md)
 - [文档索引](docs/README.md)
+
+旧里程碑与暂缓的知识体／服务网络方案保留在文档索引中，不再作为当前产品定位。
 
 ## 仓库结构
 

@@ -1,5 +1,7 @@
 # 知识体问答与作者自带模型
 
+> 2026-09-14 范围更新：本文保留为历史／暂缓背景，不再定义当前产品根目标或首批开发依赖。新方向仅为推荐期刊与按目标整理投稿包，见[产品总纲](product-design-overview.md)、[实施方案](local-journal-package-plan.md)及 [ADR 0010](adr/0010-local-journal-package-focus.md)。已有数据和历史记录继续保留；本文后续旧定位不覆盖该决定。
+
 - 状态：MVP 已实现
 - 日期：2026-08-25
 

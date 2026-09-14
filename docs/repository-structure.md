@@ -1,5 +1,7 @@
 # ManuscriptDock Repository Structure
 
+> 2026-09-14: The layout below describes the current checkout. The planned replacement module tree is in [implementation architecture](implementation/architecture.md); unused prior code and placeholder packages may be deleted. See [document structure](documentation-structure.md) for the documentation tree and migration map. The planned runtime directories do not yet exist.
+
 ## Active product paths
 
 ```text

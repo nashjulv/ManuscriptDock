@@ -1,4 +1,7 @@
-import "@testing-library/jest-dom/vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
+import { expect } from "vitest";
+
+expect.extend(matchers);
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
@@ -9,9 +12,12 @@ Object.defineProperty(window, "localStorage", {
     clear: () => storedValues.clear(),
     getItem: (key: string) => storedValues.get(key) ?? null,
     key: (index: number) => [...storedValues.keys()][index] ?? null,
-    get length() { return storedValues.size; },
+    get length() {
+      return storedValues.size;
+    },
     removeItem: (key: string) => storedValues.delete(key),
-    setItem: (key: string, value: string) => storedValues.set(key, String(value)),
+    setItem: (key: string, value: string) =>
+      storedValues.set(key, String(value)),
   },
 });
 

@@ -1,5 +1,7 @@
 # 投稿舱 ManuscriptDock V0.52 产品使用手册
 
+> 2026-09-14 文档范围：以下说明既有版本的操作、设计或验证事实。新定位与后续开发采用[两核心功能实施方案](local-journal-package-plan.md)及[简洁交互设计](ui-design-direction.md)；旧步骤和外部模型／官网读取能力不自动成为新版范围。本轮仅更新文档，未改造运行时。
+
 - 产品名称：投稿舱 ManuscriptDock V0.52
 - 产品版本：V0.52（安装包版本 `0.52.0`）
 - 适用平台：macOS 11+、Windows 10/11 x64
