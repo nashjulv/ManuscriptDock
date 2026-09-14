@@ -89,9 +89,13 @@ pub fn inspect_pdf(path: &Path) -> Result<PdfInspection, AppError> {
     {
         return Err(AppError::new("PDF_ENCRYPTED", true).recover("choose_unencrypted_pdf"));
     }
-    let extracted = pdf_extract::extract_text_from_mem(&bytes).map_err(|_| {
-        AppError::new("PDF_TEXT_EXTRACTION_FAILED", true).recover("choose_docx_or_another_pdf")
-    })?;
+    // Some PDFs make the parser panic (for example, incomplete font maps).
+    // Keep that failure inside this read-only parser, before creating a project.
+    let extraction_error =
+        || AppError::new("PDF_TEXT_EXTRACTION_FAILED", true).recover("choose_docx_or_another_pdf");
+    let extracted = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(&bytes))
+        .map_err(|_| extraction_error())?
+        .map_err(|_| extraction_error())?;
     if extracted.chars().count() > MAX_PDF_TEXT_CHARS {
         return Err(AppError::new("LIMIT_EXCEEDED", true)
             .param("textCharacterLimit", MAX_PDF_TEXT_CHARS.to_string())
@@ -680,19 +684,76 @@ mod tests {
     }
 
     fn write_simple_pdf(path: &Path) {
+        write_pdf(path, false);
+    }
+
+    #[test]
+    fn incomplete_pdf_font_map_finishes_job_and_preserves_source() {
+        use crate::{JobStatus, ProjectStore, TaskKind};
+        let root =
+            std::env::temp_dir().join(format!("manuscriptdock-font-map-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("incomplete-font-map.pdf");
+        write_pdf(&path, true);
+        let original = std::fs::read(&path).unwrap();
+        let store = ProjectStore::new(root.join("store")).unwrap();
+        let request = uuid::Uuid::new_v4().to_string();
+        store
+            .reserve_job(&request, "open_project", None, None)
+            .unwrap();
+        let mut notifications = Vec::new();
+        let error = store
+            .execute_reserved_job(
+                &request,
+                "open_project",
+                || store.create_from_manuscript(&path, TaskKind::FindJournals),
+                |job| notifications.push(job.status.clone()),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "PDF_TEXT_EXTRACTION_FAILED");
+        assert_eq!(
+            notifications,
+            vec![JobStatus::Running, JobStatus::NeedsInput]
+        );
+        assert_eq!(
+            store.get_job_unscoped(&request).unwrap().status,
+            JobStatus::NeedsInput
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        // A parser failure must not prevent a subsequent valid file from opening.
+        write_simple_pdf(&root.join("valid.pdf"));
+        assert!(store
+            .create_from_manuscript(&root.join("valid.pdf"), TaskKind::FindJournals)
+            .is_ok());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn write_pdf(path: &Path, incomplete_font_map: bool) {
         let content = concat!(
             "BT\n/F1 18 Tf\n72 740 Td\n(Synthetic Local Paper) Tj\n",
             "0 -30 Td\n/F1 11 Tf\n(Abstract) Tj\n",
             "0 -18 Td\n(This study evaluates local document processing.) Tj\n",
             "0 -18 Td\n(Keywords: local; privacy; journals) Tj\nET\n"
         );
-        let objects = [
+        let mut objects = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_owned(),
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
             format!("<< /Length {} >>\nstream\n{}endstream", content.len(), content),
         ];
+        if incomplete_font_map {
+            objects[3] =
+                "<< /Type /Font /Subtype /Type1 /BaseFont /SyntheticFont /ToUnicode 6 0 R >>"
+                    .into();
+            // Only space is mapped; the text uses other glyphs and no fallback encoding.
+            let cmap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Synthetic def\n/CMapType 2 def\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\n1 beginbfchar\n<20> <0020>\nendbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{}endstream",
+                cmap.len(),
+                cmap
+            ));
+        }
         let mut bytes = b"%PDF-1.4\n".to_vec();
         let mut offsets = vec![0_usize];
         for (index, object) in objects.iter().enumerate() {

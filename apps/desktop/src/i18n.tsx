@@ -51,8 +51,12 @@ const ERROR_MESSAGES: Record<string, [string, string]> = {
     "The selected PDF is encrypted or password-protected and cannot be read locally.",
   ],
   PDF_TEXT_EXTRACTION_FAILED: [
-    "无法从所选 PDF 读取文本；可改用 DOCX，或检查 PDF 是否完整。",
-    "Text could not be read from the selected PDF. Use a DOCX instead or check that the PDF is intact.",
+    "无法从所选 PDF 读取文本，可能是字体编码不受支持或文件不完整。请改用 DOCX 或重新导出的 PDF；原文件未修改。",
+    "Text could not be read from the selected PDF. Its font encoding may be unsupported or the file may be incomplete. Use a DOCX or a re-exported PDF; the original file was not modified.",
+  ],
+  JOB_WORKER_PANICKED: [
+    "本地处理发生异常，任务已停止。请重新打开文件；若仍失败，请改用其他文件。",
+    "Local processing failed and the task has stopped. Reopen the file; if it fails again, use another file.",
   ],
   LIMIT_EXCEEDED: [
     "所选内容超过本地处理上限。",

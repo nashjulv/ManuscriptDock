@@ -384,6 +384,44 @@ it("shows two clear bilingual tasks and local processing boundary", async () => 
 });
 
 for (const locale of ["zh-CN", "en"] as const) {
+  for (const code of ["PDF_TEXT_EXTRACTION_FAILED", "JOB_WORKER_PANICKED"]) {
+    it(`releases loading and allows another file after ${code} in ${locale}`, async () => {
+      localStorage.setItem("manuscriptdock.locale", locale);
+      const originalInvoke = invokeMock.getMockImplementation()!;
+      let firstOpen = true;
+      const requestId = crypto.randomUUID();
+      const queued = {
+        id: requestId, requestId, operation: "open_project", status: "queued", events: [],
+      };
+      invokeMock.mockImplementation((command: string, args: any) => {
+        if (command === "open_project" && firstOpen) {
+          firstOpen = false;
+          return Promise.resolve(queued);
+        }
+        if (command === "get_job") return Promise.resolve({
+          ...queued, status: code === "JOB_WORKER_PANICKED" ? "failed" : "needs_input",
+          events: [{ error: { code, retryable: false, diagnosticId: "synthetic-failure" } }],
+        });
+        return originalInvoke(command, args);
+      });
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(screen.getByRole("button", { name: locale === "en" ? /Find journals/ : /推荐期刊/ }));
+      const openLabel = locale === "en" ? "Open local manuscript" : "打开本地论文";
+      await user.click(screen.getByRole("button", { name: openLabel }));
+      const message = code === "PDF_TEXT_EXTRACTION_FAILED"
+        ? locale === "en" ? /font encoding/ : /字体编码/
+        : locale === "en" ? /task has stopped/ : /任务已停止/;
+      expect(await screen.findByText(message)).toBeVisible();
+      expect(screen.getByRole("button", { name: openLabel })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: openLabel }));
+      expect(await screen.findByLabelText(locale === "en" ? "Research keywords" : "研究关键词")).toBeVisible();
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+    });
+  }
+}
+
+for (const locale of ["zh-CN", "en"] as const) {
   it(`returns from both task pages with the visible Home button in ${locale}`, async () => {
     localStorage.setItem("manuscriptdock.locale", locale);
     const user = userEvent.setup();

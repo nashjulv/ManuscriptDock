@@ -20,6 +20,13 @@ pub struct ProjectStore {
     root: PathBuf,
 }
 
+fn run_job_action<T>(action: impl FnOnce() -> Result<T, AppError>) -> Result<T, AppError> {
+    // Catch inside the request lock so it is released normally, and let the
+    // caller persist and emit a terminal failure instead of leaving it running.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(action))
+        .unwrap_or_else(|_| Err(AppError::new("JOB_WORKER_PANICKED", false)))
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestResult<T> {
@@ -126,7 +133,7 @@ impl ProjectStore {
     {
         self.execute_idempotent(request_id, operation, || {
             self.start_job(request_id, operation, project_id, context_hash)?;
-            match action() {
+            match run_job_action(action) {
                 Ok(result) => {
                     self.transition_job(request_id, JobStatus::Succeeded, None)?;
                     Ok(result)
@@ -224,7 +231,7 @@ impl ProjectStore {
         self.execute_idempotent(request_id, operation, || {
             let running = self.transition_job(request_id, JobStatus::Running, None)?;
             notify(&running);
-            match action() {
+            match run_job_action(action) {
                 Ok(result) => {
                     let value = serde_json::to_value(&result)
                         .map_err(|_| AppError::new("REQUEST_RECORD_INVALID", false))?;
@@ -1735,6 +1742,60 @@ mod tests {
         assert_eq!(
             store.get_job(&project_id, &interrupted_id).unwrap().status,
             JobStatus::Interrupted
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn panicked_worker_persists_and_emits_failure_without_poisoning_request_lock() {
+        let root = std::env::temp_dir().join(format!(
+            "manuscriptdock-worker-panic-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = ProjectStore::new(&root).unwrap();
+        let request = uuid::Uuid::new_v4().to_string();
+        store
+            .reserve_job(&request, "open_project", None, None)
+            .unwrap();
+        let mut notifications = Vec::new();
+        let error = store
+            .execute_reserved_job::<(), _, _>(
+                &request,
+                "open_project",
+                || panic!("synthetic parser failure"),
+                |job| notifications.push(job.clone()),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "JOB_WORKER_PANICKED");
+        assert_eq!(notifications.last().unwrap().status, JobStatus::Failed);
+        let recorded = store.get_job_unscoped(&request).unwrap();
+        assert_eq!(recorded.status, JobStatus::Failed);
+        assert_eq!(
+            recorded.events.last().unwrap().error.as_ref().unwrap().code,
+            "JOB_WORKER_PANICKED"
+        );
+        assert!(store
+            .reserve_job(&request, "open_project", None, None)
+            .is_ok());
+        assert_eq!(
+            store
+                .execute_idempotent(&request, "open_project", || Ok(42))
+                .unwrap(),
+            42
+        );
+        let inline = uuid::Uuid::new_v4().to_string();
+        assert_eq!(
+            store
+                .execute_idempotent_job::<(), _>(&inline, "test", None, None, || panic!(
+                    "synthetic inline failure"
+                ))
+                .unwrap_err()
+                .code,
+            "JOB_WORKER_PANICKED"
+        );
+        assert_eq!(
+            store.get_job_unscoped(&inline).unwrap().status,
+            JobStatus::Failed
         );
         let _ = fs::remove_dir_all(root);
     }

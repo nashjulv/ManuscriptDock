@@ -1,4 +1,4 @@
-# 投稿舱 ManuscriptDock V0.60
+# 投稿舱 ManuscriptDock V0.61
 
 **中文名：投稿舱**
 
@@ -11,7 +11,7 @@ ManuscriptDock 的产品方向收敛为两个核心功能：**推荐期刊**、*
 首版不开发人工维护功能、管理后台或独立规则更新服务。输入使用“打开／选择／加载本地文件”，
 不以云端上传概念组织交互；版本、证据与原稿保护继续保留，知识体和远程评审不进入新版核心流程。
 
-**状态：V0.60 增加可选 AI 材料助手。**支持投稿信/Highlights 起草、单项材料语义检查及材料间一致性检查。每次调用前预览资料并确认，结果须作者核对，现有文件不会被覆盖。基础功能无需配置模型，原稿始终保留。见 [AI 辅助范围](docs/optional-ai-assistance.md)；材料检查与快照流程见 [V0.58 实现记录](docs/releases/V0.58/implementation-status.md)。
+**状态：V0.61 修复 PDF 解析异常导致持续加载。**不支持的字体映射现在返回可恢复的读取错误，后台任务异常会进入终止状态；见 [V0.61 验证记录](docs/releases/V0.61/implementation-status.md)。V0.60 的可选 AI 材料助手继续支持投稿信/Highlights 起草、单项材料语义检查及材料间一致性检查。每次调用前预览资料并确认，结果须作者核对，现有文件不会被覆盖。基础功能无需配置模型，原稿始终保留。见 [AI 辅助范围](docs/optional-ai-assistance.md)；材料检查与快照流程见 [V0.58 实现记录](docs/releases/V0.58/implementation-status.md)。
 执行入口：[详细实现方案](docs/implementation/README.md)；产品范围见[总体计划](docs/local-journal-package-plan.md)。
 实际实现允许重写旧代码和交互，删除不服务于两个核心功能的模块，不为保留旧体系增加兼容层。
 用户原稿和已有导出文件仍须保护；因早期版本尚未上线，V0.54 不再扫描、展示或迁移早期任务，磁盘上已有文件也不会被应用主动删除。
