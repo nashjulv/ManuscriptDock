@@ -20,6 +20,8 @@ import type {
 import { PRODUCT_VERSION } from "./version";
 import { PackageWorkspace } from "./PackageWorkspace";
 import { MaterialChecklist } from "./MaterialChecklist";
+import productLogo from "./assets/manuscriptdock-logo.svg";
+import { factLabels, reconcileFactDraft, type FactConflict } from "./factDraft";
 import { JournalTargetMap } from "./JournalTargetMap";
 import { AiSettingsDialog } from "./AiAssistant";
 
@@ -65,6 +67,8 @@ function AppContent() {
   } | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshComplete, setRefreshComplete] = useState(false);
   const [activeJob, setActiveJob] = useState<JobRecord | null>(null);
   const busyRef = useRef(false);
   const pageDirty = useRef(false);
@@ -203,10 +207,25 @@ function AppContent() {
     },
     [finishFolder, run],
   );
-  const resume = useCallback((item: Project) => {
-    setProject(item);
-    setScreen(item.lastTask === "find_journals" ? "matching" : "preparation");
-  }, []);
+  const refreshAll = async () => {
+    setRefreshComplete(false);
+    await run(async () => {
+      const [current, recentProjects, removedProjects] = await Promise.all([
+        project && screen !== "home" ? api.project(project.id) : Promise.resolve(null),
+        api.recent(), api.removed(),
+      ]);
+      if (current) setProject(current);
+      setRecent(recentProjects); setRemoved(removedProjects);
+      setRefreshKey(value => value + 1);
+      setRefreshComplete(true);
+    });
+  };
+  const resume = useCallback(async (item: Project) => {
+    const current = await run(() => api.project(item.id));
+    if (!current) return;
+    setProject(current);
+    setScreen(current.lastTask === "find_journals" ? "matching" : "preparation");
+  }, [run]);
   const removeRecent = useCallback(
     async (item: Project) => {
       const hidden = await run(() => api.hideRecent(item.id));
@@ -231,7 +250,7 @@ function AppContent() {
           disabled={busy}
           aria-label={text("返回首页", "Back to home")}
         >
-          <img src="/src/assets/manuscriptdock-logo.svg" alt="" />
+          <img src={productLogo} alt="" />
           <span>
             投稿舱 ManuscriptDock <strong>{PRODUCT_VERSION}</strong>
           </span>
@@ -246,6 +265,8 @@ function AppContent() {
             {text("本地优先", "Local first")}
           </span>
           <TextSizeSettings />
+          <button disabled={busy} aria-label={text("全局刷新", "Refresh all")} title={text("重新读取当前项目、材料和目录，保留未保存的输入", "Reload the project, materials, and folder while preserving unsaved input")} onClick={() => void refreshAll()}>{text("刷新", "Refresh")}</button>
+          {refreshComplete && <span className="sr-only" role="status">{text("已重新读取最新状态", "Latest state reloaded")}</span>}
           <button disabled={busy} onClick={() => setShowAiSettings(true)}>{text("AI 设置", "AI settings")}</button>
           <button
             className="language"
@@ -324,6 +345,7 @@ function AppContent() {
         ) : null}
         {screen === "preparation" ? (
           <Preparation
+            refreshKey={refreshKey}
             onDirtyChange={reportDirty}
             project={project}
             setProject={setProject}
@@ -613,6 +635,7 @@ function Matching({
   const [keywords, setKeywords] = useState(() => keywordsForProject(project));
   const [result, setResult] = useState<RecommendationResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  useEffect(() => { setResult(null); setSelected(null); }, [project?.id, project?.revision]);
   useEffect(() => {
     onDirtyChange(!!project && (keywords !== keywordsForProject(project) || JSON.stringify(constraints) !== JSON.stringify(constraintsForProject(project, locale))));
     return () => onDirtyChange(false);
@@ -1021,6 +1044,7 @@ function Matching({
 }
 
 function Preparation({
+  refreshKey,
   project,
   setProject,
   open,
@@ -1028,6 +1052,7 @@ function Preparation({
   run,
   onDirtyChange,
 }: {
+  refreshKey: number;
   project: Project | null;
   setProject: (value: Project) => void;
   open: () => void;
@@ -1042,10 +1067,14 @@ function Preparation({
   const [facts, setFacts] = useState<DocumentFacts | null>(
     project?.facts ?? null,
   );
+  const factsBase = useRef(project);
+  const factsRef = useRef(facts);
+  factsRef.current = facts;
+  const [factConflicts, setFactConflicts] = useState<FactConflict[]>([]);
   useEffect(() => {
-    onDirtyChange(!!project && !!facts && JSON.stringify(facts) !== JSON.stringify(project.facts));
+    onDirtyChange(factConflicts.length > 0 || (!!project && !!facts && JSON.stringify(facts) !== JSON.stringify(project.facts)));
     return () => onDirtyChange(false);
-  }, [project, facts, onDirtyChange]);
+  }, [project, facts, factConflicts, onDirtyChange]);
   const [materialKind, setMaterialKind] = useState("supplementary");
   const [authorConfirmed, setAuthorConfirmed] = useState(false);
   const [changingTarget, setChangingTarget] = useState(false);
@@ -1055,36 +1084,45 @@ function Preparation({
   const [receipt, setReceipt] = useState<ExportReceipt | null>(null);
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
   const preparationTarget = useRef<string | null>(null);
+  const [preparationLoading, setPreparationLoading] = useState(false);
   useEffect(() => {
     let active = true;
+    let request = 0;
     const refresh = () => {
+      const current = ++request;
+      setPreparationLoading(!!project?.target);
       if (project?.target) void api.preparation(project.id).then(value => {
-        if (active) { setPreparation(value); setPackage(current => current && current.contextHash !== value.contextHash ? null : current); }
-      }).catch(() => { if (active) setPreparation(null); });
+        if (active && current === request) { setPreparation(value); setPackage(current => current && current.contextHash !== value.contextHash ? null : current); }
+      }).catch(() => { if (active && current === request) setPreparation(null); })
+        .finally(() => { if (active && current === request) setPreparationLoading(false); });
     };
+    const targetKey = project?.target ? `${project.id}/${project.target.journalId}` : null;
+    if (preparationTarget.current !== targetKey) setPreparation(null);
+    preparationTarget.current = targetKey;
     refresh();
     window.addEventListener("focus", refresh);
     return () => { active = false; window.removeEventListener("focus", refresh); };
-  }, [workspaceRefresh, project?.id, project?.target?.journalId]);
+  }, [refreshKey, workspaceRefresh, project?.id, project?.revision, project?.target?.journalId]);
   useEffect(() => {
     let active = true;
     void api.journals("").then(items => { if (active) setJournals(items); }).catch(() => undefined);
     return () => { active = false; };
-  }, [project?.id, changingTarget]);
+  }, [refreshKey, project?.id, changingTarget]);
   useEffect(() => {
-    let active = true;
-    const targetKey = project?.target ? `${project.id}/${project.target.journalId}` : null;
-    if (preparationTarget.current !== targetKey) setPreparation(null);
-    preparationTarget.current = targetKey;
-    if (project?.target)
-      void api
-        .preparation(project.id)
-        .then(value => { if (active) setPreparation(value); })
-        .catch(() => { if (active) setPreparation(null); });
-    setFacts(project?.facts ?? null);
+    const base = factsBase.current;
+    if (base && project && base.id === project.id && factsRef.current) {
+      const recovered = reconcileFactDraft(base, factsRef.current, project);
+      setFacts(recovered.facts);
+      setFactConflicts(previous => {
+        // Keep unresolved inputs even if another update arrives during review.
+        const pending = previous.map(conflict => ({ ...conflict, saved: project.facts[conflict.field] }));
+        return [...pending.filter(old => !recovered.conflicts.some(next => next.field === old.field)), ...recovered.conflicts];
+      });
+    } else { setFacts(project?.facts ?? null); setFactConflicts([]); }
+    factsBase.current = project;
+    setAuthorConfirmed(false);
     setPackage(null);
     setReceipt(null);
-    return () => { active = false; };
   }, [project?.id, project?.revision, project?.target]);
   useEffect(() => {
     const journalId = project?.target?.journalId;
@@ -1104,7 +1142,7 @@ function Preparation({
       })
       .catch(() => { if (active) setTargetName(journalId); });
     return () => { active = false; };
-  }, [project?.target?.journalId]);
+  }, [refreshKey, project?.target?.journalId]);
   const search = async () => {
     const result = await run(() => api.journals(query));
     if (result) setJournals(result);
@@ -1122,7 +1160,7 @@ function Preparation({
     }
   };
   const saveFacts = async () => {
-    if (!project || !facts || !authorConfirmed) return;
+    if (!project || !facts || !authorConfirmed || factConflicts.length) return;
     const confirmed = {
       ...facts,
       authorConfirmedFields: [
@@ -1141,8 +1179,24 @@ function Preparation({
         "generative_ai_disclosure",
       ],
     };
-    const result = await run(() => api.updateFacts(project, confirmed));
+    const result = await run(async () => {
+      try { return await api.updateFacts(project, confirmed); }
+      catch (cause) {
+        const error = cause as AppError;
+        if (error.code !== "CONTEXT_CHANGED") throw cause;
+        let latest: Project;
+        try { latest = await api.project(project.id); }
+        catch { throw { ...error, code: "FACTS_RELOAD_FAILED" }; }
+        setProject(latest);
+        setAuthorConfirmed(false);
+        throw { ...error, code: "FACTS_RELOADED" };
+      }
+    });
     if (result) {
+      factsBase.current = result;
+      factsRef.current = result.facts;
+      setFacts(result.facts);
+      setFactConflicts([]);
       setProject(result);
       setAuthorConfirmed(false);
     }
@@ -1164,7 +1218,7 @@ function Preparation({
     if (result) setProject(result);
   };
   const build = async (mode: "draft" | "final") => {
-    if (!project || !preparation) return;
+    if (!project || !preparation || preparationLoading) return;
     const result = await run(() =>
       api.build(project.id, preparation.contextHash, mode),
     );
@@ -1187,21 +1241,26 @@ function Preparation({
     return (
       <EmptyTask kind="prepare_package" open={open} openFolder={openFolder} />
     );
+  // Match compiler.rs: an included anonymized manuscript takes precedence,
+  // then an included editable manuscript, then the immutable import source.
+  const packageManuscript = project.materials.find(material => material.included && material.kind === "anonymized_manuscript")
+    ?? project.materials.find(material => material.included && material.kind === "editable_manuscript");
+  const needsDocx = !packageManuscript && project.activeSource.format === "pdf";
   return (
     <section className="task-page">
       <TaskHeader
         eyebrow={text("任务 02 · 整理投稿包", "Task 02 · Prepare package")}
         title={project.displayName}
-        meta={`${project.activeSource.fileName} · ${project.materials.length} ${text("份附件", "attachment(s)")}`}
+        meta={`${needsDocx ? text("导入来源", "Imported source") : text("投稿主稿", "Submission manuscript")}: ${packageManuscript?.fileName ?? project.activeSource.fileName} · ${project.materials.length} ${text("份附件", "attachment(s)")}`}
         onChange={open}
       />
-      {project.activeSource.format === "pdf" ? (
+      {needsDocx ? (
         <aside className="pdf-source-note">
-          <strong>{text("当前主稿为 PDF", "The current manuscript is a PDF")}</strong>
+          <strong>{text("尚未关联投稿主稿 DOCX", "No submission manuscript DOCX linked")}</strong>
           <span>
             {text(
-              "可直接用于本地期刊匹配和草稿检查；正式导出前请添加作者核对的可编辑 DOCX。系统不会把 PDF 转换或改名成 Word 文件。",
-              "It can be used directly for local journal matching and draft review. Add an author-verified editable DOCX before final export. The app will not convert or rename the PDF as a Word file.",
+              "最初导入的 PDF 保留为项目来源，可用于期刊匹配和草稿检查。正式导出前请在材料清单中选择并关联作者核对的 DOCX；仅删除目录中的 PDF 不会关联新主稿。系统不会把 PDF 转换或改名成 Word 文件。",
+              "The imported PDF is retained as the project source for journal matching and draft review. Before final export, choose and link an author-verified DOCX in the material checklist. Deleting the PDF from the folder does not link a new manuscript. The app will not convert or rename the PDF as a Word file.",
             )}
           </span>
         </aside>
@@ -1306,8 +1365,8 @@ function Preparation({
                         )}
                   </strong>
                 </div>
-                <PackageWorkspace key={`${project.id}-${project.target.journalId}`} project={project} setProject={setProject} run={run} refreshKey={String(workspaceRefresh)} onLocationChanged={() => setWorkspaceRefresh(value => value + 1)} />
-                <MaterialChecklist key={`materials-${project.id}-${project.target.journalId}`} project={project} refreshKey={workspaceRefresh} run={run} onGenerated={() => setWorkspaceRefresh(value => value + 1)} />
+                <PackageWorkspace key={`${project.id}-${project.target.journalId}`} project={project} setProject={setProject} run={run} refreshKey={`${refreshKey}-${workspaceRefresh}`} onLocationChanged={() => setWorkspaceRefresh(value => value + 1)} />
+                <MaterialChecklist key={`materials-${project.id}-${project.target.journalId}`} project={project} setProject={setProject} refreshKey={refreshKey + workspaceRefresh} run={run} onGenerated={() => setWorkspaceRefresh(value => value + 1)} />
                 <section className="target-requirements" aria-label={text("目标期刊要求", "Target journal requirements")}>
                   <h3>{text("目标期刊要求与待补材料", "Target requirements and missing materials")}</h3>
                   {targetJournal?.evidence.map(evidence => <button key={evidence.sourceUrl} className="link" onClick={() => void run(() => api.openSource(project.target!.journalId, evidence.sourceUrl))}>{localize(evidence.label)} ↗ </button>)}
@@ -1320,6 +1379,20 @@ function Preparation({
                     <code>{item.evidence.sourceUrl}</code>
                   </details>)}
                 </section>
+                {factConflicts.length > 0 && <section className="fact-conflicts" aria-label={text("核对同时修改的内容", "Review conflicting edits")}>
+                  <h3>{text("请核对同时修改的内容", "Review conflicting edits")}</h3>
+                  <p>{text("最新状态已读取，本次输入仍保留。原稿或相同字段发生了变化，请逐项选择，再重新确认保存。", "The latest state is loaded and your input is preserved. The source or the same fields changed. Choose each value, then confirm and save again.")}</p>
+                  {factConflicts.map(conflict => <div key={conflict.field}>
+                    <strong>{text(factLabels[conflict.field][0], factLabels[conflict.field][1])}</strong>
+                    <p>{text("本次输入", "Your input")}</p><pre>{Array.isArray(conflict.local) ? conflict.local.join("\n") : conflict.local || text("（空）", "(empty)")}</pre>
+                    <p>{text("已保存内容", "Saved value")}</p><pre>{Array.isArray(conflict.saved) ? conflict.saved.join("\n") : conflict.saved || text("（空）", "(empty)")}</pre>
+                    <div className="inline-actions">{(["local", "saved"] as const).map(choice => <button className="secondary" key={choice} onClick={() => {
+                      setFacts(current => current && ({ ...current, [conflict.field]: conflict[choice] }));
+                      setFactConflicts(current => current.filter(item => item.field !== conflict.field));
+                      setAuthorConfirmed(false);
+                    }}>{choice === "local" ? text("采用本次输入", "Use my input") : text("采用已保存内容", "Use saved value")}</button>)}</div>
+                  </div>)}
+                </section>}
                 <div className="fact-form">
                   <label>
                     {text("论文标题", "Manuscript title")}
@@ -1581,7 +1654,7 @@ function Preparation({
                   </button>
                   <button
                     className="secondary"
-                    disabled={!authorConfirmed}
+                    disabled={!authorConfirmed || factConflicts.length > 0}
                     onClick={saveFacts}
                   >
                     {text("保存、确认并检查", "Save, confirm, and check")}
@@ -1613,7 +1686,7 @@ function Preparation({
                   <button
                     className="secondary"
                     disabled={
-                      !preparation.allowedActions.includes("build_draft")
+                      preparationLoading || !preparation.allowedActions.includes("build_draft")
                     }
                     onClick={() => build("draft")}
                   >
@@ -1622,7 +1695,7 @@ function Preparation({
                   <button
                     className="primary"
                     disabled={
-                      !preparation.allowedActions.includes("build_final")
+                      preparationLoading || !preparation.allowedActions.includes("build_final")
                     }
                     onClick={() => build("final")}
                   >

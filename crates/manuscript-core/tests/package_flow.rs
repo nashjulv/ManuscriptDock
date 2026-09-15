@@ -1119,6 +1119,14 @@ fn eswa_requires_a_constrained_fact_set_and_uses_the_author_verified_anonymized_
         )
         .unwrap();
     let leak_blocked = prepare(&project).unwrap();
+    let tasks = manuscript_core::material_drafts::list_material_tasks(&store, &project).unwrap();
+    let main = tasks.iter().find(|task| task.id == "manuscript").unwrap();
+    assert_eq!(
+        main.manuscript_kind.as_deref(),
+        Some("anonymized_manuscript")
+    );
+    assert_eq!(main.status, "manual_required");
+    assert!(main.provided_file_name.is_some());
     let leak_item = leak_blocked
         .blockers
         .iter()
@@ -1225,14 +1233,34 @@ fn pdf_sources_support_matching_and_drafts_but_final_packages_use_an_explicit_do
         "MATERIAL_REQUIRED"
     );
 
+    let workspace =
+        manuscript_core::package_workspace::workspace_root(&store, &project.id).unwrap();
+    let candidate = workspace.join("submission/manuscript.docx");
+    fs::copy(&editable, &candidate).unwrap();
+    let tasks = manuscript_core::material_drafts::list_material_tasks(&store, &project).unwrap();
+    let main = tasks.iter().find(|task| task.id == "manuscript").unwrap();
+    assert_eq!(main.status, "manual_required");
+    assert_eq!(main.manuscript_kind.as_deref(), Some("editable_manuscript"));
+    assert_eq!(
+        main.existing_file_path.as_deref(),
+        Some("submission/manuscript.docx")
+    );
+    assert!(main.provided_file_name.is_none());
+    assert!(!main.can_generate && !main.can_generate_template);
     project = store
-        .add_material(
+        .use_workspace_material(
             &project.id,
             project.revision,
-            &editable,
+            &candidate,
             "editable_manuscript",
         )
         .unwrap();
+    let tasks = manuscript_core::material_drafts::list_material_tasks(&store, &project).unwrap();
+    let main = tasks.iter().find(|task| task.id == "manuscript").unwrap();
+    assert_eq!(main.status, "ready");
+    assert_eq!(main.provided_file_name.as_deref(), Some("manuscript.docx"));
+    assert_eq!(fs::read(&source).unwrap(), source_bytes);
+    assert_eq!(fs::read(&candidate).unwrap(), editable_bytes);
     let mut facts = project.facts.clone();
     facts.authors = vec!["Synthetic Author".into()];
     facts.affiliations = vec!["Example University".into()];

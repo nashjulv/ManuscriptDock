@@ -707,7 +707,7 @@ mod tests {
                 &request,
                 "open_project",
                 || store.create_from_manuscript(&path, TaskKind::FindJournals),
-                |job| notifications.push(job.status.clone()),
+                |job| notifications.push(job.status),
             )
             .unwrap_err();
         assert_eq!(error.code, "PDF_TEXT_EXTRACTION_FAILED");

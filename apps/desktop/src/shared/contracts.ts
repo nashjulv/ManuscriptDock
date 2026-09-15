@@ -250,6 +250,8 @@ export interface MaterialTask {
   templatePresent?: boolean;
   existingFilePath?: string | null;
   reviewPath?: string | null;
+  manuscriptKind?: "editable_manuscript" | "anonymized_manuscript" | null;
+  providedFileName?: string | null;
 }
 export interface MaterialCheck {
   materialId: string;

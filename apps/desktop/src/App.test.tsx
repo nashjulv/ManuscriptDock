@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
@@ -8,6 +8,7 @@ const jobEvent = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: any }) => void),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -111,6 +112,8 @@ beforeEach(() => {
   openProjectResult = null;
   jobEvent.handler = null;
   invokeMock.mockReset().mockImplementation((command: string, args?: any) => {
+    if (command === "get_project_view") return Promise.resolve(project);
+    if (command === "update_document_facts") { project = { ...project, revision: project.revision + 1, facts: args.facts }; return Promise.resolve(project); }
     if (command === "list_recent_projects") return Promise.resolve(recentItems);
     if (command === "list_removed_projects") return Promise.resolve(removedItems);
     if (command === "hide_recent_project") {
@@ -726,7 +729,7 @@ it("opens a PDF for matching and requests an explicit editable DOCX for final pa
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /整理投稿包/ }));
   await user.click(screen.getByRole("button", { name: "打开本地论文" }));
-  expect(await screen.findByText("当前主稿为 PDF")).toBeVisible();
+  expect(await screen.findByText("尚未关联投稿主稿 DOCX")).toBeVisible();
   expect(screen.getByText(/不会把 PDF 转换或改名成 Word 文件/)).toBeVisible();
   await user.click(screen.getByRole("button", { name: "搜索" }));
   await user.click(screen.getByText("Artificial Intelligence").closest("button")!);
@@ -800,3 +803,115 @@ it("distinguishes saved files from a failed receipt record in both locales", asy
     screen.getByText(/files were saved, but the local receipt record failed/i),
   ).toBeVisible();
 });
+for (const locale of ["zh-CN", "en"] as const) {
+  const en = locale === "en";
+  const titleLabel = en ? "Manuscript title" : "论文标题";
+  const saveLabel = en ? "Save, confirm, and check" : "保存、确认并检查";
+  const refreshLabel = en ? "Refresh all" : "全局刷新";
+  async function openPreparation() {
+    localStorage.setItem("manuscriptdock.locale", locale);
+    project = { ...project, lastTask: "prepare_package", target: { journalId: journal.id, id: "target-1" } };
+    recentItems = [structuredClone(project)];
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /A Local AI Study.*(Continue|继续)/ }));
+    await screen.findByLabelText(titleLabel);
+    return user;
+  }
+  it(`refreshes current data without losing unsaved inputs in ${locale}`, async () => {
+    const user = await openPreparation();
+    await user.clear(screen.getByLabelText(titleLabel));
+    await user.type(screen.getByLabelText(titleLabel), "My unsaved title");
+    project = { ...project, revision: 12, facts: { ...project.facts, funding: "New saved funding" } };
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    expect(await screen.findByLabelText(titleLabel)).toHaveValue("My unsaved title");
+    expect(screen.getByLabelText(en ? "Funding statement" : "经费声明")).toHaveValue("New saved funding");
+    expect(screen.queryByRole("region", { name: en ? "Review conflicting edits" : "核对同时修改的内容" })).toBeNull();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("update_document_facts", expect.objectContaining({ expectedRevision: 12, facts: expect.objectContaining({ title: "My unsaved title", funding: "New saved funding" }) })));
+  });
+  it(`requires a choice for conflicting edits before saving in ${locale}`, async () => {
+    const user = await openPreparation();
+    await user.clear(screen.getByLabelText(titleLabel));
+    await user.type(screen.getByLabelText(titleLabel), "My title");
+    project = { ...project, revision: 12, facts: { ...project.facts, title: "Other saved title" } };
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    const conflict = await screen.findByRole("region", { name: en ? "Review conflicting edits" : "核对同时修改的内容" });
+    expect(within(conflict).getByText("My title")).toBeVisible();
+    expect(within(conflict).getByText("Other saved title")).toBeVisible();
+    await user.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("button", { name: saveLabel })).toBeDisabled();
+    await user.click(within(conflict).getByRole("button", { name: en ? "Use my input" : "采用本次输入" }));
+    expect(screen.getByLabelText(titleLabel)).toHaveValue("My title");
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(project.facts.title).toBe("My title"));
+  });
+  it(`recovers a stale save, retains input, and saves the new revision in ${locale}`, async () => {
+    const user = await openPreparation();
+    await user.clear(screen.getByLabelText(titleLabel));
+    await user.type(screen.getByLabelText(titleLabel), "Preserved input");
+    project = { ...project, revision: 12 };
+    const original = invokeMock.getMockImplementation()!;
+    let fail = true;
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "update_document_facts" && fail) { fail = false; return Promise.reject({ code: "CONTEXT_CHANGED", params: { currentRevision: "12" }, diagnosticId: "synthetic-conflict", recoveryAction: "reload_project" }); }
+      return original(command, args);
+    });
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: saveLabel }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(en ? "unsaved input is preserved" : "未保存的输入已保留");
+    expect(screen.getByLabelText(titleLabel)).toHaveValue("Preserved input");
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(project.revision).toBe(13));
+    expect(project.facts.title).toBe("Preserved input");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it(`keeps the current form if global refresh fails in ${locale}`, async () => {
+    const user = await openPreparation();
+    await user.type(screen.getByLabelText(titleLabel), " unsaved");
+    const original = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((command, args) => command === "get_project_view" ? Promise.reject({ code: "STORAGE_UNAVAILABLE", diagnosticId: "synthetic-read" }) : original(command, args));
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.getByLabelText(titleLabel)).toHaveValue("A Local AI Study unsaved");
+  });
+  it(`preserves input and reports a failed conflict reload truthfully in ${locale}`, async () => {
+    const user = await openPreparation();
+    await user.type(screen.getByLabelText(titleLabel), " preserved");
+    const original = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "update_document_facts") return Promise.reject({ code: "CONTEXT_CHANGED", diagnosticId: "synthetic-conflict" });
+      if (command === "get_project_view") return Promise.reject({ code: "STORAGE_UNAVAILABLE" });
+      return original(command, args);
+    });
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: saveLabel }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(en ? "could not be loaded" : "未能读取最新状态");
+    expect(screen.getByLabelText(titleLabel)).toHaveValue("A Local AI Study preserved");
+  });
+  it(`shows the packaged DOCX rather than a removed PDF import and refreshes replacements in ${locale}`, async () => {
+    project = { ...project, activeSource: { ...project.activeSource, fileName: "removed-source.pdf", format: "pdf" } };
+    const user = await openPreparation();
+    const missing = en ? "No submission manuscript DOCX linked" : "尚未关联投稿主稿 DOCX";
+    expect(screen.getByText(missing)).toBeVisible();
+    expect(screen.getByText(en ? /Imported source: removed-source.pdf/ : /导入来源: removed-source.pdf/)).toBeVisible();
+    // The workspace listing contains no PDF. The import snapshot is separate.
+    project = { ...project, revision: 2, materials: [{ id: "editable", fileName: "reviewed.docx", kind: "editable_manuscript", included: true }] };
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    expect(await screen.findByText(en ? /Submission manuscript: reviewed.docx/ : /投稿主稿: reviewed.docx/)).toBeVisible();
+    expect(screen.queryByText(missing)).toBeNull();
+    expect(screen.queryByText(/removed-source.pdf/)).toBeNull();
+    project = { ...project, revision: 3, materials: [...project.materials, { id: "anonymous", fileName: "anonymous.docx", kind: "anonymized_manuscript", included: true }] };
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    expect(await screen.findByText(en ? /Submission manuscript: anonymous.docx/ : /投稿主稿: anonymous.docx/)).toBeVisible();
+    project = { ...project, revision: 4, materials: project.materials.map((item: any) => ({ ...item, included: false })) };
+    await user.click(screen.getByRole("button", { name: refreshLabel }));
+    expect(await screen.findByText(missing)).toBeVisible();
+    expect(screen.queryByText(en ? "The current manuscript is a PDF" : "当前主稿为 PDF")).toBeNull();
+  });
+}

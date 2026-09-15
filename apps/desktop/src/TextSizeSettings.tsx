@@ -2,9 +2,9 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "./i18n";
 
-export type TextSize = "small" | "default" | "large";
+export type TextSize = "small" | "default" | "large" | "xlarge";
 const STORAGE_KEY = "manuscriptdock.text-size.v1";
-const SIZES: TextSize[] = ["small", "default", "large"];
+const SIZES: TextSize[] = ["small", "default", "large", "xlarge"];
 function isTextSize(value: unknown): value is TextSize { return SIZES.includes(value as TextSize); }
 
 interface TextSizeContextValue {
@@ -75,7 +75,7 @@ export function TextSizeSettings() {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const labels = { small: text("更小", "Smaller"), default: text("默认", "Default"), large: text("更大", "Larger") };
+  const labels = { small: text("更小", "Smaller"), default: text("默认", "Default"), large: text("更大", "Larger"), xlarge: text("特大", "Largest") };
   const errorMessage = error === "load"
     ? text("无法读取字体设置，已使用默认大小。点击任一档位重新保存。", "Text settings could not be read. Default size is active. Click any size to save again.")
     : text("字体大小已生效，但未能保存。点击任一档位重试。", "Text size is applied but could not be saved. Click any size to retry.");

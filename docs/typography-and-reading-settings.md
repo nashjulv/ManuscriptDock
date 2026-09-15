@@ -1,52 +1,40 @@
 # 字体与阅读设置 / Typography and reading settings
 
-- 状态：V0.49
-- 范围：桌面应用的中文、英文界面、浮层、弹窗和应用生成的预览文字。
+- 状态：V0.62
+- 范围：桌面应用的中文、英文界面、浮层、弹窗和应用内预览文字。
 
-## 字号规则
+## 字号与字体
 
-采用四档常规字号与一档首页品牌字号。默认是 Meta 13/20、Body 15/24、Section 17/26、Page 20/30、Brand 26/36px。完整三档数值以[全局设计系统](../design-system/manuscriptdock/MASTER.md#42-字号层级)为准。
+界面统一使用四种语义字号：Meta、Body、Section、Page。首页标题复用 Page，不再单设品牌字号。右上角 Aa 提供四档阅读大小：
 
-同一语义跨页面共用同一 token。正文、按钮、导航、输入和操作说明使用 Body，时间、版本、来源和短状态使用 Meta。卡片和分组使用 Section，当前页面与主要弹窗使用 Page。字号与行高一起变化，普通字重为 400，标题和必要强调为 500。
+| 层级 | 更小 / Smaller | 默认 / Default | 更大 / Larger | 特大 / Largest |
+| --- | --- | --- | --- | --- |
+| Meta | 12px | 13px | 14px | 16px |
+| Body | 14px | 15px | 17px | 19px |
+| Section | 16px | 18px | 20px | 22px |
+| Page | 22px | 24px | 27px | 30px |
 
-English uses the same semantic roles and sizes. User-authored manuscripts and quoted source material retain their original language. Small annotations must not carry instructions, errors, or decisions that belong in body text.
+正文、表单、按钮、错误和操作说明使用 Body；时间、版本、来源和短状态使用 Meta；分组使用 Section；页面标题使用 Page。正文行高为 1.6，标题为 1.5，控件随内容增高和换行。
 
-## 按钮与控件密度 / Button and control density
+字体优先使用 `PingFang SC`、`PingFang HK`，依次回退到 `Microsoft YaHei UI`、`Segoe UI`、sans-serif。正文使用 300 字重，标题和控件以 400 为主，必要强调最多 500；不合成粗体、不下载远程字体。
 
-按钮沿用正文的字号，但使用独立的紧凑行高（更小 / 默认 20px，更大 24px）。下表是单行控件的目标最小高度；多行文本和内容型导航卡片按内容撑高，不裁切文字。
+English shares the same type scale and system font stack. Manuscript text, source documents, and existing exports retain their original language and typography.
 
-| 类型 | 更小 | 默认 | 更大 |
-| --- | --- | --- | --- |
-| 右上角工具栏 | 30px | 32px | 36px |
-| 常规按钮与单行输入 | 34px | 36px | 40px |
-| 主要操作按钮 | 36px | 38px | 42px |
+## 交互与保存
 
-工具栏 Aa、语言切换外框、模型设置与本地状态保持等高，间距 6px；常规文字操作左右内边距 12px，工具栏文字按钮 10px，Aa 为 6px。工具栏上下内边距 3px，常规按钮 5px。主栏最小高度从 68px 调整为 56px，大字号与窄屏仍可自然增高。纯图标轨道、图谱坐标和内容型按钮保留各自布局语义。
+Aa 的可访问名称为“字体大小 / Text size”。浮层显示四个按钮，以选中背景和 `aria-pressed` 标识当前档位。点击后立即全局生效并保持浮层打开。打开时聚焦当前档位；Tab、空格和 Enter 可操作，Esc 关闭并返回触发按钮。外部点击或焦点移动关闭浮层。
 
-Buttons retain the body font size with a separate compact line height (20px for Small/Default, 24px for Large). Toolbar, standard and primary controls use the minimum heights above; multiline labels expand naturally. Top-right controls share one outer height and a 6px gap. Standard text actions use 12px horizontal padding, toolbar text buttons 10px, and Aa 6px. Touch devices retain larger targets. No labels, accessible names, focus behavior or error messages change.
+原生桌面使用 Rust 的 `get_ui_preferences` / `save_ui_preferences` 保存 `ui-preferences.json`，数据仅包含 schemaVersion 与 small/default/large/xlarge 枚举；原有三档设置继续兼容。先写临时文件再原子替换，和模型凭据、稿件、语言设置隔离。WebView 不接收通用文件权限。
 
-## 交互
+浏览器开发预览使用 `manuscriptdock.text-size.v1` localStorage 键。偏好覆盖全部稿件与页面，重启读取。快速选择按顺序保存，以最后选择为准；迟到的读取不会覆盖用户操作。读取失败使用默认大小，保存失败保留当次视觉效果并通过 Aa 标记、悬停文字和读屏提醒提示重试。
 
-右上角 Aa 按钮的可访问名称为“字体大小 / Text size”。点击打开非模态浮层；V0.49 浮层只显示更小 / Smaller、默认 / Default、更大 / Larger 三个按钮。选中背景与 `aria-pressed` 标识当前字号，不显示标题、预览、状态说明或关闭按钮。点击后立即全局生效，保持浮层打开。
+## 布局与原 UI 配色
 
-打开时聚焦当前档位，Tab 移动、空格或 Enter 选择。Esc 关闭并回到触发按钮；再次点击 Aa、点击外部或焦点离开也会关闭。窗口变窄不能覆盖用户选择，文字通过换行与重排适配。
-
-点击选项文字和选项背景同样有效。V0.48 改为在指针点击或焦点确实到达外部元素时关闭；不把标签激活前短暂的空焦点误判为离开浮层。
-
-## 本机保存与失败恢复
-
-原生桌面由 Rust 的 `get_ui_preferences` / `save_ui_preferences` 管理应用配置目录内的 `ui-preferences.json`，WebView 不接收文件路径或通用文件权限。数据只有 schemaVersion 与 small/default/large 枚举。先写临时文件并同步，再原子替换；与模型凭据、稿件和语言设置隔离。
-
-浏览器开发预览使用独立的 `manuscriptdock.text-size.v1` localStorage 键。原生桌面以 Rust 文件为准。偏好覆盖全部稿件与工作区；切换页面不重置，重启时读取。
-
-前端串行保存快速选择，以最后一次选择为准。迟到的启动读取不会撤销用户已经作出的选择。读取失败使用默认档；保存失败保留当次视觉效果。错误通过 Aa 异常标记、按钮悬停提示和读屏提醒说明，点击任一档位（包括当前档位）即可重试，不在浮层增加内容。后端使用稳定错误代码，不将系统路径和原始异常直接呈现在界面。
-
-这只是应用阅读偏好；不会修改源稿字形、原始论文页面或已经生成的导出文件。
+沿用原方案的浅灰页面、细分隔线、黄绿色主按钮，详见[UI 视觉系统](ui-visual-system.md)。窄窗口使用换行和减少文件列表列数，不覆盖字号偏好。触屏控件保持至少 44px 点击高度。
 
 ## 回归范围
 
-- zh-CN / en × small / default / large，验证实际字号、对应行高和同类控件一致性。
-- 1180、980、760px 桌面宽度；额外检查 390px 浏览器布局。
-- 首页、概览、材料、声明编辑、期刊目标、检查修订、投稿包、版本、知识体、证据和模型设置。
-- 首次默认、持久化恢复、错误恢复、快速连续切换、迟到读取、键盘和外部点击。
-- 原生 Rust 文件保存与重新读取使用合成临时目录；浏览器工作区场景使用合成数据，不代表真实稿件导入或出版社投递验收。
+- zh-CN / en 的四档切换、持久化、错误重试、迟到读取、键盘与外部点击。
+- Rust 四档保存重读与无关设置保护。
+- 当前两项任务、材料清单、文件目录和 AI 弹窗的共享样式；源文件与导出排版不变。
+- 原生界面视觉验证及限制记录在 [V0.62 实施记录](releases/V0.62/implementation-status.md)。

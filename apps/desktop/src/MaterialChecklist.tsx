@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./shared/ipc";
 import { localizeBackendText, useI18n } from "./i18n";
 import { FileIcon } from "./FileIcons";
+import { ManuscriptInput } from "./ManuscriptInput";
 import { AiHistory, AiWorkbench } from "./AiAssistant";
 import type { AiTask, AiRun } from "./shared/contracts";
 import type { AppError, MaterialCheck, MaterialTask, Project } from "./shared/contracts";
 
-export function MaterialChecklist({ project, refreshKey, onGenerated, run }: {
+export function MaterialChecklist({ project, setProject, refreshKey, onGenerated, run }: {
   project: Project; refreshKey: number; onGenerated: () => void;
+  setProject: (project: Project) => void;
   run: <T>(action: () => Promise<T>) => Promise<T | null>;
 }) {
   const { locale, text, localize } = useI18n();
@@ -85,7 +87,8 @@ export function MaterialChecklist({ project, refreshKey, onGenerated, run }: {
     {error ? <p role="alert">{localizeBackendText(locale, error)}</p> : null}
     <ul>{items.map(item => <li key={item.id} data-status={item.status}>
       <FileIcon name={item.relativePath}/><div className="material-task-copy"><div><strong>{localize(item.label)}</strong><span className="material-required">{item.required ? text("必需", "Required") : text("可选", "Optional")}</span></div>
-      <details><summary>{text("要求与文件位置", "Requirements and file location")}</summary><p>{localize(item.description)}</p><code>{item.reviewPath ?? item.relativePath}</code></details>
+      <details><summary>{text("要求与文件位置", "Requirements and file location")}</summary><p>{localize(item.description)}</p>{item.id === "manuscript" && <p>{text("打包后的文件名（不是待检索的源文件）：", "File name in the built package (not the source file to locate): ")}</p>}<code>{item.reviewPath ?? item.relativePath}</code></details>
+      {item.id === "manuscript" && <ManuscriptInput project={project} item={item} disabled={!!generating} onProvided={updated => { setProject(updated); onGenerated(); }}/ >}
       {checks[item.id] ? <div className="material-review" aria-label={text("材料检查结果", "Material check result")}>
         {checks[item.id].issues.length ? <><strong>{text("请处理后重新检查", "Resolve these issues and check again")}</strong><ul>{checks[item.id].issues.map((issue, index) => <li key={index}>{localize(issue)}</li>)}</ul></> : <>
           <strong>{text("本地检查通过 · 请作者确认", "Local checks passed · author confirmation required")}</strong>
@@ -97,7 +100,7 @@ export function MaterialChecklist({ project, refreshKey, onGenerated, run }: {
       <div className="material-task-actions">
       {(item.id === "cover_letter" || item.id === "highlights") && !item.existingFilePath && item.status !== "confirmed" ? <button disabled={!!generating || !project.facts.title?.trim() || !project.facts.abstractText?.trim()} onClick={() => openAi(item.id === "cover_letter" ? "draft_cover_letter" : "draft_highlights", item.id)}>{text("AI 起草", "Draft with AI")}</button> : null}
       {item.reviewPath ? <button disabled={!!generating} onClick={() => openAi("review_material", item.id)}>{text("AI 深度检查", "AI semantic review")}</button> : null}
-      {item.reviewPath || item.existingFilePath || item.templatePresent || item.status === "draft_present" ? <button className={`material-status ${item.status}`} title={text("打开文件核对", "Open file for review")} onClick={() => void run(() => api.openWorkspaceEntry(project.id, item.reviewPath ?? item.existingFilePath ?? (item.templatePresent && item.status !== "draft_present" ? item.relativePath.replace("-DRAFT.docx", "-TEMPLATE.docx") : item.relativePath)))}>{statusLabel(item)}<span aria-hidden="true"> ↗</span></button> : <span className={`material-status ${item.status}`}>{statusLabel(item)}</span>}
+      {item.id !== "manuscript" && (item.reviewPath || item.existingFilePath || item.templatePresent || item.status === "draft_present") ? <button className={`material-status ${item.status}`} title={text("打开文件核对", "Open file for review")} onClick={() => void run(() => api.openWorkspaceEntry(project.id, item.reviewPath ?? item.existingFilePath ?? (item.templatePresent && item.status !== "draft_present" ? item.relativePath.replace("-DRAFT.docx", "-TEMPLATE.docx") : item.relativePath)))}>{statusLabel(item)}<span aria-hidden="true"> ↗</span></button> : <span className={`material-status ${item.status}`}>{statusLabel(item)}</span>}
       {item.reviewPath && item.status !== "confirmed" ? <button className="generate-item" disabled={!!generating} onClick={() => void review(item)}>{generating === `review:${item.id}` ? text("正在检查…", "Checking…") : text("检查并确认完成", "Check and confirm completion")}</button> : null}
       {item.canGenerate ? <button className="generate-item" disabled={!!generating} aria-label={text(`一键生成：${localize(item.label)}`, `Generate: ${localize(item.label)}`)} onClick={() => void generate(item.id)}>{generating === item.id ? text("生成中…", "Generating…") : text("一键生成", "Generate")}</button> : null}
       {item.canGenerateTemplate ? <button className="generate-item" disabled={!!generating} aria-label={text(`一键生成模板：${localize(item.label)}`, `Generate template: ${localize(item.label)}`)} onClick={() => void generate(item.id, true)}>{generating === `template:${item.id}` ? text("生成中…", "Generating…") : text("一键生成模板", "Generate template")}</button> : null}

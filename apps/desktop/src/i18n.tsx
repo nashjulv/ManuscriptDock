@@ -131,9 +131,11 @@ const ERROR_MESSAGES: Record<string, [string, string]> = {
     "The file selection expired. Choose the file again.",
   ],
   CONTEXT_CHANGED: [
-    "内容已经变化，已为你重新读取最新状态。",
-    "The content changed. The latest state has been reloaded.",
+    "内容已变化，本次操作未完成。请重新读取最新状态后重试。",
+    "The content changed and this operation did not complete. Reload the latest state and try again.",
   ],
+  FACTS_RELOADED: ["最新状态已读取，未保存的输入已保留。请核对内容并重新勾选确认后保存。", "The latest state is loaded and unsaved input is preserved. Review the values, confirm again, and save."],
+  FACTS_RELOAD_FAILED: ["未能读取最新状态，本次输入仍保留。请重试保存；不要关闭页面。", "The latest state could not be loaded. Your input is preserved. Retry saving without closing this page."],
   RULES_UNVERIFIED: [
     "尚无已核验的期刊要求，可选择受支持期刊。",
     "No verified requirements are available for this journal. Choose a supported journal.",

@@ -16,6 +16,8 @@ pub struct MaterialTask {
     pub template_present: bool,
     pub existing_file_path: Option<String>,
     pub review_path: Option<String>,
+    pub manuscript_kind: Option<String>,
+    pub provided_file_name: Option<String>,
 }
 
 fn planned_tasks(project: &Project) -> Result<Vec<(MaterialTask, Vec<String>)>, AppError> {
@@ -58,6 +60,8 @@ fn planned_tasks(project: &Project) -> Result<Vec<(MaterialTask, Vec<String>)>, 
         template_present: false,
         existing_file_path: None,
         review_path: None,
+        manuscript_kind: None,
+        provided_file_name: None,
     };
     let needs_anonymous = rules
         .iter()
@@ -78,6 +82,21 @@ fn planned_tasks(project: &Project) -> Result<Vec<(MaterialTask, Vec<String>)>, 
     if main_ready {
         main.status = "ready".into();
     }
+    let kind = if needs_anonymous {
+        "anonymized_manuscript"
+    } else {
+        "editable_manuscript"
+    };
+    main.manuscript_kind = Some(kind.into());
+    main.provided_file_name = project
+        .materials
+        .iter()
+        .find(|material| material.included && material.kind == kind)
+        .map(|material| material.file_name.clone())
+        .or_else(|| {
+            (!needs_anonymous && project.active_source.format == "docx")
+                .then(|| project.active_source.file_name.clone())
+        });
     let title = project.facts.title.as_deref().unwrap_or("");
     let journal = crate::catalog()?
         .journals
@@ -129,6 +148,12 @@ pub fn list_material_tasks(
     planned_tasks(project)?
         .into_iter()
         .map(|(mut task, _)| {
+            // A workspace file is a candidate, never proof of author verification.
+            if task.id == "manuscript"
+                && crate::package_workspace::workspace_path(&root, &task.relative_path)?.is_file()
+            {
+                task.existing_file_path = Some(task.relative_path.clone());
+            }
             if task.can_generate_template {
                 task.template_present =
                     crate::package_workspace::workspace_path(&root, &template_path(&task))?

@@ -9,6 +9,7 @@ pub enum TextSize {
     #[default]
     Default,
     Large,
+    Xlarge,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -80,7 +81,12 @@ mod tests {
         assert_eq!(load(&root).unwrap().text_size, TextSize::Default);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("other-settings.json"), "synthetic").unwrap();
-        for size in [TextSize::Small, TextSize::Large, TextSize::Default] {
+        for size in [
+            TextSize::Small,
+            TextSize::Large,
+            TextSize::Xlarge,
+            TextSize::Default,
+        ] {
             save(&root, size).unwrap();
             assert_eq!(load(&root).unwrap().text_size, size);
         }

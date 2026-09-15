@@ -27,6 +27,7 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
   const small = en ? "Smaller" : "更小";
   const regular = en ? "Default" : "默认";
   const large = en ? "Larger" : "更大";
+  const xlarge = en ? "Largest" : "特大";
   beforeEach(() => window.localStorage.setItem("manuscriptdock.locale", locale));
 
   it("applies all sizes immediately, keeps the popover open, and restores the saved choice", async () => {
@@ -36,7 +37,7 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
     await user.click(screen.getByRole("button", { name: title }));
     const dialog = within(screen.getByRole("dialog", { name: title }));
     expect(dialog.getByRole("button", { name: regular })).toHaveFocus();
-    for (const [label, value] of [[small, "small"], [regular, "default"], [large, "large"]]) {
+    for (const [label, value] of [[small, "small"], [regular, "default"], [large, "large"], [xlarge, "xlarge"]]) {
       await user.click(dialog.getByRole("button", { name: label }));
       expect(document.documentElement.dataset.textSize).toBe(value);
       expect(dialog.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
@@ -47,7 +48,7 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
     expect(screen.getByRole("button", { name: title })).toHaveFocus();
     unmount();
     render(<Settings />);
-    expect(document.documentElement.dataset.textSize).toBe("large");
+    expect(document.documentElement.dataset.textSize).toBe("xlarge");
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
@@ -67,13 +68,13 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows only three buttons and supports keyboard selection", async () => {
+  it("shows four buttons and supports keyboard selection", async () => {
     const user = userEvent.setup();
     render(<Settings />);
     await user.click(screen.getByRole("button", { name: title }));
     const panel = screen.getByRole("dialog", { name: title });
-    expect(within(panel).getAllByRole("button")).toHaveLength(3);
-    expect(panel.textContent).toBe(`${small}${regular}${large}`);
+    expect(within(panel).getAllByRole("button")).toHaveLength(4);
+    expect(panel.textContent).toBe(`${small}${regular}${large}${xlarge}`);
     expect(within(panel).queryByRole("slider")).not.toBeInTheDocument();
     expect(within(panel).queryByRole("heading")).not.toBeInTheDocument();
     await user.tab();

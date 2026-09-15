@@ -1,22 +1,33 @@
 :root {
-  --type-meta: 12px;
+  --type-meta: 13px;
   --type-body: 15px;
-  --type-control: 14px;
+  --type-control: var(--type-body);
+  --type-section: 18px;
+  --type-page: 24px;
 }
 
 :root[data-text-size="small"] {
-  --type-meta: 11px;
+  --type-meta: 12px;
   --type-body: 14px;
-  --type-control: 13px;
+  --type-section: 16px;
+  --type-page: 22px;
 }
 
 :root[data-text-size="large"] {
   --type-meta: 14px;
   --type-body: 17px;
-  --type-control: 16px;
+  --type-section: 20px;
+  --type-page: 27px;
 }
 
-body { font-size: var(--type-body); }
+:root[data-text-size="xlarge"] {
+  --type-meta: 16px;
+  --type-body: 19px;
+  --type-section: 22px;
+  --type-page: 30px;
+}
+
+body { font-size: var(--type-body); line-height: 1.6; }
 button, input, select, textarea { font-size: var(--type-control); }
 small { font-size: var(--type-meta); }
 
@@ -24,10 +35,10 @@ small { font-size: var(--type-meta); }
 .text-size-trigger { position: relative; display: grid; place-items: center; min-width: 34px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 8px; color: var(--green); background: rgba(255,255,255,.58); cursor: pointer; }
 .text-size-trigger[aria-expanded="true"] { background: var(--paper); }
 .text-size-error-dot { position: absolute; width: 6px; height: 6px; right: 4px; top: 4px; background: #b84a27; border-radius: 50%; }
-.text-size-popover { position: absolute; top: calc(100% + 10px); right: 0; z-index: 20; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; width: 252px; max-width: calc(100vw - 24px); padding: 6px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--paper); box-shadow: var(--shadow); }
+.text-size-popover { position: absolute; top: calc(100% + 10px); right: 0; z-index: 20; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; width: 320px; max-width: calc(100vw - 24px); padding: 6px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--paper); box-shadow: var(--shadow); }
 .text-size-option { min-width: 0; padding: 7px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
 .text-size-option:hover { background: var(--green-2); }
-.text-size-option[aria-pressed="true"] { color: white; background: var(--green); }
+.text-size-option[aria-pressed="true"] { color: var(--on-primary); background: var(--primary); }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
