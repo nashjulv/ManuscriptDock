@@ -4,15 +4,15 @@
 
 - Public product name: `ManuscriptDock`
 - Chinese name: `投稿舱`
-- Current prerelease display version: `V0.621`
+- Current prerelease display version: `V0.622`
 - Product direction: local journal matching and target-specific submission-package preparation.
 - Desktop stack: Tauri 2.x, React 18, TypeScript 5, Vite 5, Rust/Cargo
 
 ## Versioning
 
-- Show the prerelease version immediately after the product name on primary identity surfaces: `投稿舱 ManuscriptDock V0.621`.
+- Show the prerelease version immediately after the product name on primary identity surfaces: `投稿舱 ManuscriptDock V0.622`.
 - Increment the display version by exactly `0.001` once per commit, using three digits after the decimal (`V0.620` → `V0.621`; `V0.629` → `V0.630`). Do not increment it for each edit, build, or test run. The existing `V0.62` baseline was normalized as `V0.620` before the first increment under this rule.
-- Keep package and installer metadata SemVer-compatible (`V0.621` maps to `0.621.0`).
+- Keep package and installer metadata SemVer-compatible (`V0.622` maps to `0.622.0`).
 - Preserve the stable package/product identifier `ManuscriptDock` so an update replaces the existing installation rather than creating a second application.
 
 ## Architecture Boundaries
@@ -58,7 +58,7 @@ New product decisions belong in the current ManuscriptDock documents linked from
 - Do not rely on `localizeBackendText` silently returning an untranslated value. For new user-visible Rust errors or dynamic messages, prefer a stable machine-readable error code plus parameters; when retaining a string contract, add or update the English mapping in the same change and cover interpolated variants.
 - Keep user-authored manuscript content and quoted source material in its original language. Localize the surrounding interface, provenance category, status, and explanatory copy rather than automatically translating research content.
 - Use locale-aware APIs for dates, times, numbers, units, and plural-sensitive copy. Do not build new locale-sensitive sentences solely by concatenating fragments.
-- The primary product identity intentionally remains bilingual as `投稿舱 ManuscriptDock V0.621`; do not remove either name as an internationalization cleanup.
+- The primary product identity intentionally remains bilingual as `投稿舱 ManuscriptDock V0.622`; do not remove either name as an internationalization cleanup.
 - For any user-visible change, add or update focused tests for both `zh-CN` and `en`, including dynamic and failure states where relevant. A static landing-page language toggle test alone is not sufficient evidence for backend messages or exported artifacts.
 - In the completion report, include an `Internationalization review` note stating which locales and surfaces were checked, what localization changed, and any known gap. If the code change has no user-visible or locale-sensitive effect, explicitly state that the review found no adaptation needed.
 - These are review instructions for AI coding tools, not an enforcement mechanism. Do not add Git hooks, mandatory CI gates, or build-time blockers solely for this section unless the user explicitly requests them.

@@ -2,10 +2,19 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "./i18n";
 
-export type TextSize = "small" | "default" | "large" | "xlarge";
-const STORAGE_KEY = "manuscriptdock.text-size.v1";
-const SIZES: TextSize[] = ["small", "default", "large", "xlarge"];
+export type TextSize = "small" | "default" | "large";
+const STORAGE_KEY = "manuscriptdock.text-size.v2";
+const SIZES: TextSize[] = ["small", "default", "large"];
 function isTextSize(value: unknown): value is TextSize { return SIZES.includes(value as TextSize); }
+
+function readBrowserSize(): unknown {
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored !== null) return stored;
+  const old = window.localStorage.getItem("manuscriptdock.text-size.v1");
+  if (old === null) return "default";
+  const migrated = old === "small" ? "default" : ["default", "large", "xlarge"].includes(old) ? "large" : old;
+  return migrated;
+}
 
 interface TextSizeContextValue {
   size: TextSize;
@@ -28,7 +37,7 @@ export function TextSizeProvider({ children }: { children: ReactNode }) {
       try {
         const value: unknown = isTauri()
           ? (await invoke<{ textSize: unknown }>("get_ui_preferences")).textSize
-          : window.localStorage.getItem(STORAGE_KEY) ?? "default";
+          : readBrowserSize();
         if (!isTextSize(value)) throw new Error("UI_PREFERENCES_INVALID");
         // An older startup read must never undo a choice the user already made.
         if (active && revision.current === 0) setSize(value);
@@ -75,7 +84,7 @@ export function TextSizeSettings() {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const labels = { small: text("更小", "Smaller"), default: text("默认", "Default"), large: text("更大", "Larger"), xlarge: text("特大", "Largest") };
+  const labels = { small: text("更小", "Smaller"), default: text("默认", "Default"), large: text("更大", "Larger") };
   const errorMessage = error === "load"
     ? text("无法读取字体设置，已使用默认大小。点击任一档位重新保存。", "Text settings could not be read. Default size is active. Click any size to save again.")
     : text("字体大小已生效，但未能保存。点击任一档位重试。", "Text size is applied but could not be saved. Click any size to retry.");

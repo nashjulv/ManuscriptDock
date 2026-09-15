@@ -4,13 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "./i18n";
 import { TextSizeProvider, TextSizeSettings } from "./TextSizeSettings";
+import typography from "./typography.css?raw";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), isTauri: vi.fn() }));
 const invokeMock = vi.mocked(invoke);
-const KEY = "manuscriptdock.text-size.v1";
+const KEY = "manuscriptdock.text-size.v2";
 
 function Settings() {
-  return <I18nProvider><TextSizeProvider><TextSizeSettings /><button type="button">Outside</button></TextSizeProvider></I18nProvider>;
+  return <I18nProvider><style>{typography}</style><TextSizeProvider><TextSizeSettings /><button type="button">Outside</button></TextSizeProvider></I18nProvider>;
 }
 
 beforeEach(() => {
@@ -27,19 +28,33 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
   const small = en ? "Smaller" : "更小";
   const regular = en ? "Default" : "默认";
   const large = en ? "Larger" : "更大";
-  const xlarge = en ? "Largest" : "特大";
   beforeEach(() => window.localStorage.setItem("manuscriptdock.locale", locale));
+
+  it("maps the old smaller size to the new default and clamps larger legacy sizes", async () => {
+    for (const [old, expected] of [["small", "default"], ["default", "large"], ["large", "large"], ["xlarge", "large"]]) {
+      window.localStorage.setItem("manuscriptdock.text-size.v1", old);
+      const { unmount } = render(<Settings />);
+      await waitFor(() => expect(document.documentElement.dataset.textSize).toBe(expected));
+      expect(screen.queryByRole("alert")).toBeNull();
+      unmount();
+    }
+    window.localStorage.setItem(KEY, "small");
+    render(<Settings />);
+    await waitFor(() => expect(document.documentElement.dataset.textSize).toBe("small"));
+  });
 
   it("applies all sizes immediately, keeps the popover open, and restores the saved choice", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<Settings />);
     expect(document.documentElement.dataset.textSize).toBe("default");
+    expect(getComputedStyle(document.documentElement).getPropertyValue("--type-body").trim()).toBe("14px");
     await user.click(screen.getByRole("button", { name: title }));
     const dialog = within(screen.getByRole("dialog", { name: title }));
     expect(dialog.getByRole("button", { name: regular })).toHaveFocus();
-    for (const [label, value] of [[small, "small"], [regular, "default"], [large, "large"], [xlarge, "xlarge"]]) {
+    for (const [label, value, pixels] of [[small, "small", "13px"], [regular, "default", "14px"], [large, "large", "15px"]]) {
       await user.click(dialog.getByRole("button", { name: label }));
       expect(document.documentElement.dataset.textSize).toBe(value);
+      expect(getComputedStyle(document.documentElement).getPropertyValue("--type-body").trim()).toBe(pixels);
       expect(dialog.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
       await waitFor(() => expect(window.localStorage.getItem(KEY)).toBe(value));
     }
@@ -48,7 +63,7 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
     expect(screen.getByRole("button", { name: title })).toHaveFocus();
     unmount();
     render(<Settings />);
-    expect(document.documentElement.dataset.textSize).toBe("xlarge");
+    expect(document.documentElement.dataset.textSize).toBe("large");
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
@@ -68,13 +83,13 @@ describe.each(["zh-CN", "en"] as const)("text size (%s)", (locale) => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows four buttons and supports keyboard selection", async () => {
+  it("shows three buttons and supports keyboard selection", async () => {
     const user = userEvent.setup();
     render(<Settings />);
     await user.click(screen.getByRole("button", { name: title }));
     const panel = screen.getByRole("dialog", { name: title });
-    expect(within(panel).getAllByRole("button")).toHaveLength(4);
-    expect(panel.textContent).toBe(`${small}${regular}${large}${xlarge}`);
+    expect(within(panel).getAllByRole("button")).toHaveLength(3);
+    expect(panel.textContent).toBe(`${small}${regular}${large}`);
     expect(within(panel).queryByRole("slider")).not.toBeInTheDocument();
     expect(within(panel).queryByRole("heading")).not.toBeInTheDocument();
     await user.tab();
